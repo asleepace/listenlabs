@@ -79,33 +79,25 @@ let totalYoung = 0
 function shouldLetPersonIn({ status: next, metrics }: GameState): boolean {
   if (next.nextPerson == null) return false;
 
+  const totalCount = 'admittedCount' in next ? next.admittedCount : 0
+
   const { nextPerson } = next
 
+  // NOTE: count total number of people
   if (next.nextPerson.attributes.well_dressed) {
     totalWellDressed++
   }
-
   if (next.nextPerson.attributes.young) {
     totalYoung++
   }
 
-  if (totalWellDressed > 600 && totalYoung > 600) {
+  // calculate totals
+
+  if (totalYoung > 600 && totalWellDressed > 600) {
     return true
-  }
-
-  if (totalYoung > 600) {
-    return nextPerson.attributes.well_dressed
-  }
-
-  if (totalWellDressed > 600) {
-    return nextPerson.attributes.young
   }
 
   if (nextPerson.attributes.well_dressed && nextPerson.attributes.young) {
-    return true
-  }
-
-  if (totalWellDressed < 600 && nextPerson.attributes.well_dressed) {
     return true
   }
 
@@ -113,7 +105,17 @@ function shouldLetPersonIn({ status: next, metrics }: GameState): boolean {
     return true
   }
 
-  return nextPerson.attributes.well_dressed || nextPerson.attributes.young || Math.random() < 0.05
+  if (totalWellDressed < 600 && nextPerson.attributes.well_dressed) {
+    return true
+  }
+
+  const hasOneOrMoreAttribute = nextPerson.attributes.well_dressed || nextPerson.attributes.young 
+
+  if (totalCount < 900) {
+    return hasOneOrMoreAttribute || nextPerson.personIndex % 16 === 0
+  } else {
+    return hasOneOrMoreAttribute
+  }
 }
 
 
@@ -149,7 +151,7 @@ async function runGameLoop(state: GameState): Promise<boolean> {
   }
 
   const nextState: GameState = updateGameState(state, next)
-  prettyPrint({ ...nextState, stats: { totalWellDressed, totalYoung} })
+  prettyPrint(nextState)
 
   await saveGameFile(nextState);
   return await runGameLoop(nextState);
