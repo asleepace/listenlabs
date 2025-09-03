@@ -1,0 +1,82 @@
+{
+  "file": "./game-e3534380-eeaa-4f97-a991-a78f23b01b25.json",
+  "game": {
+    "gameId": "e3534380-eeaa-4f97-a991-a78f23b01b25",
+    "constraints": [
+      {
+        "attribute": "techno_lover",
+        "minCount": 650
+      },
+      {
+        "attribute": "well_connected",
+        "minCount": 450
+      },
+      {
+        "attribute": "creative",
+        "minCount": 300
+      },
+      {
+        "attribute": "berlin_local",
+        "minCount": 750
+      }
+    ],
+    "attributeStatistics": {
+      "relativeFrequencies": {
+        "techno_lover": 0.6265000000000001,
+        "well_connected": 0.4700000000000001,
+        "creative": 0.06227,
+        "berlin_local": 0.398
+      },
+      "correlations": {
+        "techno_lover": {
+          "techno_lover": 1,
+          "well_connected": -0.4696169332674324,
+          "creative": 0.09463317039891586,
+          "berlin_local": -0.6549403815606182
+        },
+        "well_connected": {
+          "techno_lover": -0.4696169332674324,
+          "well_connected": 1,
+          "creative": 0.14197259140471485,
+          "berlin_local": 0.5724067808436452
+        },
+        "creative": {
+          "techno_lover": 0.09463317039891586,
+          "well_connected": 0.14197259140471485,
+          "creative": 1,
+          "berlin_local": 0.14446459505650772
+        },
+        "berlin_local": {
+          "techno_lover": -0.6549403815606182,
+          "well_connected": 0.5724067808436452,
+          "creative": 0.14446459505650772,
+          "berlin_local": 1
+        }
+      }
+    }
+  },
+  "status": {
+    "status": "running",
+    "admittedCount": 999,
+    "rejectedCount": 5648,
+    "nextPerson": {
+      "personIndex": 6647,
+      "attributes": {
+        "techno_lover": true,
+        "well_connected": false,
+        "creative": false,
+        "berlin_local": false
+      }
+    }
+  },
+  "metrics": {
+    "data": {
+      "berlin_local": -24,
+      "techno_lover": 136,
+      "creative": -68,
+      "well_connected": -263
+    },
+    "score": 5648,
+    "total": 999
+  }
+}

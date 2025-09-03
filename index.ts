@@ -122,12 +122,16 @@ class GameCounter {
     }
 
     // check if we need to find the exact people
-    const hasToFindExactPeople = this.totalPeopleNeeded < this.availableSpaces     
+    const hasToFindExactPeople = this.totalPeopleNeeded < this.availableSpaces    
 
     // handle limiting factor which is this key
     if (this.data.creative > 0 && person.attributes.creative) return YES()
 
-    if (this.data.creative <= 0 && this.data.berlin_local > 0 && person.attributes.berlin_local) {
+
+    const shouldAllowLocals = this.data.berlin_local > 0 && person.attributes.berlin_local
+    const shouldAllowTechno = this.data.techno_lover > 0 && person.attributes.techno_lover
+    
+    if (!hasToFindExactPeople && (shouldAllowLocals || shouldAllowTechno)) {
       return YES()
     }
 
