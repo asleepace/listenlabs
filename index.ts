@@ -57,8 +57,6 @@ export type GameState = {
   metrics: {
     totalWellDressed: number;
     totalYoung: number;
-    percentWellDressed: number;
-    percentYoung: number;
   };
 };
 
@@ -72,6 +70,9 @@ function hasSomeAttribute(person: Person) {
   return Object.values(person.attributes).some(Boolean)
 }
 
+let totalWellDressed = 0
+let totalYoung = 0
+
 /**
  * Main function where we should let person in or not...
  */
@@ -80,55 +81,49 @@ function shouldLetPersonIn({ status: next, metrics }: GameState): boolean {
 
   const { nextPerson } = next
 
-  if (hasAllAttributes(nextPerson)) return true
+  if (next.nextPerson.attributes.well_dressed) {
+    totalWellDressed++
+  }
 
-  const totalPeople = next.admittedCount
-  const isMoreYoungPeople = metrics.totalYoung > metrics.totalWellDressed
-  const hasAnyAttribute = nextPerson.attributes.well_dressed || nextPerson.attributes.young
-  const isWithinRange = Math.abs(metrics.totalYoung - metrics.totalWellDressed) < 10
+  if (next.nextPerson.attributes.young) {
+    totalYoung++
+  }
 
-
-  if (totalPeople <= 64) {
+  if (totalWellDressed > 600 && totalYoung > 600) {
     return true
   }
 
-  if (totalPeople <= 256) {
-    return hasAnyAttribute
+  if (totalYoung > 600) {
+    return nextPerson.attributes.well_dressed
   }
 
-  if (totalPeople <= 512) {
-    if (metrics.totalWellDressed <= 300 && nextPerson.attributes.well_dressed) return true
-    if (metrics.totalYoung <= 300 && nextPerson.attributes.young) return true
-  }
-
-  if (totalPeople <= 720) {
-    if (isWithinRange && nextPerson.attributes.well_dressed) return true
-    if (isWithinRange && nextPerson.attributes.young) return true
-  }
-
-  if (isMoreYoungPeople && nextPerson.attributes.well_dressed) {
-    return true
-  } else {
+  if (totalWellDressed > 600) {
     return nextPerson.attributes.young
   }
+
+  if (nextPerson.attributes.well_dressed && nextPerson.attributes.young) {
+    return true
+  }
+
+  if (totalWellDressed < 600 && nextPerson.attributes.well_dressed) {
+    return true
+  }
+
+  if (totalYoung < 600 && nextPerson.attributes.young) {
+    return true
+  }
+
+  return nextPerson.attributes.well_dressed || nextPerson.attributes.young || Math.random() < 0.05
 }
 
 
-function updateGameState(prevState: GameState, nextStatus: GameStatus, accepted: boolean): GameState {
-  const nextPerson = nextStatus.nextPerson
-
-  const nextTotalWellDressed = prevState.metrics.totalWellDressed + (accepted && nextPerson?.attributes.well_dressed ? 1 : 0);
-  const nextTotalYoung =  prevState.metrics.totalYoung + (accepted && nextPerson?.attributes.young ? 1 : 0);
-  const admittedCount = 'admittedCount' in nextStatus ? nextStatus.admittedCount : 1
-
+function updateGameState(prevState: GameState, nextStatus: GameStatus): GameState {
   return {
     ...prevState,
     status: nextStatus,
     metrics: {
-      totalWellDressed: nextTotalWellDressed,
-      totalYoung: nextTotalYoung,
-      percentWellDressed: (nextTotalWellDressed / admittedCount),
-      percentYoung: (nextTotalYoung / admittedCount)
+      totalWellDressed: totalWellDressed,
+      totalYoung: totalYoung,
     }
   }
 }
@@ -150,16 +145,11 @@ async function runGameLoop(state: GameState): Promise<boolean> {
 
   if (next.status === "completed") return true;
   if (next.status === "failed") {
-    throw new Error("Uh oh game failed...");
+    throw next
   }
 
-  const nextMetrics = accept === false ? state.metrics : {
-    totalWellDressed: state.metrics.totalWellDressed - (next.nextPerson.attributes.well_dressed ? 1 : 0),
-    totalYoung: state.metrics.totalYoung - (next.nextPerson.attributes.young ? 1 : 0)
-  }
-
-  const nextState: GameState = updateGameState(state, next, accept)
-  prettyPrint(nextState)
+  const nextState: GameState = updateGameState(state, next)
+  prettyPrint({ ...nextState, stats: { totalWellDressed, totalYoung} })
 
   await saveGameFile(nextState);
   return await runGameLoop(nextState);
