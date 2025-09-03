@@ -1,6 +1,7 @@
 import { config } from "./src/config";
 import { createGame } from "./src/create-game";
 import { acceptOrRejectThenGetNext } from "./src/play-game";
+import { initialize, loadGameFile, saveGameFile, prettyPrint } from "./src/disk";
 
 export type GameConstraints = {
   attribute: string;
@@ -50,7 +51,7 @@ export type GameStatus =
       nextPerson: null;
     };
 
-type GameState = {
+export type GameState = {
   game: Game;
   status: GameStatus;
   metrics: {
@@ -59,43 +60,7 @@ type GameState = {
   };
 };
 
-function prettyPrint(obj: any) {
-  console.log(JSON.stringify(obj, null, 2));
-}
 
-async function saveGameFile(state: GameState) {
-  const file = Bun.file("./state.json", { type: "json" });
-  await file.write(JSON.stringify(state, null, 2));
-}
-
-async function loadGameFile() {
-  const file = Bun.file("./state.json", { type: "json" });
-  const json = (await file.json()) as GameState;
-  return json;
-}
-
-/**
- * Start a new game and save file.
- */
-async function initialize() {
-  const game = await createGame({ scenario: "1" });
-  const status = await acceptOrRejectThenGetNext({
-    index: 0,
-    accept: true,
-    game,
-  });
-
-  prettyPrint({ game, status });
-
-  await saveGameFile({
-    game,
-    status,
-    metrics: {
-      totalWellDressed: 600,
-      totalYoung: 600,
-    },
-  });
-}
 
 function hasAllAttributes(person: Person) {
   return Object.values(person.attributes).every(Boolean)
@@ -110,35 +75,54 @@ function hasSomeAttribute(person: Person) {
  */
 function shouldLetPersonIn({ status: next, metrics }: GameState): boolean {
   if (next.nextPerson == null) return false;
-  const hasAllAttributes = Object.values(next.nextPerson.attributes).every(
-    (attr) => attr
-  );
 
-  if (hasAllAttributes) return true
+  const { nextPerson } = next
 
-  const hasAnyAttribute = hasSomeAttribute(next.nextPerson)
-  const totalPeopleLeft = 10_000 - next.nextPerson.personIndex
-  const isCloseToClose = totalPeopleLeft < 1_000 || next.admittedCount > 900
-  const isStartOfNight = !isCloseToClose && (totalPeopleLeft > 9_000 || next.admittedCount < 100)
+  if (hasAllAttributes(nextPerson)) return true
 
-  if (isStartOfNight && (hasAnyAttribute || Math.random() < 0.14)) {
-    return true
+  const totalPeople = next.admittedCount
+
+  const hasAnyAttribute = hasSomeAttribute(nextPerson)
+  const isMoreYoungPeople = metrics.totalYoung > metrics.totalWellDressed
+  const isMoreWellDressed = !isMoreYoungPeople
+
+  switch (true) {
+    case totalPeople < 99:
+      return true
+
+    case totalPeople < 250:
+      return hasAnyAttribute
+
+    case totalPeople < 800: {
+      if (isMoreYoungPeople && nextPerson.attributes.well_dressed) return true
+      if (isMoreWellDressed && nextPerson.attributes.young) return true
+      return hasAnyAttribute
+    }
+    
+    case totalPeople < 800: {
+      if (isMoreYoungPeople && nextPerson.attributes.well_dressed) return true
+      if (isMoreWellDressed && nextPerson.attributes.young) return true
+      return false
+    }
+    default:
+      return hasAnyAttribute
   }
+}
 
-  const hasLessWellDressed = metrics.totalWellDressed >= metrics.totalYoung
-  const hasLessYoungPeople = metrics.totalYoung >= metrics.totalWellDressed
-  const isYoung = next.nextPerson.attributes.young
-  const isWellDressed = next.nextPerson.attributes.well_dressed 
 
-  if (metrics.totalWellDressed > 0 && isWellDressed && (hasLessWellDressed || isCloseToClose || isStartOfNight)) {
-    return true
+function updateGameState(prevState: GameState, nextStatus: GameStatus, accepted: boolean): GameState {
+  const nextPerson = nextStatus.nextPerson
+  const nextTotalWellDressed = accepted && nextPerson?.attributes.well_dressed ? 1 : 0;
+  const nextTotalYoung = accepted && nextPerson?.attributes.young ? 1 : 0;
+
+  return {
+    ...prevState,
+    status: nextStatus,
+    metrics: {
+      totalWellDressed: prevState.metrics.totalWellDressed + nextTotalWellDressed,
+      totalYoung: prevState.metrics.totalYoung + nextTotalYoung,
+    }
   }
-
-  if (metrics.totalYoung > 0 && isYoung && (hasLessYoungPeople || isCloseToClose || isStartOfNight)) {
-    return true
-  }
-
-  return isCloseToClose ? hasAllAttributes : hasSomeAttribute(next.nextPerson)
 }
 
 /**
@@ -148,10 +132,11 @@ function shouldLetPersonIn({ status: next, metrics }: GameState): boolean {
  */
 async function runGameLoop(state: GameState): Promise<boolean> {
   const accept = shouldLetPersonIn(state);
+  const index = state.status.nextPerson?.personIndex ?? 0
 
   const next = await acceptOrRejectThenGetNext({
     game: state.game,
-    index: state.status.nextPerson?.personIndex ?? 0,
+    index: index,
     accept,
   });
 
@@ -162,15 +147,10 @@ async function runGameLoop(state: GameState): Promise<boolean> {
 
   const nextMetrics = accept === false ? state.metrics : {
     totalWellDressed: state.metrics.totalWellDressed - (next.nextPerson.attributes.well_dressed ? 1 : 0),
-    totalYoung: state.metrics.totalWellDressed - (next.nextPerson.attributes.young ? 1 : 0)
+    totalYoung: state.metrics.totalYoung - (next.nextPerson.attributes.young ? 1 : 0)
   }
 
-  const nextState: GameState = {
-    ...state,
-    status: next,
-    metrics: nextMetrics
-  };
-
+  const nextState: GameState = updateGameState(state, next, accept)
   prettyPrint(nextState)
 
   await saveGameFile(nextState);
@@ -179,6 +159,6 @@ async function runGameLoop(state: GameState): Promise<boolean> {
 
 // ================= GAME START ===================== //
 
-await initialize()
+await initialize({ scenario: '1' })
 const savedGame = await loadGameFile();
 await runGameLoop(savedGame);
