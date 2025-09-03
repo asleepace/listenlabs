@@ -239,11 +239,8 @@ async function runGameLoop(
     metrics: counter.metrics(next),
   };
   prettyPrint(nextState);
+  await saveGameFile(nextState);
 
-  if (next.status === "completed") {
-    await saveGameFile(nextState);
-    return true;
-  }
   if (next.status === "failed") {
     await Bun.file(state.file).delete();
     throw next;
