@@ -108,21 +108,23 @@ function shouldLetPersonIn({ status: next, metrics }: GameState): boolean {
     return true
   }
 
-  if (totalYoung < 585 && nextPerson.attributes.young) {
+  if (totalYoung < 595 && nextPerson.attributes.young) {
     return true
   }
 
-  if (totalWellDressed < 585 && nextPerson.attributes.well_dressed) {
+  if (totalWellDressed < 595 && nextPerson.attributes.well_dressed) {
     return true
+  }
+
+  if (totalCount > 975) {
+    if (totalYoung < 600 && nextPerson.attributes.young) return true
+    if (totalWellDressed < 600 && nextPerson.attributes.well_dressed) return true
+    return false 
   }
 
   const hasOneOrMoreAttribute = nextPerson.attributes.well_dressed || nextPerson.attributes.young 
 
-  if (totalCount < 900) {
-    return hasOneOrMoreAttribute || nextPerson.personIndex % 15 === 0
-  } else {
-    return hasOneOrMoreAttribute
-  }
+  return hasOneOrMoreAttribute || nextPerson.personIndex % 8 === 0
 }
 
 
@@ -174,12 +176,28 @@ async function runGameLoop(state: GameState): Promise<boolean> {
 // ================= GAME START ===================== //
 
 async function triggerNewGame() {
+  console.warn('[game] triggering new game!')
   const file = await initialize({ scenario: '1' })
   const savedGame = await loadGameFile({ file })
   await runGameLoop(savedGame);
+  return savedGame
 }
 
-// run forever
-triggerNewGame()
-  .finally(() => sleep(5 * 60 * 1_000))
-  .then(() => triggerNewGame())
+async function* createGameGenerator() {
+  do {
+    try {
+      yield await triggerNewGame()
+    } catch (e) {
+      console.warn('[error] e:', e)
+    } finally {
+      await sleep(60_000)
+    }
+  } while (true)
+}
+
+
+const gameIterator = createGameGenerator()
+
+for await (const result of gameIterator) {
+  console.log(result.metrics)
+}
