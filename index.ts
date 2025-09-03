@@ -106,6 +106,9 @@ class GameCounter {
     const NO = () => { return false }
     const personKeys = getKeys(person.attributes)
 
+    if (this.totalEntries < 500 && personKeys.size >= 2 && this.data.creative > 0 && person.attributes.creative) return YES()
+
+
     if (this.totalEntries < 500 && personKeys.size >= 3) return YES()
 
     const wantedKeys = getKeys({
@@ -121,15 +124,6 @@ class GameCounter {
       wantedKeys: wantedKeys,
       personKeys: personKeys
     })
-
-    if (this.totalEntries < 500 && doesSetBHaveAllSetA(wantedKeys, personKeys)) {
-      return YES()
-    }
-
-    if (doesSetBHaveAllSetA(personKeys, wantedKeys)) {
-      return YES()
-    }
-
 
     let keysInCommon = 0
     wantedKeys.forEach((key) => {
