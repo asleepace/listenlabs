@@ -125,7 +125,11 @@ class GameCounter {
     const hasToFindExactPeople = this.totalPeopleNeeded < this.availableSpaces     
 
     // handle limiting factor which is this key
-    if (!hasToFindExactPeople && this.data.creative > 0 && person.attributes.creative) return YES()
+    if (this.data.creative > 0 && person.attributes.creative) return YES()
+
+    if (this.data.creative <= 0 && this.data.berlin_local > 0 && person.attributes.berlin_local) {
+      return YES()
+    }
 
     // determine which keys are left
     const wantedKeys = getKeys({
