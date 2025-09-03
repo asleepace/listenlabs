@@ -1,6 +1,6 @@
 {
   "game": {
-    "gameId": "0ac08114-8405-4017-bb74-c3fb1890ad19",
+    "gameId": "71151a2c-1fd8-4b49-bfe0-c189cd41bf26",
     "constraints": [
       {
         "attribute": "young",
@@ -30,18 +30,20 @@
   },
   "status": {
     "status": "running",
-    "admittedCount": 999,
-    "rejectedCount": 935,
+    "admittedCount": 263,
+    "rejectedCount": 238,
     "nextPerson": {
-      "personIndex": 1934,
+      "personIndex": 501,
       "attributes": {
-        "well_dressed": true,
+        "well_dressed": false,
         "young": false
       }
     }
   },
   "metrics": {
-    "totalWellDressed": 318,
-    "totalYoung": 336
+    "totalWellDressed": 7.672946133367824e+148,
+    "totalYoung": 7.672321777852354e+148,
+    "percentWellDressed": -1.4587350063436928e+146,
+    "percentYoung": -1.4586163075764932e+146
   }
 }

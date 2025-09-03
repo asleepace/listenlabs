@@ -57,6 +57,8 @@ export type GameState = {
   metrics: {
     totalWellDressed: number;
     totalYoung: number;
+    percentWellDressed: number;
+    percentYoung: number;
   };
 };
 
@@ -86,41 +88,51 @@ function shouldLetPersonIn({ status: next, metrics }: GameState): boolean {
   const isMoreYoungPeople = metrics.totalYoung > metrics.totalWellDressed
   const isMoreWellDressed = !isMoreYoungPeople
 
+  const isWithinRange = Math.abs(metrics.totalYoung - metrics.totalWellDressed) < 10
+
   switch (true) {
-    case totalPeople < 99:
-      return true
+    case totalPeople < 100:
+      return Math.random() < 0.5
 
     case totalPeople < 250:
       return hasAnyAttribute
 
-    case totalPeople < 800: {
-      if (isMoreYoungPeople && nextPerson.attributes.well_dressed) return true
-      if (isMoreWellDressed && nextPerson.attributes.young) return true
-      return hasAnyAttribute
+    case totalPeople < 500: {
+      if ((isMoreYoungPeople || isWithinRange) && nextPerson.attributes.well_dressed) return true
+      if ((isMoreWellDressed || isWithinRange) && nextPerson.attributes.young) return true
+      return hasAnyAttribute || Math.random() < 0.25
     }
     
-    case totalPeople < 800: {
+    case totalPeople < 750: {
+      if ((isMoreYoungPeople || isWithinRange) && nextPerson.attributes.well_dressed) return true
+      if ((isMoreWellDressed || isWithinRange) && nextPerson.attributes.young) return true
+      return (hasAnyAttribute && Math.random() < 0.1)
+    }
+
+    default: {
       if (isMoreYoungPeople && nextPerson.attributes.well_dressed) return true
       if (isMoreWellDressed && nextPerson.attributes.young) return true
       return false
     }
-    default:
-      return hasAnyAttribute
   }
 }
 
 
 function updateGameState(prevState: GameState, nextStatus: GameStatus, accepted: boolean): GameState {
   const nextPerson = nextStatus.nextPerson
-  const nextTotalWellDressed = accepted && nextPerson?.attributes.well_dressed ? 1 : 0;
-  const nextTotalYoung = accepted && nextPerson?.attributes.young ? 1 : 0;
+
+  const nextTotalWellDressed = prevState.metrics.totalWellDressed + (accepted && nextPerson?.attributes.well_dressed ? 1 : 0);
+  const nextTotalYoung =  prevState.metrics.totalYoung + (accepted && nextPerson?.attributes.young ? 1 : 0);
+  const admittedCount = 'admittedCount' in nextStatus ? nextStatus.admittedCount : 1
 
   return {
     ...prevState,
     status: nextStatus,
     metrics: {
-      totalWellDressed: prevState.metrics.totalWellDressed + nextTotalWellDressed,
-      totalYoung: prevState.metrics.totalYoung + nextTotalYoung,
+      totalWellDressed: nextTotalWellDressed,
+      totalYoung: nextTotalYoung,
+      percentWellDressed: 1 - (nextTotalWellDressed / admittedCount),
+      percentYoung: 1 - (nextTotalYoung / admittedCount)
     }
   }
 }

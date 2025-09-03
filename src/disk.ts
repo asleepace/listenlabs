@@ -36,6 +36,8 @@ export async function initialize(props: Parameters<typeof createGame>[0]) {
     metrics: {
       totalWellDressed: 0,
       totalYoung: 0,
+      percentWellDressed: 0,
+      percentYoung: 0
     },
   });
 }
