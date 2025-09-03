@@ -146,8 +146,13 @@ async function runGameLoop(state: GameState): Promise<boolean> {
     accept,
   });
 
-  if (next.status === "completed") return true;
+  if (next.status === "completed") {
+    const nextState: GameState = updateGameState(state, next)
+    await saveGameFile({ ...nextState, winner: true, score: next.rejectedCount } as any)
+    return true;
+  }
   if (next.status === "failed") {
+    await Bun.file(state.file).delete()
     throw next
   }
 

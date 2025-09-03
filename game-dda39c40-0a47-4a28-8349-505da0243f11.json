@@ -1,7 +1,7 @@
 {
-  "file": "./game-1eaefec6-9e97-4129-b24c-7a91b061f0be.json",
+  "file": "./game-dda39c40-0a47-4a28-8349-505da0243f11.json",
   "game": {
-    "gameId": "1eaefec6-9e97-4129-b24c-7a91b061f0be",
+    "gameId": "dda39c40-0a47-4a28-8349-505da0243f11",
     "constraints": [
       {
         "attribute": "young",
@@ -30,19 +30,14 @@
     }
   },
   "status": {
-    "status": "running",
-    "admittedCount": 999,
-    "rejectedCount": 941,
-    "nextPerson": {
-      "personIndex": 1940,
-      "attributes": {
-        "well_dressed": false,
-        "young": true
-      }
-    }
+    "status": "completed",
+    "rejectedCount": 805,
+    "nextPerson": null
   },
   "metrics": {
-    "totalWellDressed": 586,
-    "totalYoung": 616
-  }
+    "totalWellDressed": 610,
+    "totalYoung": 620
+  },
+  "winner": true,
+  "score": 805
 }
