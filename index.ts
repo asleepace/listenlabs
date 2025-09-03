@@ -125,7 +125,7 @@ class GameCounter {
     const hasToFindExactPeople = this.totalPeopleNeeded < this.availableSpaces     
 
     // handle limiting factor which is this key
-    // if (this.data.creative > 0 && person.attributes.creative) return YES()
+    if (!hasToFindExactPeople && this.data.creative > 0 && person.attributes.creative) return YES()
 
     const wantedKeys = getKeys({
       berlin_local: this.data.berlin_local > 0,
@@ -140,6 +140,7 @@ class GameCounter {
     // we can just return everyone now
     if (wantedKeys.size === 0) return YES()
 
+    // check how many keys both share in common
     let keysInCommon = 0
     wantedKeys.forEach((key) => {
       if (personKeys.has(key)) {
