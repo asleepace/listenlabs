@@ -1,7 +1,7 @@
 {
-  "file": "./game-cd484e6c-becd-4345-b677-74d40445a333.json",
+  "file": "./game-a95f8f55-bf15-4d8f-881d-a1bad32065cb.json",
   "game": {
-    "gameId": "cd484e6c-becd-4345-b677-74d40445a333",
+    "gameId": "a95f8f55-bf15-4d8f-881d-a1bad32065cb",
     "constraints": [
       {
         "attribute": "techno_lover",
@@ -57,10 +57,10 @@
   },
   "status": {
     "status": "running",
-    "admittedCount": 192,
-    "rejectedCount": 1397,
+    "admittedCount": 103,
+    "rejectedCount": 130,
     "nextPerson": {
-      "personIndex": 1589,
+      "personIndex": 233,
       "attributes": {
         "techno_lover": true,
         "well_connected": false,
@@ -71,12 +71,12 @@
   },
   "metrics": {
     "data": {
-      "berlin_local": 597,
-      "techno_lover": 474,
-      "creative": 196,
-      "well_connected": 284
+      "berlin_local": 651,
+      "techno_lover": 621,
+      "creative": 279,
+      "well_connected": 366
     },
-    "score": 1397,
-    "total": 192
+    "score": 130,
+    "total": 103
   }
 }

@@ -106,6 +106,10 @@ class GameCounter {
     const NO = () => { return false }
     const personKeys = getKeys(person.attributes)
 
+    if (this.data.creative > 0 && this.data.berlin_local > 0 && (person.attributes.berlin_local || person.attributes.creative)) {
+      return YES()
+    }
+
     // handle limiting factor which is this key
     if (this.data.creative > 0 && person.attributes.creative) return YES()
 
@@ -222,6 +226,12 @@ async function runGameLoop(
     index: index,
     accept,
   });
+
+  if (next.status === 'completed') {
+    console.log('Finished!')
+    console.log(next)
+    return true
+  }
 
   const nextState: GameState = {
     ...state,
