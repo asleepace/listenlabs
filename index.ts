@@ -113,7 +113,7 @@ function shouldLetPersonIn({ status: next, metrics }: GameState): boolean {
   const hasOneOrMoreAttribute = nextPerson.attributes.well_dressed || nextPerson.attributes.young 
 
   if (totalCount < 900) {
-    return hasOneOrMoreAttribute || nextPerson.personIndex % 16 === 0
+    return hasOneOrMoreAttribute || nextPerson.personIndex % 13 === 0
   } else {
     return hasOneOrMoreAttribute
   }
