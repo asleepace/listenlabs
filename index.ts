@@ -52,6 +52,7 @@ export type GameStatus =
     };
 
 export type GameState = {
+  file: string;
   game: Game;
   status: GameStatus;
   metrics: {
@@ -101,11 +102,11 @@ function shouldLetPersonIn({ status: next, metrics }: GameState): boolean {
     return true
   }
 
-  if (totalYoung < 600 && nextPerson.attributes.young) {
+  if (totalYoung < 590 && nextPerson.attributes.young) {
     return true
   }
 
-  if (totalWellDressed < 600 && nextPerson.attributes.well_dressed) {
+  if (totalWellDressed < 595 && nextPerson.attributes.well_dressed) {
     return true
   }
 
@@ -159,6 +160,6 @@ async function runGameLoop(state: GameState): Promise<boolean> {
 
 // ================= GAME START ===================== //
 
-await initialize({ scenario: '1' })
-const savedGame = await loadGameFile();
+const file = await initialize({ scenario: '1' })
+const savedGame = await loadGameFile({ file })
 await runGameLoop(savedGame);

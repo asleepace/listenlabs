@@ -1,18 +1,18 @@
 import { type GameState } from "..";
 import { createGame } from "./create-game";
-import { acceptOrRejectThenGetNext } from './play-game'
+import { acceptOrRejectThenGetNext } from "./play-game";
 
 export function prettyPrint(obj: any) {
   console.log(JSON.stringify(obj, null, 2));
 }
 
 export async function saveGameFile(state: GameState) {
-  const file = Bun.file("./state.json", { type: "json" });
+  const file = Bun.file(state.file, { type: "json" });
   await file.write(JSON.stringify(state, null, 2));
 }
 
-export async function loadGameFile() {
-  const file = Bun.file("./state.json", { type: "json" });
+export async function loadGameFile(props: { file: string }) {
+  const file = Bun.file(props.file, { type: "json" });
   const json = (await file.json()) as GameState;
   return json;
 }
@@ -30,12 +30,17 @@ export async function initialize(props: Parameters<typeof createGame>[0]) {
 
   prettyPrint({ game, status });
 
+  const file = `./game-${game.gameId}.json`
+
   await saveGameFile({
-    game,
-    status,
-    metrics: {
-      totalWellDressed: 0,
-      totalYoung: 0,
-    },
+    file,
+      game,
+      status,
+      metrics: {
+        totalWellDressed: 0,
+        totalYoung: 0,
+      },
   });
+
+  return file
 }
