@@ -1,7 +1,12 @@
 import { config } from "./src/config";
 import { createGame } from "./src/create-game";
 import { acceptOrRejectThenGetNext } from "./src/play-game";
-import { initialize, loadGameFile, saveGameFile, prettyPrint } from "./src/disk";
+import {
+  initialize,
+  loadGameFile,
+  saveGameFile,
+  prettyPrint,
+} from "./src/disk";
 
 export type GameConstraints = {
   attribute: string;
@@ -23,12 +28,162 @@ export type Game = {
   };
 };
 
+
+function toBitmask(attr: PersonAttributesScenario2) {
+  const OxTecho = attr.techno_lover ? 0b1000 : 0b0000
+  const OxConnt = attr.well_connected ? 0b0100 : 0b0000
+  const OxCreat = attr.creative ? 0b0010 : 0b0000
+  const OxLocal = attr.berlin_local ? 0b0001 : 0b0000
+  return OxTecho | OxConnt | OxCreat | OxLocal
+}
+
+
+function doesSetBHaveAllSetA<T>(setA: Set<T>, setB: Set<T>): boolean {
+  for (const key of setB.values()) {
+    if (setA.has(key)) continue
+    return false
+  }
+  return true
+}
+
+function countMatchingBitsEfficient(mask1: number, mask2: number): number {
+  let matching = mask1 & mask2;
+  let count = 0;
+  while (matching) {
+      count += matching & 1;
+      matching >>= 1;
+  }
+  return count;
+}
+
+const getKeys = (attr: Person['attributes']) => {
+  return new Set(Object.entries(attr).filter(([key, attr]) => attr === true).map(([key]) => key) as (keyof Person['attributes'])[])
+}
+
+class GameCounter {
+  public data: Record<keyof Person['attributes'], number> = {
+    berlin_local: 0,
+    techno_lover: 0,
+    creative: 0,
+    well_connected: 0,
+  }
+
+  private canLetAnyoneIn = false;
+  private numberOfAttributes = 0;
+  private totalEntries = 0;
+
+  get bitmask() {
+    return toBitmask({
+      berlin_local: this.data.berlin_local > 0,
+      techno_lover: this.data.techno_lover > 0,
+      creative: this.data.creative > 0,
+      well_connected: this.data.well_connected > 0,
+    })
+  }
+
+  constructor(initialState: GameState) {
+    // initialize with game constraints
+    for (const constraint of initialState.game.constraints) {
+      this.data[constraint.attribute as keyof Person['attributes']] = Number(constraint.minCount);
+    }
+  }
+
+  public count(person: Person) {
+    if (this.canLetAnyoneIn) return true;
+    for (const [key, value] of Object.entries(person.attributes) as [keyof Person['attributes'], boolean][]) {
+      if (value === false) continue;
+      this.data[key]--;
+    }
+
+    this.canLetAnyoneIn = Object.values(this.data).every((val) => val < 0);
+  }
+
+  get availableSpaces(): number {
+    return 10_000 - this.totalEntries
+  }
+
+  get totalPeopleNeeded(): number {
+    return Object.values(this.data).reduce((total, current) => {
+      return total + (current < 0 ? 0 : current)
+    }, 0)
+  }
+
+  public shouldLetIn(person: Person): boolean {
+    const YES = () => {
+      this.count(person)
+      return true
+    }
+    const NO = () => { return false }
+    const personKeys = getKeys(person.attributes)
+
+    // person is a unicorn, let them in...
+    if (personKeys.size === 4) {
+      return YES()
+    }
+
+    // check if we need to find the exact people
+    const hasToFindExactPeople = this.totalPeopleNeeded < this.availableSpaces     
+
+    // handle limiting factor which is this key
+    if (this.data.creative > 0 && person.attributes.creative) return YES()
+
+    if (this.data.creative <= 0 && this.data.berlin_local > 0 && person.attributes.berlin_local) {
+      return YES()
+    }
+
+    // determine which keys are left
+    const wantedKeys = getKeys({
+      berlin_local: this.data.berlin_local > 0,
+      techno_lover: this.data.techno_lover > 0,
+      creative: this.data.creative > 0,
+      well_connected: this.data.well_connected > 0,
+    })
+
+    // attempt to knock down large items which can take out a lot
+    if (!hasToFindExactPeople && personKeys.size + 1 >= wantedKeys.size) return YES()
+
+    // we can just return everyone now
+    if (wantedKeys.size === 0) return YES()
+
+    // check how many keys both share in common
+    let keysInCommon = 0
+    wantedKeys.forEach((key) => {
+      if (personKeys.has(key)) {
+        keysInCommon++
+      }
+    })
+
+    if (keysInCommon === wantedKeys.size) {
+      return YES()
+    } else {
+      return NO()
+    }
+  }
+
+  public metrics(status: GameState["status"]) {
+    if (status.status !== "running")
+      throw new Error("Invalid status for metrics:");
+    return {
+      data: this.data,
+      score: status.rejectedCount,
+      total: status.admittedCount,
+    };
+  }
+}
+
 type PersonAttributesScenario1 = {
   well_dressed: true;
   young: true;
 };
 
-export type Person<T = PersonAttributesScenario1> = {
+type PersonAttributesScenario2 = {
+  techno_lover: boolean;
+  well_connected: boolean;
+  creative: boolean;
+  berlin_local: boolean;
+};
+
+export type Person<T = PersonAttributesScenario2> = {
   personIndex: number;
   attributes: T;
 };
@@ -56,97 +211,30 @@ export type GameState = {
   game: Game;
   status: GameStatus;
   metrics: {
-    totalWellDressed: number;
-    totalYoung: number;
-    winner: boolean;
     score: number;
+    total: number;
+    data: Record<string, number>;
   };
 };
 
-
-const sleep = (time: number) => new Promise<void>((resolve) => {
-  setTimeout(() => resolve(), time)
-})
-
-
-function hasAllAttributes(person: Person) {
-  return Object.values(person.attributes).every(Boolean)
-}
-
-function hasSomeAttribute(person: Person) {
-  return Object.values(person.attributes).some(Boolean)
-}
-
-let totalWellDressed = 0
-let totalYoung = 0
-
-/**
- * Main function where we should let person in or not...
- */
-function shouldLetPersonIn({ status: next, metrics }: GameState): boolean {
-  if (next.nextPerson == null) return false;
-
-  const totalCount = 'admittedCount' in next ? next.admittedCount : 0
-
-  const { nextPerson } = next
-
-  // NOTE: count total number of people
-  if (next.nextPerson.attributes.well_dressed) {
-    totalWellDressed++
-  }
-  if (next.nextPerson.attributes.young) {
-    totalYoung++
-  }
-
-  // calculate totals
-
-  if (totalYoung > 600 && totalWellDressed > 600) {
-    return true
-  }
-
-  if (nextPerson.attributes.well_dressed && nextPerson.attributes.young) {
-    return true
-  }
-
-  if (totalYoung < 585 && nextPerson.attributes.young) {
-    return true
-  }
-
-  if (totalWellDressed < 585 && nextPerson.attributes.well_dressed) {
-    return true
-  }
-
-  const hasOneOrMoreAttribute = nextPerson.attributes.well_dressed || nextPerson.attributes.young 
-
-  if (totalCount < 900) {
-    return hasOneOrMoreAttribute || nextPerson.personIndex % 15 === 0
-  } else {
-    return hasOneOrMoreAttribute
-  }
-}
-
-
-function updateGameState(prevState: GameState, nextStatus: GameStatus): GameState {
-  return {
-    ...prevState,
-    status: nextStatus,
-    metrics: {
-      totalWellDressed: totalWellDressed,
-      totalYoung: totalYoung,
-      winner: false,
-      score: 'rejectedCount' in nextStatus ? nextStatus.rejectedCount : 0
-     }
-  }
-}
+const sleep = (time: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(() => resolve(), time);
+  });
 
 /**
  * # Game Loop
  *
  *
  */
-async function runGameLoop(state: GameState): Promise<boolean> {
-  const accept = shouldLetPersonIn(state);
-  const index = state.status.nextPerson?.personIndex ?? 0
+async function runGameLoop(
+  state: GameState,
+  counter: GameCounter
+): Promise<boolean> {
+  if (state.status.status !== "running") throw new Error("Invalid status!");
+
+  const accept = counter.shouldLetIn(state.status.nextPerson);
+  const index = state.status.nextPerson?.personIndex ?? 0;
 
   const next = await acceptOrRejectThenGetNext({
     game: state.game,
@@ -154,32 +242,39 @@ async function runGameLoop(state: GameState): Promise<boolean> {
     accept,
   });
 
-  if (next.status === "completed") {
-    const nextState: GameState = updateGameState(state, next)
-    await saveGameFile({ ...nextState, metrics: { totalWellDressed, totalYoung, winner: true, score: next.rejectedCount }})
-    return true;
-  }
-  if (next.status === "failed") {
-    await Bun.file(state.file).delete()
-    throw next
+  if (next.status === 'completed') {
+    console.log('================ success ================')
+    console.log(next)
+    return true
   }
 
-  const nextState: GameState = updateGameState(state, next)
-  prettyPrint(nextState)
+  const nextState: GameState = {
+    ...state,
+    status: next,
+    metrics: counter.metrics(next),
+  };
+
+  prettyPrint(nextState);
+  await saveGameFile(nextState);
+
+  if (next.status === "failed") {
+    console.log('================ failure ================')
+    await Bun.file(state.file).delete();
+    throw next;
+  }
 
   await saveGameFile(nextState);
-  return await runGameLoop(nextState);
+  return await runGameLoop(nextState, counter);
 }
 
 // ================= GAME START ===================== //
 
 async function triggerNewGame() {
-  const file = await initialize({ scenario: '1' })
-  const savedGame = await loadGameFile({ file })
-  await runGameLoop(savedGame);
+  console.warn("[game] triggering new game!");
+  const file = await initialize({ scenario: "2" });
+  const savedGame = await loadGameFile({ file });
+  const counter = new GameCounter(savedGame);
+  await runGameLoop(savedGame, counter);
 }
 
-// run forever
-triggerNewGame()
-  .finally(() => sleep(5 * 60 * 1_000))
-  .then(() => triggerNewGame())
+await triggerNewGame();

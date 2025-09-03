@@ -37,9 +37,10 @@ export async function initialize(props: Parameters<typeof createGame>[0]) {
       game,
       status,
       metrics: {
-        totalWellDressed: 0,
-        totalYoung: 0,
-        winner: false,
+        data: {
+
+        },
+        total: 0,
         score: 0,
       },
   });
