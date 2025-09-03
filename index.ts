@@ -83,37 +83,33 @@ function shouldLetPersonIn({ status: next, metrics }: GameState): boolean {
   if (hasAllAttributes(nextPerson)) return true
 
   const totalPeople = next.admittedCount
-
-  const hasAnyAttribute = hasSomeAttribute(nextPerson)
   const isMoreYoungPeople = metrics.totalYoung > metrics.totalWellDressed
-  const isMoreWellDressed = !isMoreYoungPeople
-
+  const hasAnyAttribute = nextPerson.attributes.well_dressed || nextPerson.attributes.young
   const isWithinRange = Math.abs(metrics.totalYoung - metrics.totalWellDressed) < 10
 
-  switch (true) {
-    case totalPeople < 100:
-      return Math.random() < 0.5
 
-    case totalPeople < 250:
-      return hasAnyAttribute
+  if (totalPeople <= 64) {
+    return true
+  }
 
-    case totalPeople < 500: {
-      if ((isMoreYoungPeople || isWithinRange) && nextPerson.attributes.well_dressed) return true
-      if ((isMoreWellDressed || isWithinRange) && nextPerson.attributes.young) return true
-      return hasAnyAttribute || Math.random() < 0.25
-    }
-    
-    case totalPeople < 750: {
-      if ((isMoreYoungPeople || isWithinRange) && nextPerson.attributes.well_dressed) return true
-      if ((isMoreWellDressed || isWithinRange) && nextPerson.attributes.young) return true
-      return (hasAnyAttribute && Math.random() < 0.1)
-    }
+  if (totalPeople <= 256) {
+    return hasAnyAttribute
+  }
 
-    default: {
-      if (isMoreYoungPeople && nextPerson.attributes.well_dressed) return true
-      if (isMoreWellDressed && nextPerson.attributes.young) return true
-      return false
-    }
+  if (totalPeople <= 512) {
+    if (metrics.totalWellDressed <= 300 && nextPerson.attributes.well_dressed) return true
+    if (metrics.totalYoung <= 300 && nextPerson.attributes.young) return true
+  }
+
+  if (totalPeople <= 720) {
+    if (isWithinRange && nextPerson.attributes.well_dressed) return true
+    if (isWithinRange && nextPerson.attributes.young) return true
+  }
+
+  if (isMoreYoungPeople && nextPerson.attributes.well_dressed) {
+    return true
+  } else {
+    return nextPerson.attributes.young
   }
 }
 
@@ -131,8 +127,8 @@ function updateGameState(prevState: GameState, nextStatus: GameStatus, accepted:
     metrics: {
       totalWellDressed: nextTotalWellDressed,
       totalYoung: nextTotalYoung,
-      percentWellDressed: 1 - (nextTotalWellDressed / admittedCount),
-      percentYoung: 1 - (nextTotalYoung / admittedCount)
+      percentWellDressed: (nextTotalWellDressed / admittedCount),
+      percentYoung: (nextTotalYoung / admittedCount)
     }
   }
 }
