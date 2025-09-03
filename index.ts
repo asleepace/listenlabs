@@ -106,10 +106,8 @@ class GameCounter {
     const NO = () => { return false }
     const personKeys = getKeys(person.attributes)
 
-    if (this.totalEntries < 500 && personKeys.size >= 2 && this.data.creative > 0 && person.attributes.creative) return YES()
-
-
-    if (this.totalEntries < 500 && personKeys.size >= 3) return YES()
+    // handle limiting factor which is this key
+    if (this.data.creative > 0 && person.attributes.creative) return YES()
 
     const wantedKeys = getKeys({
       berlin_local: this.data.berlin_local > 0,
@@ -118,6 +116,10 @@ class GameCounter {
       well_connected: this.data.well_connected > 0,
     })
 
+    // attempt to knock down large items which can take out a lot
+    if (personKeys.size + 1 >= wantedKeys.size) return YES()
+
+    // we can just return everyone now
     if (wantedKeys.size === 0) return YES()
 
     console.log({
