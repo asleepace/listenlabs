@@ -98,6 +98,16 @@ class GameCounter {
     this.canLetAnyoneIn = Object.values(this.data).every((val) => val < 0);
   }
 
+  get availableSpaces(): number {
+    return 10_000 - this.totalEntries
+  }
+
+  get totalPeopleNeeded(): number {
+    return Object.values(this.data).reduce((total, current) => {
+      return total + (current < 0 ? 0 : current)
+    }, 0)
+  }
+
   public shouldLetIn(person: Person): boolean {
     const YES = () => {
       this.count(person)
@@ -106,12 +116,16 @@ class GameCounter {
     const NO = () => { return false }
     const personKeys = getKeys(person.attributes)
 
-    if (this.data.creative > 0 && this.data.berlin_local > 0 && (person.attributes.berlin_local || person.attributes.creative)) {
+    // person is a unicorn, let them in...
+    if (personKeys.size === 4) {
       return YES()
     }
 
+    // check if we need to find the exact people
+    const hasToFindExactPeople = this.totalPeopleNeeded < this.availableSpaces     
+
     // handle limiting factor which is this key
-    if (this.data.creative > 0 && person.attributes.creative) return YES()
+    // if (this.data.creative > 0 && person.attributes.creative) return YES()
 
     const wantedKeys = getKeys({
       berlin_local: this.data.berlin_local > 0,
@@ -121,15 +135,10 @@ class GameCounter {
     })
 
     // attempt to knock down large items which can take out a lot
-    if (personKeys.size + 1 >= wantedKeys.size) return YES()
+    if (!hasToFindExactPeople && personKeys.size + 1 >= wantedKeys.size) return YES()
 
     // we can just return everyone now
     if (wantedKeys.size === 0) return YES()
-
-    console.log({
-      wantedKeys: wantedKeys,
-      personKeys: personKeys
-    })
 
     let keysInCommon = 0
     wantedKeys.forEach((key) => {
@@ -228,7 +237,7 @@ async function runGameLoop(
   });
 
   if (next.status === 'completed') {
-    console.log('Finished!')
+    console.log('================ success ================')
     console.log(next)
     return true
   }
@@ -238,10 +247,12 @@ async function runGameLoop(
     status: next,
     metrics: counter.metrics(next),
   };
+
   prettyPrint(nextState);
   await saveGameFile(nextState);
 
   if (next.status === "failed") {
+    console.log('================ failure ================')
     await Bun.file(state.file).delete();
     throw next;
   }
