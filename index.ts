@@ -116,9 +116,14 @@ function shouldLetPersonIn({ status: next, metrics }: GameState): boolean {
 
   if (hasAllAttributes) return true
 
+  const hasAnyAttribute = hasSomeAttribute(next.nextPerson)
   const totalPeopleLeft = 10_000 - next.nextPerson.personIndex
-  const isCloseToClose = totalPeopleLeft < 1_000
-  const isStartOfNight = totalPeopleLeft > 9_000
+  const isCloseToClose = totalPeopleLeft < 1_000 || next.admittedCount > 800
+  const isStartOfNight = !isCloseToClose && (totalPeopleLeft > 9_000 || next.admittedCount < 100)
+
+  if (isStartOfNight && (hasAnyAttribute || Math.random() < 0.2)) {
+    return true
+  }
 
   const hasLessWellDressed = metrics.totalWellDressed >= metrics.totalYoung
   const hasLessYoungPeople = metrics.totalYoung >= metrics.totalWellDressed
@@ -172,10 +177,8 @@ async function runGameLoop(state: GameState): Promise<boolean> {
   return await runGameLoop(nextState);
 }
 
+// ================= GAME START ===================== //
 
-
-// console.log(await initialize())
-
+await initialize()
 const savedGame = await loadGameFile();
-
 await runGameLoop(savedGame);
