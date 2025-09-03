@@ -58,9 +58,15 @@ export type GameState = {
   metrics: {
     totalWellDressed: number;
     totalYoung: number;
+    winner: boolean;
+    score: number;
   };
 };
 
+
+const sleep = (time: number) => new Promise<void>((resolve) => {
+  setTimeout(() => resolve(), time)
+})
 
 
 function hasAllAttributes(person: Person) {
@@ -102,18 +108,18 @@ function shouldLetPersonIn({ status: next, metrics }: GameState): boolean {
     return true
   }
 
-  if (totalYoung < 590 && nextPerson.attributes.young) {
+  if (totalYoung < 585 && nextPerson.attributes.young) {
     return true
   }
 
-  if (totalWellDressed < 595 && nextPerson.attributes.well_dressed) {
+  if (totalWellDressed < 585 && nextPerson.attributes.well_dressed) {
     return true
   }
 
   const hasOneOrMoreAttribute = nextPerson.attributes.well_dressed || nextPerson.attributes.young 
 
   if (totalCount < 900) {
-    return hasOneOrMoreAttribute || nextPerson.personIndex % 13 === 0
+    return hasOneOrMoreAttribute || nextPerson.personIndex % 15 === 0
   } else {
     return hasOneOrMoreAttribute
   }
@@ -127,7 +133,9 @@ function updateGameState(prevState: GameState, nextStatus: GameStatus): GameStat
     metrics: {
       totalWellDressed: totalWellDressed,
       totalYoung: totalYoung,
-    }
+      winner: false,
+      score: 'rejectedCount' in nextStatus ? nextStatus.rejectedCount : 0
+     }
   }
 }
 
@@ -148,7 +156,7 @@ async function runGameLoop(state: GameState): Promise<boolean> {
 
   if (next.status === "completed") {
     const nextState: GameState = updateGameState(state, next)
-    await saveGameFile({ ...nextState, winner: true, score: next.rejectedCount } as any)
+    await saveGameFile({ ...nextState, metrics: { totalWellDressed, totalYoung, winner: true, score: next.rejectedCount }})
     return true;
   }
   if (next.status === "failed") {
@@ -165,6 +173,13 @@ async function runGameLoop(state: GameState): Promise<boolean> {
 
 // ================= GAME START ===================== //
 
-const file = await initialize({ scenario: '1' })
-const savedGame = await loadGameFile({ file })
-await runGameLoop(savedGame);
+async function triggerNewGame() {
+  const file = await initialize({ scenario: '1' })
+  const savedGame = await loadGameFile({ file })
+  await runGameLoop(savedGame);
+}
+
+// run forever
+triggerNewGame()
+  .finally(() => sleep(5 * 60 * 1_000))
+  .then(() => triggerNewGame())
