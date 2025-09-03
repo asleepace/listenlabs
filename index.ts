@@ -118,10 +118,10 @@ function shouldLetPersonIn({ status: next, metrics }: GameState): boolean {
 
   const hasAnyAttribute = hasSomeAttribute(next.nextPerson)
   const totalPeopleLeft = 10_000 - next.nextPerson.personIndex
-  const isCloseToClose = totalPeopleLeft < 1_000 || next.admittedCount > 800
+  const isCloseToClose = totalPeopleLeft < 1_000 || next.admittedCount > 900
   const isStartOfNight = !isCloseToClose && (totalPeopleLeft > 9_000 || next.admittedCount < 100)
 
-  if (isStartOfNight && (hasAnyAttribute || Math.random() < 0.2)) {
+  if (isStartOfNight && (hasAnyAttribute || Math.random() < 0.14)) {
     return true
   }
 
