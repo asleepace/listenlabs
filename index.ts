@@ -106,13 +106,16 @@ class GameCounter {
       // sort attributes in descending order (greatest to smallest)
       const sortedAttributes = getSortedAttributes(this.data);
 
-      console.log(sortedAttributes);
-
       // the quotas have been met
       if (sortedAttributes.length === 0) return true;
 
       // extract a set of the persons attributes
       const personAttributes = getKeys(person.attributes);
+
+      console.log({
+        sortedAttributes,
+        personAttributes,
+      });
 
       // if a person has all attributes then accept
       if (personAttributes.size === this.totalAttributes) {
@@ -123,30 +126,37 @@ class GameCounter {
       const admitVinylCollector =
         this.data.vinyl_collector > 0 && person.attributes.vinyl_collector;
 
-      // admit vinyl collectors
-      if (
-        this.totalEntries < 100 &&
-        admitVinylCollector &&
-        personAttributes.size > 2
-      ) {
-        return true;
+      const admitGermainSpeaker = this.data.german_speaker > 0 && person.attributes.german_speaker
+      const admitQueerFriendly = this.data.queer_friendly > 0 && person.attributes.queer_friendly
+      const admitInternational = this.data.international > 0 && person.attributes.international
+
+      if (this.totalEntries < 150 && admitQueerFriendly && admitVinylCollector) {
+        return true
       }
 
-      if (this.minPeopleToMeetQuota < 1_000 - this.totalEntries) {
-        // iterate over 100, 200, 300, 400, 500 people looking for largest
-        // attributes starting with 1x, 2x, 3x, 4x, 5x
-        for (let i = 1; i < this.totalAttributes; i++) {
-          if (this.totalEntries > i * 100) continue;
-          const wantedAttrs = sortedAttributes.slice(0, i);
-          const hasBoth = wantedAttrs.every(([key]) =>
-            personAttributes.has(key)
-          );
-          if (hasBoth) return true;
-        }
+      if (this.totalEntries < 150 && admitGermainSpeaker && admitInternational) {
+        return true
+      }
+
+      // count the number of keys the person has which need to be filled
+      const totalAttributesFulfilled = sortedAttributes.reduce((total, [key]) => {
+        const hasAttribute = personAttributes.has(key)
+        return total + (hasAttribute ? 1 : 0)
+      }, 0)
+
+      // hope the math starts mathing here...
+      if (this.totalEntries < 50 && totalAttributesFulfilled > 2) {
+        return true
+      }
+      if (this.totalEntries < 250 && totalAttributesFulfilled > 3) {
+        return true
+      }
+      if (this.totalEntries < 500 && totalAttributesFulfilled > 4) {
+        return true
       }
 
       // otherwise we want to return if they have them all in common.
-      return sortedAttributes.every(([key]) => personAttributes.has(key));
+      return totalAttributesFulfilled === sortedAttributes.length
     };
 
     if (determineToLetPersonInOrSomething()) {
