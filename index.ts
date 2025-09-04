@@ -28,69 +28,51 @@ export type Game = {
   };
 };
 
-
-function toBitmask(attr: PersonAttributesScenario2) {
-  const OxTecho = attr.techno_lover ? 0b1000 : 0b0000
-  const OxConnt = attr.well_connected ? 0b0100 : 0b0000
-  const OxCreat = attr.creative ? 0b0010 : 0b0000
-  const OxLocal = attr.berlin_local ? 0b0001 : 0b0000
-  return OxTecho | OxConnt | OxCreat | OxLocal
-}
-
-
 function doesSetBHaveAllSetA<T>(setA: Set<T>, setB: Set<T>): boolean {
   for (const key of setB.values()) {
-    if (setA.has(key)) continue
-    return false
+    if (setA.has(key)) continue;
+    return false;
   }
-  return true
+  return true;
 }
 
-function countMatchingBitsEfficient(mask1: number, mask2: number): number {
-  let matching = mask1 & mask2;
-  let count = 0;
-  while (matching) {
-      count += matching & 1;
-      matching >>= 1;
-  }
-  return count;
-}
-
-const getKeys = (attr: Person['attributes']) => {
-  return new Set(Object.entries(attr).filter(([key, attr]) => attr === true).map(([key]) => key) as (keyof Person['attributes'])[])
-}
+const getKeys = (attr: Person["attributes"]) => {
+  return new Set(
+    Object.entries(attr)
+      .filter(([key, attr]) => attr === true)
+      .map(([key]) => key) as (keyof Person["attributes"])[]
+  );
+};
 
 class GameCounter {
-  public data: Record<keyof Person['attributes'], number> = {
-    berlin_local: 0,
-    techno_lover: 0,
-    creative: 0,
-    well_connected: 0,
-  }
+  public data: Record<keyof Person["attributes"], number> = {
+    underground_veteran: 0,
+    international: 0,
+    fashion_forward: 0,
+    queer_friendly: 0,
+    vinyl_collector: 0,
+    german_speaker: 0,
+  };
 
   private canLetAnyoneIn = false;
   private numberOfAttributes = 0;
   private totalEntries = 0;
 
-  get bitmask() {
-    return toBitmask({
-      berlin_local: this.data.berlin_local > 0,
-      techno_lover: this.data.techno_lover > 0,
-      creative: this.data.creative > 0,
-      well_connected: this.data.well_connected > 0,
-    })
-  }
-
   constructor(initialState: GameState) {
     // initialize with game constraints
     for (const constraint of initialState.game.constraints) {
-      this.data[constraint.attribute as keyof Person['attributes']] = Number(constraint.minCount);
+      this.data[constraint.attribute as keyof Person["attributes"]] = Number(
+        constraint.minCount
+      );
     }
   }
 
   public count(person: Person) {
     if (this.canLetAnyoneIn) return true;
-    for (const [key, value] of Object.entries(person.attributes) as [keyof Person['attributes'], boolean][]) {
+    for (const [key, value] of Object.entries(person.attributes) as [
+      keyof Person["attributes"],
+      boolean
+    ][]) {
       if (value === false) continue;
       this.data[key]--;
     }
@@ -99,63 +81,65 @@ class GameCounter {
   }
 
   get availableSpaces(): number {
-    return 10_000 - this.totalEntries
+    return 10_000 - this.totalEntries;
   }
 
   get totalPeopleNeeded(): number {
     return Object.values(this.data).reduce((total, current) => {
-      return total + (current < 0 ? 0 : current)
-    }, 0)
+      return total + (current < 0 ? 0 : current);
+    }, 0);
   }
 
   public shouldLetIn(person: Person): boolean {
     const YES = () => {
-      this.count(person)
-      return true
-    }
-    const NO = () => { return false }
-    const personKeys = getKeys(person.attributes)
+      this.count(person);
+      return true;
+    };
+    const NO = () => {
+      return false;
+    };
+    const personKeys = getKeys(person.attributes);
 
     // person is a unicorn, let them in...
     if (personKeys.size === 4) {
-      return YES()
+      return YES();
     }
 
     // check if we need to find the exact people
-    const hasToFindExactPeople = this.totalPeopleNeeded >= this.availableSpaces    
+    const hasToFindExactPeople = this.totalPeopleNeeded >= this.availableSpaces;
 
     // handle limiting factor which is this key
-    if (this.data.creative > 50 && person.attributes.creative) return YES()
-
-    if (this.totalEntries < 200 && personKeys.size >= 3) return YES()
-
+    if (this.totalEntries < 200 && personKeys.size >= 4) return YES();
 
     // determine which keys are left
     const wantedKeys = getKeys({
-      berlin_local: this.data.berlin_local > 0,
-      techno_lover: this.data.techno_lover > 0,
-      creative: this.data.creative > 0,
-      well_connected: this.data.well_connected > 0,
-    })
+      underground_veteran: this.data.underground_veteran > 0,
+      international: this.data.international > 0,
+      fashion_forward: this.data.fashion_forward > 0,
+      queer_friendly: this.data.queer_friendly > 0,
+      vinyl_collector: this.data.vinyl_collector > 0,
+      german_speaker: this.data.german_speaker > 0,
+    });
 
     // attempt to knock down large items which can take out a lot
-    if (!hasToFindExactPeople && personKeys.size + 1 >= wantedKeys.size) return YES()
+    if (!hasToFindExactPeople && personKeys.size + 1 >= wantedKeys.size)
+      return YES();
 
     // we can just return everyone now
-    if (wantedKeys.size === 0) return YES()
+    if (wantedKeys.size === 0) return YES();
 
     // check how many keys both share in common
-    let keysInCommon = 0
+    let keysInCommon = 0;
     wantedKeys.forEach((key) => {
       if (personKeys.has(key)) {
-        keysInCommon++
+        keysInCommon++;
       }
-    })
+    });
 
     if (keysInCommon === wantedKeys.size) {
-      return YES()
+      return YES();
     } else {
-      return NO()
+      return NO();
     }
   }
 
@@ -182,7 +166,16 @@ type PersonAttributesScenario2 = {
   berlin_local: boolean;
 };
 
-export type Person<T = PersonAttributesScenario2> = {
+type PersonAttributesScenario3 = {
+  underground_veteran: boolean;
+  international: boolean;
+  fashion_forward: boolean;
+  queer_friendly: boolean;
+  vinyl_collector: boolean;
+  german_speaker: boolean;
+};
+
+export type Person<T = PersonAttributesScenario3> = {
   personIndex: number;
   attributes: T;
 };
@@ -241,10 +234,10 @@ async function runGameLoop(
     accept,
   });
 
-  if (next.status === 'completed') {
-    console.log('================ success ================')
-    console.log(next)
-    return true
+  if (next.status === "completed") {
+    console.log("================ success ================");
+    console.log(next);
+    return true;
   }
 
   const nextState: GameState = {
@@ -257,7 +250,7 @@ async function runGameLoop(
   await saveGameFile(nextState);
 
   if (next.status === "failed") {
-    console.log('================ failure ================')
+    console.log("================ failure ================");
     await Bun.file(state.file).delete();
     throw next;
   }
@@ -269,11 +262,13 @@ async function runGameLoop(
 // ================= GAME START ===================== //
 
 async function triggerNewGame() {
+  console.log("================ starting ================");
   console.warn("[game] triggering new game!");
-  const file = await initialize({ scenario: "2" });
+  const file = await initialize({ scenario: "3" });
+  console.warn("[game] game file:", file);
   const savedGame = await loadGameFile({ file });
-  const counter = new GameCounter(savedGame);
-  await runGameLoop(savedGame, counter);
+  // const counter = new GameCounter(savedGame);
+  // await runGameLoop(savedGame, counter);
 }
 
 await triggerNewGame();
