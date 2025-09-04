@@ -81,7 +81,7 @@ class GameCounter {
   }
 
   get availableSpaces(): number {
-    return 10_000 - this.totalEntries;
+    return 1_000 - this.totalEntries;
   }
 
   get totalPeopleNeeded(): number {
@@ -101,7 +101,7 @@ class GameCounter {
     const personKeys = getKeys(person.attributes);
 
     // person is a unicorn, let them in...
-    if (personKeys.size === 4) {
+    if (personKeys.size === 6) {
       return YES();
     }
 
@@ -109,7 +109,9 @@ class GameCounter {
     const hasToFindExactPeople = this.totalPeopleNeeded >= this.availableSpaces;
 
     // handle limiting factor which is this key
+    if (this.totalEntries < 100 && personKeys.size >= 3) return YES();
     if (this.totalEntries < 200 && personKeys.size >= 4) return YES();
+    if (this.totalEntries < 300 && personKeys.size >= 5) return YES();
 
     // determine which keys are left
     const wantedKeys = getKeys({
@@ -264,11 +266,13 @@ async function runGameLoop(
 async function triggerNewGame() {
   console.log("================ starting ================");
   console.warn("[game] triggering new game!");
-  // const file = await initialize({ scenario: "3" });
-  // console.warn("[game] game file:", file);
-  const savedGame = await loadGameFile({ file: './game-1782caa1-01c1-41ee-a3de-c04f4fb8d24b.json' });
+  const file = await initialize({ scenario: "3" });
+  console.warn("[game] game file:", file);
+  const savedGame = await loadGameFile({ file });
   const counter = new GameCounter(savedGame);
   await runGameLoop(savedGame, counter);
+  console.log('[game] scenario 3 finished!')
+  console.log("================ end ================");
 }
 
 await triggerNewGame();
