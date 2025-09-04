@@ -79,13 +79,9 @@ class GameCounter {
     this.canLetAnyoneIn = Object.values(this.data).every((val) => val < 0);
   }
 
-  get availableSpaces(): number {
-    return 1_000 - this.totalEntries;
-  }
-
-  get totalPeopleNeeded(): number {
+  get minPeopleToMeetQuota(): number {
     return Object.values(this.data).reduce((total, current) => {
-      return total + (current < 0 ? 0 : current);
+      return Math.max(total, current)
     }, 0);
   }
 
@@ -105,7 +101,7 @@ class GameCounter {
     }
 
     // check if we need to find the exact people
-    const isUnderStrictLimit = this.availableSpaces >= this.totalEntries + 50;
+    const isUnderStrictLimit = this.minPeopleToMeetQuota <= (1_000 - (this.totalEntries * 50))
 
     const shouldPickCollector =
       this.data.vinyl_collector > 0 && person.attributes.vinyl_collector;
