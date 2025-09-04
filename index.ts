@@ -99,7 +99,7 @@ class GameCounter {
   }
 
   get availableSpaces(): number {
-    return 10_000 - this.totalEntries
+    return 1_000 - this.totalEntries
   }
 
   get totalPeopleNeeded(): number {
@@ -122,7 +122,7 @@ class GameCounter {
     }
 
     // check if we need to find the exact people
-    const hasToFindExactPeople = this.totalPeopleNeeded >= this.availableSpaces    
+    const hasToFindExactPeople = (this.totalPeopleNeeded + 1) >= this.availableSpaces    
 
     // handle limiting factor which is this key
     if (this.data.creative > 50 && person.attributes.creative) return YES()
