@@ -28,6 +28,15 @@ export type Game = {
   };
 };
 
+function getSortedAttributes(
+  attributes: Record<keyof Person["attributes"], number>
+): [keyof Person["attributes"], number][] {
+  return Object.entries(attributes)
+    .filter((attr) => attr[1] > 0)
+    .sort((attr1, attr2) => attr1[1] - attr2[1])
+    .reverse() as [keyof Person["attributes"], number][];
+}
+
 function doesSetBHaveAllSetA<T>(setA: Set<T>, setB: Set<T>): boolean {
   for (const key of setB.values()) {
     if (setA.has(key)) continue;
@@ -56,6 +65,7 @@ class GameCounter {
 
   private canLetAnyoneIn = false;
   private totalEntries = 0;
+  private totalAttributes = 0;
 
   constructor(initialState: GameState) {
     // initialize with game constraints
@@ -64,6 +74,8 @@ class GameCounter {
         constraint.minCount
       );
     }
+
+    this.totalAttributes = Object.keys(this.data).length;
   }
 
   public count(person: Person) {
@@ -81,109 +93,67 @@ class GameCounter {
 
   get minPeopleToMeetQuota(): number {
     return Object.values(this.data).reduce((total, current) => {
-      return Math.max(total, current)
+      return Math.max(total, current);
     }, 0);
   }
 
   public shouldLetIn(person: Person): boolean {
-    const YES = () => {
-      this.count(person);
-      return true;
-    };
-    const NO = () => {
-      return false;
-    };
-    const personKeys = getKeys(person.attributes);
+    /**
+     * NOTE: this is an inner funcion:
+     * @returns
+     */
+    const determineToLetPersonInOrSomething = (): boolean => {
+      // sort attributes in descending order (greatest to smallest)
+      const sortedAttributes = getSortedAttributes(this.data);
 
-    // person is a unicorn, let them in...
-    if (personKeys.size === 6) {
-      return YES();
-    }
+      console.log(sortedAttributes);
 
-    if (this.totalEntries < 150 && person.attributes.international && personKeys.size > 2) {
-      return YES()
-    }
+      // the quotas have been met
+      if (sortedAttributes.length === 0) return true;
 
-    // check if we need to find the exact people
-    const isUnderStrictLimit = this.minPeopleToMeetQuota <= (1_000 - (this.totalEntries + 50))
+      // extract a set of the persons attributes
+      const personAttributes = getKeys(person.attributes);
 
-    const shouldPickCollector =
-      this.data.vinyl_collector > 0 && person.attributes.vinyl_collector;
-    const shouldPickGerman =
-      this.data.german_speaker > 0 && person.attributes.german_speaker;
-    const shouldPickInternational =
-      this.data.international > 0 && person.attributes.international;
-    const shouldPickQueerFriendly =
-      this.data.queer_friendly > 0 && person.attributes.queer_friendly;
+      // if a person has all attributes then accept
+      if (personAttributes.size === this.totalAttributes) {
+        return true;
+      }
 
-    if (isUnderStrictLimit && shouldPickGerman && shouldPickCollector) {
-      return YES();
-    }
+      // this is the least common item so we want to grab these too
+      const admitVinylCollector =
+        this.data.vinyl_collector > 0 && person.attributes.vinyl_collector;
 
-    // pick internationl queer pairs
-    if (
-      isUnderStrictLimit &&
-      shouldPickInternational &&
-      shouldPickQueerFriendly
-    ) {
-      return YES();
-    }
-
-    // pick international german pairs
-    if (isUnderStrictLimit && shouldPickInternational && shouldPickGerman) {
-      return YES();
-    }
-
-    // handle limiting factor which is this key
-    // if (this.totalEntries < 50 && personKeys.size >= 3) return YES();
-    if (isUnderStrictLimit) {
+      // admit vinyl collectors
       if (
         this.totalEntries < 100 &&
-        personKeys.size >= 3 &&
-        person.attributes.german_speaker
-      )
-        return YES();
-      if (this.totalEntries < 250 && personKeys.size >= 4) return YES();
-      if (this.totalEntries < 500 && personKeys.size >= 5) return YES();
-
-      if (
-        isUnderStrictLimit &&
-        this.data.vinyl_collector > 50 &&
-        person.attributes.vinyl_collector
+        admitVinylCollector &&
+        personAttributes.size > 2
       ) {
-        return YES();
+        return true;
       }
-    }
 
-    // determine which keys are left
-    const wantedKeys = getKeys({
-      underground_veteran: this.data.underground_veteran > 0,
-      international: this.data.international > 0,
-      fashion_forward: this.data.fashion_forward > 0,
-      queer_friendly: this.data.queer_friendly > 0,
-      vinyl_collector: this.data.vinyl_collector > 0,
-      german_speaker: this.data.german_speaker > 0,
-    });
-
-    // attempt to knock down large items which can take out a lot
-    // if (this.totalEntries < 400 && !hasToFindExactPeople && personKeys.size + 1 >= wantedKeys.size)
-    //   return YES();
-
-    // we can just return everyone now
-    if (wantedKeys.size === 0) return YES();
-
-    // check how many keys both share in common
-    let hasAllKeys = true;
-    wantedKeys.forEach((key) => {
-      if (!personKeys.has(key)) {
-        hasAllKeys = false;
+      if (this.minPeopleToMeetQuota < 1_000 - this.totalEntries) {
+        // iterate over 100, 200, 300, 400, 500 people looking for largest
+        // attributes starting with 1x, 2x, 3x, 4x, 5x
+        for (let i = 1; i < this.totalAttributes; i++) {
+          if (this.totalEntries > i * 100) continue;
+          const wantedAttrs = sortedAttributes.slice(0, i);
+          const hasBoth = wantedAttrs.every(([key]) =>
+            personAttributes.has(key)
+          );
+          if (hasBoth) return true;
+        }
       }
-    });
 
-    if (hasAllKeys) {
-      return YES();
+      // otherwise we want to return if they have them all in common.
+      return sortedAttributes.every(([key]) => personAttributes.has(key));
+    };
+
+    if (determineToLetPersonInOrSomething()) {
+      this.count(person);
+      return true;
     } else {
-      return NO();
+      return false;
     }
   }
 
