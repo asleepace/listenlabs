@@ -126,7 +126,11 @@ class GameCounter {
     // handle limiting factor which is this key
     if (this.data.creative > 50 && person.attributes.creative) return YES()
 
-    if (this.totalEntries < 200 && personKeys.size >= 3) return YES()
+    // if (this.totalEntries < 150 && personKeys.size >= 3) return YES()
+
+    if (this.totalEntries < 250 && this.data.berlin_local > 0 && person.attributes.berlin_local && personKeys.size > 2) {
+      return true
+    } 
 
 
     // determine which keys are left
@@ -144,13 +148,23 @@ class GameCounter {
     if (wantedKeys.size === 0) return YES()
 
     // check how many keys both share in common
-
+    let totalInCommon = 0
+    let allKeysMatch = true
     for (const key of wantedKeys) {
-      if (personKeys.has(key)) continue
-      return NO()
+      if (personKeys.has(key)) {
+        totalInCommon++
+        continue
+      } else {
+        allKeysMatch = false
+      }
     }
 
-    return YES()
+    if (this.totalEntries < 500 && totalInCommon >= 3) {
+      return YES()
+    }
+
+
+    return allKeysMatch ? YES() : NO()
   }
 
   public metrics(status: GameState["status"]) {
