@@ -106,13 +106,18 @@ class GameCounter {
     }
 
     // check if we need to find the exact people
-    const hasToFindExactPeople = this.totalPeopleNeeded >= this.availableSpaces;
+    const isUnderStrictLimit = this.totalEntries < 750
 
     // handle limiting factor which is this key
-    if (this.totalEntries < 100 && personKeys.size >= 3) return YES();
-    if (this.totalEntries < 200 && personKeys.size >= 4) return YES();
-    if (this.totalEntries < 300 && personKeys.size >= 5) return YES();
+    // if (this.totalEntries < 50 && personKeys.size >= 3) return YES();
+    if (this.totalEntries < 100 && personKeys.size >= 3 && person.attributes.german_speaker) return YES();
+    if (this.totalEntries < 250 && personKeys.size >= 4) return YES();
+    if (this.totalEntries < 500 && personKeys.size >= 5) return YES();
 
+    if (isUnderStrictLimit && this.data.vinyl_collector > 50 && person.attributes.vinyl_collector) {
+      return YES()
+    }
+    
     // determine which keys are left
     const wantedKeys = getKeys({
       underground_veteran: this.data.underground_veteran > 0,
@@ -124,8 +129,8 @@ class GameCounter {
     });
 
     // attempt to knock down large items which can take out a lot
-    if (!hasToFindExactPeople && personKeys.size + 1 >= wantedKeys.size)
-      return YES();
+    // if (this.totalEntries < 400 && !hasToFindExactPeople && personKeys.size + 1 >= wantedKeys.size)
+    //   return YES();
 
     // we can just return everyone now
     if (wantedKeys.size === 0) return YES();
@@ -147,7 +152,7 @@ class GameCounter {
 
   public metrics(status: GameState["status"]) {
     if (status.status !== "running")
-      throw new Error("Invalid status for metrics:");
+      throw status
     return {
       data: this.data,
       score: status.rejectedCount,

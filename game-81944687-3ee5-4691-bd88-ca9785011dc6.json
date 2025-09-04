@@ -57,10 +57,10 @@
   },
   "status": {
     "status": "running",
-    "admittedCount": 604,
-    "rejectedCount": 4402,
+    "admittedCount": 999,
+    "rejectedCount": 4472,
     "nextPerson": {
-      "personIndex": 5006,
+      "personIndex": 5471,
       "attributes": {
         "techno_lover": true,
         "well_connected": false,
@@ -71,12 +71,12 @@
   },
   "metrics": {
     "data": {
-      "berlin_local": 258,
-      "techno_lover": 147,
-      "creative": 6,
-      "well_connected": -84
+      "berlin_local": 65,
+      "techno_lover": -92,
+      "creative": -26,
+      "well_connected": -310
     },
-    "score": 4402,
-    "total": 604
+    "score": 4472,
+    "total": 999
   }
 }

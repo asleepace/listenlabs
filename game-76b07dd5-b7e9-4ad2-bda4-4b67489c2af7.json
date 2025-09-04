@@ -91,13 +91,13 @@
   },
   "status": {
     "status": "running",
-    "admittedCount": 835,
-    "rejectedCount": 795,
+    "admittedCount": 999,
+    "rejectedCount": 861,
     "nextPerson": {
-      "personIndex": 1630,
+      "personIndex": 1860,
       "attributes": {
         "underground_veteran": true,
-        "international": false,
+        "international": true,
         "fashion_forward": true,
         "queer_friendly": false,
         "vinyl_collector": false,
@@ -107,14 +107,14 @@
   },
   "metrics": {
     "data": {
-      "underground_veteran": -266,
-      "international": 46,
-      "fashion_forward": -219,
-      "queer_friendly": 183,
-      "vinyl_collector": 126,
-      "german_speaker": 433
+      "underground_veteran": -391,
+      "international": -59,
+      "fashion_forward": -360,
+      "queer_friendly": 176,
+      "vinyl_collector": 119,
+      "german_speaker": 355
     },
-    "score": 795,
-    "total": 835
+    "score": 861,
+    "total": 999
   }
 }
