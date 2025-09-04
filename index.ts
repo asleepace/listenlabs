@@ -69,7 +69,6 @@ class GameCounter {
   }
 
   private canLetAnyoneIn = false;
-  private numberOfAttributes = 0;
   private totalEntries = 0;
 
   get bitmask() {
@@ -122,7 +121,7 @@ class GameCounter {
     }
 
     // check if we need to find the exact people
-    const hasToFindExactPeople = (this.totalPeopleNeeded + 1) >= this.availableSpaces    
+    const hasToFindExactPeople = this.totalEntries > 900   
 
     // handle limiting factor which is this key
     if (this.data.creative > 50 && person.attributes.creative) return YES()
@@ -145,18 +144,13 @@ class GameCounter {
     if (wantedKeys.size === 0) return YES()
 
     // check how many keys both share in common
-    let keysInCommon = 0
-    wantedKeys.forEach((key) => {
-      if (personKeys.has(key)) {
-        keysInCommon++
-      }
-    })
 
-    if (keysInCommon === wantedKeys.size) {
-      return YES()
-    } else {
+    for (const key of wantedKeys) {
+      if (personKeys.has(key)) continue
       return NO()
     }
+
+    return YES()
   }
 
   public metrics(status: GameState["status"]) {
