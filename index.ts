@@ -100,8 +100,12 @@ class GameCounter {
       return YES();
     }
 
+    if (this.totalEntries < 150 && person.attributes.international && personKeys.size > 2) {
+      return YES()
+    }
+
     // check if we need to find the exact people
-    const isUnderStrictLimit = this.minPeopleToMeetQuota <= (1_000 - (this.totalEntries * 50))
+    const isUnderStrictLimit = this.minPeopleToMeetQuota <= (1_000 - (this.totalEntries + 50))
 
     const shouldPickCollector =
       this.data.vinyl_collector > 0 && person.attributes.vinyl_collector;
