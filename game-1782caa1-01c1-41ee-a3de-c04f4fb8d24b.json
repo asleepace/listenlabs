@@ -91,10 +91,10 @@
   },
   "status": {
     "status": "running",
-    "admittedCount": 1,
-    "rejectedCount": 0,
+    "admittedCount": 139,
+    "rejectedCount": 2052,
     "nextPerson": {
-      "personIndex": 1,
+      "personIndex": 2191,
       "attributes": {
         "underground_veteran": false,
         "international": true,
@@ -106,8 +106,15 @@
     }
   },
   "metrics": {
-    "data": {},
-    "total": 0,
-    "score": 0
+    "data": {
+      "underground_veteran": 371,
+      "international": 547,
+      "fashion_forward": 445,
+      "queer_friendly": 179,
+      "vinyl_collector": 127,
+      "german_speaker": 684
+    },
+    "score": 2052,
+    "total": 139
   }
 }

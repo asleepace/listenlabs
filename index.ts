@@ -264,11 +264,11 @@ async function runGameLoop(
 async function triggerNewGame() {
   console.log("================ starting ================");
   console.warn("[game] triggering new game!");
-  const file = await initialize({ scenario: "3" });
-  console.warn("[game] game file:", file);
-  const savedGame = await loadGameFile({ file });
-  // const counter = new GameCounter(savedGame);
-  // await runGameLoop(savedGame, counter);
+  // const file = await initialize({ scenario: "3" });
+  // console.warn("[game] game file:", file);
+  const savedGame = await loadGameFile({ file: './game-1782caa1-01c1-41ee-a3de-c04f4fb8d24b.json' });
+  const counter = new GameCounter(savedGame);
+  await runGameLoop(savedGame, counter);
 }
 
 await triggerNewGame();
