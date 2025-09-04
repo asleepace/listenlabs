@@ -55,7 +55,6 @@ class GameCounter {
   };
 
   private canLetAnyoneIn = false;
-  private numberOfAttributes = 0;
   private totalEntries = 0;
 
   constructor(initialState: GameState) {
@@ -106,18 +105,56 @@ class GameCounter {
     }
 
     // check if we need to find the exact people
-    const isUnderStrictLimit = this.totalEntries < 750
+    const isUnderStrictLimit = this.availableSpaces >= this.totalEntries + 50;
+
+    const shouldPickCollector =
+      this.data.vinyl_collector > 0 && person.attributes.vinyl_collector;
+    const shouldPickGerman =
+      this.data.german_speaker > 0 && person.attributes.german_speaker;
+    const shouldPickInternational =
+      this.data.international > 0 && person.attributes.international;
+    const shouldPickQueerFriendly =
+      this.data.queer_friendly > 0 && person.attributes.queer_friendly;
+
+    if (isUnderStrictLimit && shouldPickGerman && shouldPickCollector) {
+      return YES();
+    }
+
+    // pick internationl queer pairs
+    if (
+      isUnderStrictLimit &&
+      shouldPickInternational &&
+      shouldPickQueerFriendly
+    ) {
+      return YES();
+    }
+
+    // pick international german pairs
+    if (isUnderStrictLimit && shouldPickInternational && shouldPickGerman) {
+      return YES();
+    }
 
     // handle limiting factor which is this key
     // if (this.totalEntries < 50 && personKeys.size >= 3) return YES();
-    if (this.totalEntries < 100 && personKeys.size >= 3 && person.attributes.german_speaker) return YES();
-    if (this.totalEntries < 250 && personKeys.size >= 4) return YES();
-    if (this.totalEntries < 500 && personKeys.size >= 5) return YES();
+    if (isUnderStrictLimit) {
+      if (
+        this.totalEntries < 100 &&
+        personKeys.size >= 3 &&
+        person.attributes.german_speaker
+      )
+        return YES();
+      if (this.totalEntries < 250 && personKeys.size >= 4) return YES();
+      if (this.totalEntries < 500 && personKeys.size >= 5) return YES();
 
-    if (isUnderStrictLimit && this.data.vinyl_collector > 50 && person.attributes.vinyl_collector) {
-      return YES()
+      if (
+        isUnderStrictLimit &&
+        this.data.vinyl_collector > 50 &&
+        person.attributes.vinyl_collector
+      ) {
+        return YES();
+      }
     }
-    
+
     // determine which keys are left
     const wantedKeys = getKeys({
       underground_veteran: this.data.underground_veteran > 0,
@@ -136,14 +173,14 @@ class GameCounter {
     if (wantedKeys.size === 0) return YES();
 
     // check how many keys both share in common
-    let keysInCommon = 0;
+    let hasAllKeys = true;
     wantedKeys.forEach((key) => {
-      if (personKeys.has(key)) {
-        keysInCommon++;
+      if (!personKeys.has(key)) {
+        hasAllKeys = false;
       }
     });
 
-    if (keysInCommon === wantedKeys.size) {
+    if (hasAllKeys) {
       return YES();
     } else {
       return NO();
@@ -151,8 +188,7 @@ class GameCounter {
   }
 
   public metrics(status: GameState["status"]) {
-    if (status.status !== "running")
-      throw status
+    if (status.status !== "running") throw status;
     return {
       data: this.data,
       score: status.rejectedCount,
@@ -276,7 +312,7 @@ async function triggerNewGame() {
   const savedGame = await loadGameFile({ file });
   const counter = new GameCounter(savedGame);
   await runGameLoop(savedGame, counter);
-  console.log('[game] scenario 3 finished!')
+  console.log("[game] scenario 3 finished!");
   console.log("================ end ================");
 }
 
