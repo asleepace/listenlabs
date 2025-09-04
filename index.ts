@@ -122,18 +122,13 @@ class GameCounter {
     }
 
     // check if we need to find the exact people
-    const hasToFindExactPeople = this.totalPeopleNeeded < this.availableSpaces    
+    const hasToFindExactPeople = this.totalPeopleNeeded >= this.availableSpaces    
 
     // handle limiting factor which is this key
-    if (this.data.creative > 0 && person.attributes.creative) return YES()
+    if (this.data.creative > 50 && person.attributes.creative) return YES()
 
+    if (this.totalEntries < 200 && personKeys.size >= 3) return YES()
 
-    const shouldAllowLocals = this.data.berlin_local > 0 && person.attributes.berlin_local
-    const shouldAllowTechno = this.data.techno_lover > 0 && person.attributes.techno_lover
-    
-    if (!hasToFindExactPeople && (shouldAllowLocals || shouldAllowTechno)) {
-      return YES()
-    }
 
     // determine which keys are left
     const wantedKeys = getKeys({
