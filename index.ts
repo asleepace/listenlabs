@@ -105,6 +105,11 @@ async function runGameLoop(nextStatus: GameStatus): Promise<boolean> {
 
   console.log(counter.getProgress())
 
+  if (next.status === 'failed') {
+    console.warn("================ failed ================");
+    throw next
+  }
+
   if (next.status === "completed") {
     console.log("================ success ================");
     console.log(next);
