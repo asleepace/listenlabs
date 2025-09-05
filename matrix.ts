@@ -21,27 +21,25 @@ interface GameCounter {
 
 const CONFIG = {
   // Admission threshold settings
-  MIN_THRESHOLD: 0.4, // Base admission score threshold (0.35 = moderately lenient)
-  THRESHOLD_RAMP: 0.5, // How quickly threshold decreases as we fill up (0.48 = gradual tightening)
+  MIN_THRESHOLD: 0.50, // Base admission score threshold (0.35 = moderately lenient)
+  THRESHOLD_RAMP: 0.50, // How quickly threshold decreases as we fill up (0.48 = gradual tightening)
 
   // Quota completion targets
-  TARGET_RANGE: 5_000, // Aim to complete all quotas by person #4000 (out of 10,000)
+  TARGET_RANGE: 5000, // Aim to complete all quotas by person #4000 (out of 10,000)
 
   // Scoring weights
-  URGENCY_MODIFIER: 4, // Multiplier for how much being behind schedule matters
-  CORRELATION_BONUS: 0.2, // Bonus for positive correlations between needed attributes
+  URGENCY_MODIFIER: 2.1, // Multiplier for how much being behind schedule matters
+  CORRELATION_BONUS: 0.3, // Bonus for positive correlations between needed attributes
   NEGATIVE_CORRELATION_BONUS: 0.5, // Bonus for rare combinations (negatively correlated but both needed)
   NEGATIVE_CORRELATION_THRESHOLD: -0.5, // Correlation below this triggers special handling
-  MULTI_ATTRIBUTE_BONUS: 0.2, // Bonus per additional useful attribute (compounds)
+  MULTI_ATTRIBUTE_BONUS: 0.5, // Bonus per additional useful attribute (compounds)
 
   // Capacity settings
-  MAX_CAPACITY: 1_000, // Maximum people we can admit
+  MAX_CAPACITY: 1000, // Maximum people we can admit
   TOTAL_PEOPLE: 10_000, // Total people in line
-
-  FINAL_PUSH_THRESHOLD: 0.15,    // When under 15% capacity remaining
-  FINAL_PUSH_TARGET: 0.95,       // Boost attributes under 95% complete  
-  FINAL_PUSH_MULTIPLIER: 10,     // Aggressive multiplier for final push
 };
+
+
 
 export class NightclubGameCounter implements GameCounter {
   private gameData: GameData;
@@ -74,7 +72,7 @@ export class NightclubGameCounter implements GameCounter {
       this.totalPeople - this.admittedCount - this.rejectedCount;
 
     // If we're at capacity, reject
-    if (spotsLeft <= 0) {
+    if (spotsLeft < 0) {
       return false;
     }
 
@@ -133,11 +131,38 @@ export class NightclubGameCounter implements GameCounter {
 
     // If all quotas are met, admit everyone
     if (allQuotasMet || this.state.status.status !== "running") {
-      return 10.0; // High score to guarantee admission
+      return Infinity; // High score to guarantee admission
     }
+
+    // Sort current counts in order of precedence
+    const rankings = this.gameData.constraints.map((constraint) => {
+      const currentCount = this.attributeCounts[constraint.attribute]!
+      const totalPeopleWithAttributesWanted = constraint.minCount - currentCount
+      const totalAvailableSpots = CONFIG.MAX_CAPACITY - this.admittedCount
+      const difference = 1 - ((totalAvailableSpots - totalPeopleWithAttributesWanted) / totalAvailableSpots)
+      return {
+        attribute: constraint.attribute as Keys,
+        neededCount: totalPeopleWithAttributesWanted,
+        mustAdmint: difference >= 0.9,
+        difference,
+      }
+    })
+      .filter((item) => item.neededCount > 0)
+      .sort((item1, item2) => item1.neededCount - item2.neededCount)
+      .toReversed()
+
+    console.log(rankings)
 
     const { admittedCount, rejectedCount } = this.state.status;
     const totalProcessed = admittedCount + rejectedCount;
+
+
+    const minRequiredConstraints = rankings.filter((rank) => rank.mustAdmint)
+
+    if (minRequiredConstraints.length) {
+      return minRequiredConstraints.every((constraint) => attributes[constraint.attribute]) ? Infinity : 0
+    }
+
 
     // Calculate score for each attribute the person has
     this.gameData.constraints.forEach((constraint) => {
@@ -176,16 +201,9 @@ export class NightclubGameCounter implements GameCounter {
       let componentScore =
         (urgency + riskFactor) * Math.log(scarcityFactor + 1);
 
-      // Critical shortage bonus - boost attributes that are close but behind
-      const quotaProgress = currentCount / constraint.minCount;
-      const spotsLeftRatio = spotsLeft / CONFIG.MAX_CAPACITY;
-
-      // If we're running low on spots and this attribute is behind, boost it
-      if (spotsLeftRatio < CONFIG.FINAL_PUSH_THRESHOLD && quotaProgress < CONFIG.FINAL_PUSH_TARGET) {
-        // In final 15% of capacity, massively boost incomplete quotas
-        const shortageMultiplier = 1 + (CONFIG.FINAL_PUSH_TARGET - quotaProgress) * CONFIG.FINAL_PUSH_MULTIPLIER;
-        componentScore *= shortageMultiplier;
-      }
+      // Ranking score
+      const currentRank = rankings.find((rank) => rank.attribute === attr)
+      if (currentRank?.mustAdmint) return 12.0
 
       // Add correlation bonus for multiple needed attributes
       let correlationBonus = 0;

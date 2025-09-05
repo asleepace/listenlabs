@@ -85,8 +85,7 @@ const savedGame = await loadGameFile({ file });
 const counter = new NightclubGameCounter(savedGame);
 await runGameLoop(savedGame.status).catch(console.warn)
 
-console.log("[game] scenario 3 finished!");
-console.log("================ end ================");
+console.log("=========================================");
 
 //
 // ====================== game loop ======================
@@ -106,12 +105,12 @@ async function runGameLoop(nextStatus: GameStatus): Promise<boolean> {
   console.log(counter.getProgress())
 
   if (next.status === 'failed') {
-    console.warn("================ failed ================");
+    console.warn("================ ❌ ================");
     throw next
   }
 
   if (next.status === "completed") {
-    console.log("================ success ================");
+    console.log("================ ✅ ================");
     console.log(next);
     return true;
   }
