@@ -19,6 +19,11 @@ interface GameCounter {
   admit(status: GameState['status']): boolean;
 }
 
+const CONFIG = {
+  MIN_THRESHOLD: 0.35,
+  TARGET_RANGE: 5_000,
+}
+
 export class NightclubGameCounter implements GameCounter {
   private gameData: GameData;
   private attributeCounts: Record<string, number> = {};
@@ -64,7 +69,7 @@ export class NightclubGameCounter implements GameCounter {
     
     // Dynamic threshold based on how many spots are left
     const progressRatio = this.admittedCount / this.maxCapacity;
-    const baseThreshold = 0.33;
+    const baseThreshold = CONFIG.MIN_THRESHOLD;
     const threshold = baseThreshold * (1 - progressRatio * 0.5); // More lenient early, stricter later
     
     const shouldAdmit = score > threshold;
@@ -128,7 +133,7 @@ export class NightclubGameCounter implements GameCounter {
       
       // Expected progress: where we should be at this point in the line
       // We want to fill quotas by person 5000 (halfway through the line)
-      const targetProgress = Math.min(totalProcessed / 4000, 1.0);
+      const targetProgress = Math.min(totalProcessed / CONFIG.TARGET_RANGE, 1.0);
       const actualProgress = currentCount / constraint.minCount;
       const progressGap = targetProgress - actualProgress;
       
