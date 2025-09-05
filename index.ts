@@ -37,12 +37,9 @@ function getSortedAttributes(
     .reverse() as [keyof Person["attributes"], number][];
 }
 
-function doesSetBHaveAllSetA<T>(setA: Set<T>, setB: Set<T>): boolean {
-  for (const key of setB.values()) {
-    if (setA.has(key)) continue;
-    return false;
-  }
-  return true;
+function getMeanWithoutZeros(numbers: number[]) {
+  const total = numbers.reduce((total, current) => current + total, 0);
+  return total / numbers.length;
 }
 
 const getKeys = (attr: Person["attributes"]) => {
@@ -63,32 +60,31 @@ class GameCounter {
     german_speaker: 0,
   };
 
-  private canLetAnyoneIn = false;
-  private totalEntries = 0;
-  private totalAttributes = 0;
-
-  constructor(initialState: GameState) {
-    // initialize with game constraints
-    for (const constraint of initialState.game.constraints) {
-      this.data[constraint.attribute as keyof Person["attributes"]] = Number(
-        constraint.minCount
-      );
-    }
-
-    this.totalAttributes = Object.keys(this.data).length;
+  private admittedCount = 0;
+  get frequencies() {
+    return this.state.game.attributeStatistics.relativeFrequencies as Record<
+      keyof Person["attributes"],
+      number
+    >;
   }
 
+  // initialize with game constraints
+  constructor(public state: GameState) {
+    for (const constraint of state.game.constraints) {
+      // Number(constraint.minCount);
+      this.data[constraint.attribute as keyof Person["attributes"]] = 0;
+    }
+  }
+
+  // count people to let enter
   public count(person: Person) {
-    if (this.canLetAnyoneIn) return true;
     for (const [key, value] of Object.entries(person.attributes) as [
       keyof Person["attributes"],
       boolean
     ][]) {
       if (value === false) continue;
-      this.data[key]--;
+      this.data[key]++;
     }
-
-    this.canLetAnyoneIn = Object.values(this.data).every((val) => val < 0);
   }
 
   get minPeopleToMeetQuota(): number {
@@ -97,78 +93,88 @@ class GameCounter {
     }, 0);
   }
 
+  calculatePersonScore = (person: Person): number => {
+    if (this.state.status.status !== 'running') throw new Error('not_running')
+
+    const constraints = this.state.game.constraints;
+    const frequencies = this.state.game.attributeStatistics.relativeFrequencies;
+    const currentCounts = this.data;
+    const admittedCount = this.state.status.admittedCount;
+    const remainingSpaces = 1000 - admittedCount;
+  
+    const personVector: number[] = [];
+    const normalizedScores: number[] = [];
+  
+    constraints.forEach((constraint) => {
+      const attr = constraint.attribute as keyof Person["attributes"];
+      
+      if (!person.attributes[attr]) {
+        normalizedScores.push(0);
+        return;
+      }
+  
+      const currentCount = currentCounts[attr] || 0;
+      const remaining = Math.max(0, constraint.minCount - currentCount);
+      
+      if (remaining === 0) {
+        normalizedScores.push(0);
+        return;
+      }
+  
+      // Normalize each component to 0-1 scale
+      const needsRatio = Math.min(remaining / remainingSpaces, 1); // 0-1
+      const rarityScore = 1 - (frequencies[attr] || 0.001); // 0-1 (rare = closer to 1)
+      
+      // Urgency: completion ratio inverted
+      const completionRatio = currentCount / constraint.minCount;
+      const urgencyScore = Math.max(0, 1 - completionRatio); // 0-1
+      
+      // Combine with weights, keep in reasonable range
+      const score = needsRatio * 0.4 + rarityScore * 0.4 + urgencyScore * 0.2;
+      normalizedScores.push(score);
+    });
+  
+    // Sum gives max possible score of (number of attributes)
+    return normalizedScores.reduce((sum, score) => sum + score, 0);
+  };
+  /**
+   * Core game logic here...
+   * @param person 
+   * @returns 
+   */
   public shouldLetIn(person: Person): boolean {
-    /**
-     * NOTE: this is an inner funcion:
-     * @returns
-     */
-    const determineToLetPersonInOrSomething = (): boolean => {
-      // sort attributes in descending order (greatest to smallest)
-      const sortedAttributes = getSortedAttributes(this.data);
+    if (this.state.status.status !== "running") throw new Error("Game not running");
 
-      // the quotas have been met
-      if (sortedAttributes.length === 0) return true;
+    const score = this.calculatePersonScore(person);
+    const remainingSpaces = 1000 - this.state.status.admittedCount;
+    const scorePercent = score / 6.0
+    const spaceRatio = remainingSpaces / 1000; // 1.0 = full capacity, 0.0 = no space
+    const threshold = 0.30 + (0.99 * Math.pow(1 - spaceRatio, 2));
+    const shouldAccept = scorePercent >= threshold;
 
-      // extract a set of the persons attributes
-      const personAttributes = getKeys(person.attributes);
+    console.log({
+      person: person.personIndex,
+      score: Math.round(score * 100) / 100,
+      scorePercent,
+      threshold,
+      decision: shouldAccept,
+      remainingSpaces
+    });
 
-      console.log({
-        sortedAttributes,
-        personAttributes,
-      });
-
-      // if a person has all attributes then accept
-      if (personAttributes.size === this.totalAttributes) {
-        return true;
-      }
-
-      // this is the least common item so we want to grab these too
-      const admitVinylCollector =
-        this.data.vinyl_collector > 0 && person.attributes.vinyl_collector;
-
-      const admitGermainSpeaker = this.data.german_speaker > 0 && person.attributes.german_speaker
-      const admitQueerFriendly = this.data.queer_friendly > 0 && person.attributes.queer_friendly
-      const admitInternational = this.data.international > 0 && person.attributes.international
-
-      if (this.totalEntries < 150 && admitQueerFriendly && admitVinylCollector) {
-        return true
-      }
-
-      if (this.totalEntries < 150 && admitGermainSpeaker && admitInternational) {
-        return true
-      }
-
-      // count the number of keys the person has which need to be filled
-      const totalAttributesFulfilled = sortedAttributes.reduce((total, [key]) => {
-        const hasAttribute = personAttributes.has(key)
-        return total + (hasAttribute ? 1 : 0)
-      }, 0)
-
-      // hope the math starts mathing here...
-      if (this.totalEntries < 50 && totalAttributesFulfilled > 2) {
-        return true
-      }
-      if (this.totalEntries < 250 && totalAttributesFulfilled > 3) {
-        return true
-      }
-      if (this.totalEntries < 500 && totalAttributesFulfilled > 4) {
-        return true
-      }
-
-      // otherwise we want to return if they have them all in common.
-      return totalAttributesFulfilled === sortedAttributes.length
-    };
-
-    if (determineToLetPersonInOrSomething()) {
+    // Only update internal state if accepting
+    if (shouldAccept) {
       this.count(person);
-      return true;
-    } else {
-      return false;
     }
+
+    return shouldAccept;
   }
 
+  // Remove admittedCount tracking - let the game state handle this
+  // Remove the increment from shouldLetIn method
+
   public metrics(status: GameState["status"]) {
-    if (status.status !== "running") throw status;
+    if (status.status !== "running") throw new Error("invalid status");
+    this.state.status = status
     return {
       data: this.data,
       score: status.rejectedCount,
