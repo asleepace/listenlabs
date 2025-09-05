@@ -30,19 +30,12 @@ export async function initialize(props: Parameters<typeof createGame>[0]) {
 
   prettyPrint({ game, status });
 
-  const file = `./game-${game.gameId}.json`
+  const file = `./data/game-${game.gameId}.json`
 
   await saveGameFile({
     file,
       game,
       status,
-      metrics: {
-        data: {
-
-        },
-        total: 0,
-        score: 0,
-      },
   });
 
   return file

@@ -1,7 +1,7 @@
 {
-  "file": "./game-7027e090-0b6d-4b38-ab54-be80b4f25ea0.json",
+  "file": "./data/game-4f981684-80c2-4d4a-8a1b-2d3df4675cb5.json",
   "game": {
-    "gameId": "7027e090-0b6d-4b38-ab54-be80b4f25ea0",
+    "gameId": "4f981684-80c2-4d4a-8a1b-2d3df4675cb5",
     "constraints": [
       {
         "attribute": "underground_veteran",
@@ -91,30 +91,18 @@
   },
   "status": {
     "status": "running",
-    "admittedCount": 999,
-    "rejectedCount": 11,
+    "admittedCount": 1,
+    "rejectedCount": 0,
     "nextPerson": {
-      "personIndex": 1010,
+      "personIndex": 1,
       "attributes": {
         "underground_veteran": true,
-        "international": true,
+        "international": false,
         "fashion_forward": true,
-        "queer_friendly": false,
+        "queer_friendly": true,
         "vinyl_collector": false,
-        "german_speaker": true
+        "german_speaker": false
       }
     }
-  },
-  "metrics": {
-    "data": {
-      "underground_veteran": 679,
-      "international": 563,
-      "fashion_forward": 718,
-      "queer_friendly": 47,
-      "vinyl_collector": 47,
-      "german_speaker": 465
-    },
-    "score": 11,
-    "total": 999
   }
 }
