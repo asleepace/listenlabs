@@ -1,7 +1,7 @@
 import { acceptOrRejectThenGetNext } from "./src/play-game";
 import { initialize, loadGameFile, prettyPrint } from "./src/disk";
 
-import { NightclubGameCounter } from "./src/matrix";
+import { NightclubGameCounter } from "./matrix";
 
 export type GameConstraints = {
   attribute: string;
@@ -83,7 +83,7 @@ console.warn("[game] game file:", file);
 
 const savedGame = await loadGameFile({ file });
 const counter = new NightclubGameCounter(savedGame);
-await runGameLoop(savedGame.status);
+await runGameLoop(savedGame.status).catch(console.warn)
 
 console.log("[game] scenario 3 finished!");
 console.log("================ end ================");
@@ -103,7 +103,7 @@ async function runGameLoop(nextStatus: GameStatus): Promise<boolean> {
     accept,
   });
 
-  prettyPrint(counter.getProgress())
+  console.log(counter.getProgress())
 
   if (next.status === "completed") {
     console.log("================ success ================");

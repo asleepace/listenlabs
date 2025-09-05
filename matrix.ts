@@ -1,4 +1,4 @@
-import type { Keys, GameState, Person } from "..";
+import type { Keys, GameState, Person } from ".";
 
 interface Constraint {
   attribute: string;
@@ -64,7 +64,7 @@ export class NightclubGameCounter implements GameCounter {
     
     // Dynamic threshold based on how many spots are left
     const progressRatio = this.admittedCount / this.maxCapacity;
-    const baseThreshold = 0.3;
+    const baseThreshold = 0.33;
     const threshold = baseThreshold * (1 - progressRatio * 0.5); // More lenient early, stricter later
     
     const shouldAdmit = score > threshold;
@@ -82,12 +82,12 @@ export class NightclubGameCounter implements GameCounter {
   }
 
   get admittedCount() {
-    if (this.state.status.status !== 'running') throw new Error('not_running')
+    if (this.state.status.status !== 'running') throw this.state.status
     return this.state.status.admittedCount
   }
 
   get rejectedCount() {
-    if (this.state.status.status !== 'running') throw new Error('not_running')
+    if (this.state.status.status !== 'running') throw this.state.status
     return this.state.status.rejectedCount
   }
 
@@ -128,7 +128,7 @@ export class NightclubGameCounter implements GameCounter {
       
       // Expected progress: where we should be at this point in the line
       // We want to fill quotas by person 5000 (halfway through the line)
-      const targetProgress = Math.min(totalProcessed / 5000, 1.0);
+      const targetProgress = Math.min(totalProcessed / 4000, 1.0);
       const actualProgress = currentCount / constraint.minCount;
       const progressGap = targetProgress - actualProgress;
       
