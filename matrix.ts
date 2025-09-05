@@ -138,8 +138,9 @@ export class NightclubGameCounter implements GameCounter {
     const rankings = this.gameData.constraints.map((constraint) => {
       const currentCount = this.attributeCounts[constraint.attribute]!
       const totalPeopleWithAttributesWanted = constraint.minCount - currentCount
-      const totalAvailableSpots = CONFIG.MAX_CAPACITY - this.admittedCount
-      const difference = 1 - ((totalAvailableSpots - totalPeopleWithAttributesWanted) / totalAvailableSpots)
+      const frequency = frequencies[constraint.attribute]!
+      const totalAvailableSpots = (CONFIG.MAX_CAPACITY - this.admittedCount) / frequency
+      const difference = 1 - (totalAvailableSpots - totalPeopleWithAttributesWanted) / (totalAvailableSpots)
       return {
         attribute: constraint.attribute as Keys,
         neededCount: totalPeopleWithAttributesWanted,
