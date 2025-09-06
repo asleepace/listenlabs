@@ -21,14 +21,14 @@ interface GameCounter {
 
 const CONFIG = {
   // Admission threshold settings
-  MIN_THRESHOLD: 0.5, // Base admission score threshold (0.35 = moderately lenient)
-  THRESHOLD_RAMP: 0.5, // How quickly threshold decreases as we fill up (0.48 = gradual tightening)
+  MIN_THRESHOLD: 0.70, // Base admission score threshold (0.35 = moderately lenient)
+  THRESHOLD_RAMP: 0.30, // How quickly threshold decreases as we fill up (0.48 = gradual tightening)
 
   // Quota completion targets
-  TARGET_RANGE: 5000, // Aim to complete all quotas by person #4000 (out of 10,000)
+  TARGET_RANGE: 4000, // Aim to complete all quotas by person #4000 (out of 10,000)
 
   // Scoring weights
-  URGENCY_MODIFIER: 2.1, // Multiplier for how much being behind schedule matters
+  URGENCY_MODIFIER: 2.2, // Multiplier for how much being behind schedule matters
   CORRELATION_BONUS: 0.3, // Bonus for positive correlations between needed attributes
   NEGATIVE_CORRELATION_BONUS: 0.5, // Bonus for rare combinations (negatively correlated but both needed)
   NEGATIVE_CORRELATION_THRESHOLD: -0.5, // Correlation below this triggers special handling
@@ -65,6 +65,7 @@ export class NightclubGameCounter implements GameCounter {
       return false;
     }
 
+    const progress = this.getProgress()
     const spotsLeft = this.maxCapacity - this.admittedCount;
     const peopleInLineLeft =
       this.totalPeople - this.admittedCount - this.rejectedCount;
@@ -89,7 +90,19 @@ export class NightclubGameCounter implements GameCounter {
     const threshold =
       baseThreshold * (1 - progressRatio * CONFIG.THRESHOLD_RAMP); // More lenient early, stricter later
 
-    const shouldAdmit = score > threshold;
+    const hasEveryAttribute = progress.quotas.every((item) => personAttributes[item.attribute])
+
+    let isInCriticalZone = false
+    const hasCriticalAttributes = progress.quotas.every((quota) => {
+      if (quota.needed < 0) return true
+      const isLessThan20 = (spotsLeft - quota.needed) <= 20
+      if (isLessThan20) {
+        isInCriticalZone = true
+      }
+      return isLessThan20
+    })
+
+    const shouldAdmit = isInCriticalZone ? hasCriticalAttributes : ((score >= threshold) || hasEveryAttribute)
 
     if (shouldAdmit) {
       // Update counts for admitted person
@@ -134,15 +147,20 @@ export class NightclubGameCounter implements GameCounter {
     const { admittedCount, rejectedCount } = this.state.status;
     const totalProcessed = admittedCount + rejectedCount;
 
+    const progress = this.getProgress()
+    const totalQuotasMet = progress.quotas.length
+
     // Calculate score for each attribute the person has
     this.gameData.constraints.forEach((constraint) => {
       const attr = constraint.attribute;
 
       if (!attributes[attr]) return;
+      if ((attr as Keys) === 'underground_veteran') return // fuck 'em
 
       const currentCount = this.attributeCounts[attr]!;
       const needed = constraint.minCount - currentCount;
 
+      if (totalQuotasMet < 3 && needed < 50) return
       if (needed <= 0) return; // Quota already met
 
       const frequency = frequencies[attr] || 0.5;
@@ -221,23 +239,26 @@ export class NightclubGameCounter implements GameCounter {
 
   // Helper method to check current progress
   getProgress(): {
-    quotasMet: Record<string, boolean>;
+    quotas: { attribute: Keys; needed: number }[];
     quotaProgress: Record<string, number>;
     admissionRate: number;
     admitted: number;
     rejected: number;
   } {
-    const quotasMet: Record<string, boolean> = {};
+    const quotas: { attribute: Keys; needed: number }[] = [];
     const quotaProgress: Record<string, number> = {};
 
     this.gameData.constraints.forEach((constraint) => {
       const attr = constraint.attribute;
-      quotasMet[attr] = this.attributeCounts[attr]! >= constraint.minCount;
+      const quota = constraint.minCount - this.attributeCounts[attr]!;
+      if (quota > 0) {
+        quotas.push({ attribute: attr as Keys, needed: quota })
+      }
       quotaProgress[attr] = this.attributeCounts[attr]! / constraint.minCount;
     });
 
     return {
-      quotasMet,
+      quotas: quotas.toSorted((a, b) => a.needed - b.needed),
       quotaProgress,
       admissionRate:
         this.admittedCount / (this.admittedCount + this.rejectedCount),
