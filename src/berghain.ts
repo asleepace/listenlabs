@@ -12,12 +12,6 @@ export interface BergainBouncer {
   getOutput(): any
 }
 
-class MissingGameID extends Error {
-  constructor() {
-    super('MISSING_GAME_ID: Missing or invalid gameId!')
-  }
-}
-
 class MissingCurrentState extends Error {
   constructor() {
     super('MISSING_CURRENT_GAME: Make sure to create or load a game first!')
@@ -116,6 +110,14 @@ export class Berghain {
     endpoint.searchParams.set('playerId', this.config.uniqueId)
     endpoint.searchParams.set('scenario', this.config.scenario)
     const game = await this.fetch<Game>(endpoint)
+
+    console.log('[game] created new game:')
+    prettyPrint(game)
+
+    if (!game.gameId) {
+      throw game
+    }
+
     const status = await this.acceptOrRejectThenGetNext({
       index: 0,
       accept: true,
