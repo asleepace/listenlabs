@@ -465,9 +465,12 @@ export class NightclubGameCounter implements GameCounter {
         const estimatedPeopleLeftInLine =
           peopleInLineLeft * this.getFrequency(current.attribute)
 
-        // check if at thresholds...
+        // check if at thresholds... (maybe backwards?)
+        /**
+         * @testing was >=
+         */
         const isCriticalLineThreshold =
-          estimatedPeopleLeftInLine >= criticalLineThreshold
+          estimatedPeopleLeftInLine <= criticalLineThreshold
 
         const isCriticalCapacityThreshold =
           peopleNeeded >= criticalCapacityThreshold
@@ -571,7 +574,7 @@ export class NightclubGameCounter implements GameCounter {
      * check total progress and spots left
      */
     const spotsLeft = this.totalSpotsLeft
-    const totalSpotsLeft = this.estimatedPeopleInLineLeft
+    const peopleLeftInLine = this.estimatedPeopleInLineLeft
     this.criticalAttributes = this.getCriticalAttributes()
 
     const criticalKeys = Object.keys(this.criticalAttributes) as Keys[]
@@ -607,7 +610,7 @@ export class NightclubGameCounter implements GameCounter {
         const currentCount = this.getCount(constraint.attribute)
         const totalNeeded = constraint.minCount - currentCount
         if (totalNeeded < 1) return total + 1
-        const attrProgress = currentCount / totalNeeded
+        const attrProgress = totalNeeded > 0 ? currentCount / totalNeeded : 1
         return total + attrProgress
       }, 0) / this.constraints.length
 
