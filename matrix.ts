@@ -177,7 +177,7 @@ const CONFIG = {
    * @range 0.2 to 0.7
    * @default 0.7
    */
-  MIN_THRESHOLD: 0.72, // (less = moderately lenient, 0.7=default)
+  MIN_THRESHOLD: 0.79, // (less = moderately lenient, 0.7=default)
   /**
    * How quickly threshold decreases as we fill up, lesser for gradual tightening.
    * Lower = consistent threshold throughout
@@ -195,7 +195,7 @@ const CONFIG = {
    * @default 4000 (people)
    * @note current best score on leaderboard.
    */
-  TARGET_RANGE: 4000,
+  TARGET_RANGE: 6000,
 
   /**
    * Multiplier for how much being behind schedule matters.
@@ -525,9 +525,17 @@ export class NightclubGameCounter implements GameCounter {
      * check if we have any required critical attributes.
      * @testing
      */
+    let totalCriticalAttributes = 0
+    let possesedCriticalAttribute = 0
     for (const [attrKey, critical] of Object.entries(this.criticalAttributes)) {
       if (!critical.required) continue
-      if (!personAttributes[attrKey as Keys]) return false
+      totalCriticalAttributes++
+      if (!personAttributes[attrKey as Keys]) continue
+      possesedCriticalAttribute++
+    }
+
+    if (totalCriticalAttributes && !possesedCriticalAttribute) {
+      return false
     }
 
     /**
