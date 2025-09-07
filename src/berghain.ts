@@ -73,7 +73,7 @@ export class Berghain {
   private createBouncer?: (initialState: GameState) => BergainBouncer
   private bouncer?: BergainBouncer
   private current?: GameState
-  private maxRetries = 10
+  private maxRetries = 1
 
   constructor(private config: ListenLabsConfig) {}
 
@@ -111,10 +111,15 @@ export class Berghain {
     endpoint.searchParams.set('scenario', this.config.scenario)
     const game = await this.fetch<Game>(endpoint)
 
+    // @ts-ignore
+    this.current = {
+      game,
+    }
+
     console.log('[game] created new game:')
     prettyPrint(game)
 
-    if (!game.gameId) {
+    if (!game || !game.gameId) {
       throw game
     }
 
