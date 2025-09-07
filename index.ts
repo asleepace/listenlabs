@@ -79,12 +79,12 @@ export type Keys = keyof Person['attributes']
 console.log('================ starting ================')
 console.warn('[game] triggering new game!')
 
-const file = await initialize({ scenario: '3' })
-console.warn('[game] game file:', file)
+const game = await initialize({ scenario: '3' })
+console.warn('[game] game file:', game)
 
-const savedGame = await loadGameFile({ file })
-const counter = new NightclubGameCounter(savedGame)
-await runGameLoop(savedGame.status).catch(console.warn)
+// const savedGame = await loadGameFile({ file })
+const counter = new NightclubGameCounter(game)
+await runGameLoop(game.status).catch(console.warn)
 
 console.log('=========================================')
 
@@ -105,12 +105,12 @@ async function runGameLoop(nextStatus: GameStatus): Promise<boolean> {
 
   console.log(counter.getProgress())
 
-  if (next.status !== 'completed') {
-    saveGameFile({
-      ...savedGame,
-      output: counter.getGameData(),
-    }).catch(() => {})
-  }
+  // if (next.status !== 'completed') {
+  //   saveGameFile({
+  //     ...,game,
+  //     output: counter.getGameData(),
+  //   }).catch(() => {})
+  // }
 
   if (next.status === 'failed') {
     console.warn('================ ❌ ================')
@@ -120,7 +120,7 @@ async function runGameLoop(nextStatus: GameStatus): Promise<boolean> {
   if (next.status === 'completed') {
     console.log('================ ✅ ================')
     const scoreFile = Bun.file(`./scores-${+new Date()}.json`)
-    scoreFile.write(JSON.stringify(counter.getGameData(), null, 2))
+    // scoreFile.write(JSON.stringify(counter.getGameData(), null, 2))
     console.log(next)
     return true
   }
