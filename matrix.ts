@@ -215,7 +215,7 @@ const CONFIG = {
    * Bonus for rare combinations (negatively correlated but both needed).
    * @default 0.5
    */
-  NEGATIVE_CORRELATION_BONUS: 0.6,
+  NEGATIVE_CORRELATION_BONUS: 0.7,
   /**
    * Correlation below this triggers special handling.
    * @range -0.7 to -0.3
@@ -698,10 +698,18 @@ export class NightclubGameCounter implements GameCounter {
       // Risk factor: can we afford to wait?
       const riskFactor = needed / Math.max(expectedRemaining, 1)
 
-      // TODO: add close to zero value?
+      /**
+       * @testing improve score of critical attributes.
+       */
+      const criticalBonus = attr in this.criticalAttributes ? 1.5 : 1
 
       // Component score combines all factors
       let componentScore = (urgency + riskFactor) * Math.log(scarcityFactor + 1)
+
+      /**
+       * @testing
+       */
+      componentScore *= criticalBonus
 
       // Special boost for attributes that need above their natural rate
       const quotaRate = constraint.minCount / CONFIG.MAX_CAPACITY
