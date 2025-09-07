@@ -195,7 +195,9 @@ const CONFIG = {
    * @range 0.2 to 0.7
    * @default 0.7
    */
-  MIN_THRESHOLD: 0.75, // (less = moderately lenient, 0.7=default)
+  BASE_THRESHOLD: 0.5,
+  MIN_THRESHOLD: 0.05, // (less = moderately lenient, 0.7=default)
+  MAX_THRESHOLD: 0.95,
   /**
    * How quickly threshold decreases as we fill up, lesser for gradual tightening.
    * Lower = consistent threshold throughout
@@ -572,12 +574,17 @@ export class NightclubGameCounter implements GameCounter {
     const progressDelta = totalProgress - progressRatio
 
     // Elastic threshold that responds to the delta
-    const baseThreshold = 0.4 // Neutral point
     const sensitivity = 5.0 // How much to adjust (tune this)
 
+    /**
+     * @testing this was CONFIG.BASE_THRESHOLD + progressDelta * sensitivity
+     */
     const threshold = Math.max(
-      0.05,
-      Math.min(0.95, baseThreshold + progressDelta * sensitivity)
+      CONFIG.MIN_THRESHOLD,
+      Math.min(
+        CONFIG.MAX_THRESHOLD,
+        CONFIG.BASE_THRESHOLD - progressDelta * sensitivity
+      )
     )
 
     return threshold
