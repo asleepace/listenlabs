@@ -572,8 +572,8 @@ export class NightclubGameCounter implements GameCounter {
     const progressDelta = totalProgress - progressRatio
 
     // Elastic threshold that responds to the delta
-    const baseThreshold = 0.5 // Neutral point
-    const sensitivity = 2.0 // How much to adjust (tune this)
+    const baseThreshold = 0.4 // Neutral point
+    const sensitivity = 5.0 // How much to adjust (tune this)
 
     const threshold = Math.max(
       0.05,
@@ -664,9 +664,8 @@ export class NightclubGameCounter implements GameCounter {
     this.info['unicorns'] = hasEveryAttribute
       ? ++this.totalUnicorns
       : this.totalUnicorns
-    this.info['last_score'] = score
-    this.info['best_score'] = Math.max(this.info['best_score'] ?? 0, score)
-    this.info['lows_score'] = this.lowestAcceptedScore
+    this.info['prev_accepted_score'] = Stats.round(this.totalScores.at(-1) || 0)
+    this.info['last_score'] = Stats.round(score)
     this.info['avrg_score'] = Stats.average(this.totalAdmittedScores)
     this.info['progress_ratio'] = Stats.round(progressRatio, 10_000)
     this.info['threshold'] = threshold
