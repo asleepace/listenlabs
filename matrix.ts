@@ -155,7 +155,7 @@ const CONFIG = {
    * @range 0.2 to 0.7
    * @default 0.7
    */
-  MIN_THRESHOLD: 0.75, // (less = moderately lenient, 0.7=default)
+  MIN_THRESHOLD: 0.6, // (less = moderately lenient, 0.7=default)
   /**
    * How quickly threshold decreases as we fill up, lesser for gradual tightening.
    * Lower = consistent threshold throughout
@@ -241,7 +241,12 @@ const CONFIG = {
    * Percentage of remaining people we need to fill quota.
    * @default 0.75 (75% percent)
    */
-  CRITICAL_RATIO: 0.75,
+  CRITICAL_IN_LINE_RATIO: 0.75,
+
+  /**
+   * Percentage of remaining spots needed.
+   */
+  CRITICAL_CAPACITY_RATIO: 0.8,
 
   /**
    * Arbitrary max value to guarentee admission.
@@ -283,6 +288,8 @@ export class NightclubGameCounter implements GameCounter {
     mode: 0,
   }
 
+  public criticalAttributes: Partial<Record<Keys, number>> = {}
+
   constructor(initialData: GameState) {
     this.gameData = initialData.game
     this.state = initialData
@@ -290,6 +297,7 @@ export class NightclubGameCounter implements GameCounter {
       this.attributeCounts[constraint.attribute] = 0
     })
     this.progress = this.getProgress()
+    this
   }
 
   // getters
@@ -321,37 +329,6 @@ export class NightclubGameCounter implements GameCounter {
   }
 
   /**
-   * Ratio of people already admitted over max capicity.
-   * @note closer to 1.0 means more full
-   */
-  private get progressRatio(): number {
-    return this.admittedCount / this.maxCapacity
-  }
-
-  /**
-   * Get total number of attributes needed to fulfill the quotas.
-   */
-  // private get totalAttributesNeeded(): number {
-  //   return this.constraints.reduce((total, score) => {
-  //     const currentCount = this.attributeCounts[score.attribute]!
-  //     if (currentCount < 0) return total
-  //     const totalNeeded = score.minCount - currentCount
-  //     const frequency = this.frequencies[score.attribute] || 0.5
-  //     return total + totalNeeded * (1 - frequency)
-  //   }, 0)
-  // }
-
-  /**
-   * Check how many quotas have been filled.
-   */
-  private get totalQuotasFulfilled(): number {
-    return this.progress.quotas.reduce((total, quota) => {
-      const isFulfilled = quota.needed <= 0
-      return total + (isFulfilled ? 1 : 0)
-    }, 0)
-  }
-
-  /**
    * True when all quotas have been fulfilled.
    */
   private get allQuotasMet(): boolean {
@@ -360,16 +337,6 @@ export class NightclubGameCounter implements GameCounter {
         this.attributeCounts[constraint.attribute]! >= constraint.minCount
     )
   }
-
-  /**
-   * Check if any of the quotas are near the spots remaining.
-   */
-  // private get criticalAttributes(): GameQuota[] {
-  //   return this.progress.quotas.filter((quota) => {
-  //     if (quota.needed <= 0) return false
-  //     return this.totalSpotsLeft - quota.needed < CONFIG.CRITICAL_THRESHOLD
-  //   })
-  // }
 
   /**
    * Get the current average score (with normalized values 0.0 to 1.0)
@@ -381,33 +348,85 @@ export class NightclubGameCounter implements GameCounter {
   }
 
   /**
+   * Total number of people admitted.
+   */
+  get admittedCount() {
+    if (this.state.status.status !== 'running') throw this.state.status
+    return this.state.status.admittedCount
+  }
+
+  /**
+   * Total number of people rejected.
+   */
+  get rejectedCount() {
+    if (this.state.status.status !== 'running') throw this.state.status
+    return this.state.status.rejectedCount
+  }
+
+  /**
+   * Get the current number of people with the attribute already admited.
+   */
+  public getCount(attribute: Keys | string): number {
+    if (!(attribute in this.attributeCounts))
+      throw new Error(`Missing attribute count for: ${attribute}`)
+    return this.attributeCounts[attribute] ?? 0
+  }
+
+  public getCorrelations(attribute: Keys | string) {
+    if (!(attribute in this.correlations))
+      throw new Error(`Missing correlation for: ${attribute}`)
+    return this.correlations[attribute]!
+  }
+
+  public getFrequency(attribute: Keys | string): number {
+    if (!(attribute in this.frequencies))
+      throw new Error(`Missing frequency for: ${attribute}`)
+    return this.frequencies[attribute]!
+  }
+
+  /**
    * Get the total number of people left to fill the attributes quota.
    */
-  private getPeopleNeeded(attribute: Keys): number {
+  private getPeopleNeeded(attribute: Keys | string): number {
     const constraint = this.constraints.find(
       (constraint) => constraint.attribute === attribute
     )
     if (!constraint) throw new Error('Missing constraint for:' + attribute)
-    const totalPeople = constraint.minCount - this.attributeCounts[attribute]!
-    return Math.max(totalPeople, 0)
+    const totalPeople = constraint.minCount - this.getCount(attribute)
+    return totalPeople > 0 ? totalPeople : 0
   }
 
   /**
-   * If we need more than 80% of expected remaining for quota, it's critical.
+   * If we need more than 80% of expected remaining people for quota, or
+   * we need 90% of total spot available.
    */
-  private getCriticalAttributes(): Map<Keys, number> {
+  private getCriticalAttributes(): Record<Keys, number> {
     const peopleInLineLeft = this.estimatedPeopleInLineLeft
-    const criticalAttributes = new Map<Keys, number>()
-    this.gameData.constraints.forEach((constraint) => {
-      const peopleNeeded = this.getPeopleNeeded(constraint.attribute as Keys)
-      const frequency = this.frequencies[constraint.attribute]!
-      const expectedPeopleInLine = peopleInLineLeft * frequency
-      const criticalLimit = expectedPeopleInLine * CONFIG.CRITICAL_RATIO
-      if (peopleNeeded > criticalLimit) {
-        criticalAttributes.set(constraint.attribute as Keys, peopleNeeded)
+    const criticalLineThreshold =
+      peopleInLineLeft * CONFIG.CRITICAL_IN_LINE_RATIO
+    const criticalCapacityThreshold =
+      this.totalSpotsLeft * CONFIG.CRITICAL_CAPACITY_RATIO
+
+    return this.gameData.constraints.reduce((output, current) => {
+      const peopleNeeded = this.getPeopleNeeded(current.attribute)
+      if (!peopleNeeded) return output
+
+      const estimatedPeopleLeftInLine =
+        peopleInLineLeft * this.getFrequency(current.attribute)
+
+      // check if at thresholds...
+      const isCriticalLineThreshold =
+        estimatedPeopleLeftInLine >= criticalLineThreshold
+
+      const isCriticalCapacityThreshold =
+        peopleNeeded >= criticalCapacityThreshold
+
+      if (isCriticalLineThreshold || isCriticalCapacityThreshold) {
+        return { ...output, [current.attribute as Keys]: peopleNeeded }
+      } else {
+        return output
       }
-    })
-    return criticalAttributes
+    }, {} as Record<Keys, number>)
   }
 
   /**
@@ -441,6 +460,9 @@ export class NightclubGameCounter implements GameCounter {
      */
     const spotsLeft = this.totalSpotsLeft
     const peopleInLineLeft = this.estimatedPeopleInLineLeft
+    this.criticalAttributes = this.getCriticalAttributes()
+
+    const criticalKeys = Object.keys(this.criticalAttributes) as Keys[]
 
     /**
      * if at capacity reject everyone
@@ -473,25 +495,20 @@ export class NightclubGameCounter implements GameCounter {
       CONFIG.MIN_THRESHOLD * (1 - progressRatio * CONFIG.THRESHOLD_RAMP)
 
     /**
-     * current attributes at or below the critical threshold (running out of room)
-     */
-    const criticalAttributes = this.getCriticalAttributes()
-    const criticalAttributeKeys = [...criticalAttributes.keys()]
-
-    /**
      * update generic game information for debugging.
      */
     this.totalScores.push(score)
     this.info['last_score'] = score
     this.info['best_score'] = Math.max(this.info['best_score'] ?? 0, score)
     this.info['avrg_score'] = this.averageScore
-    this.info['critical_attributes'] = criticalAttributes
     this.info['threshold'] = threshold
+    this.info['critical_attributes'] = criticalKeys
 
     /**
      * person is a unicorn and has all critical attributes.
      */
-    const hasEveryCriticalAttribute = criticalAttributeKeys.every(
+
+    const hasEveryCriticalAttribute = criticalKeys.every(
       (attrKey) => personAttributes[attrKey]
     )
 
@@ -512,41 +529,6 @@ export class NightclubGameCounter implements GameCounter {
   }
 
   /**
-   * Total number of people admitted.
-   */
-  get admittedCount() {
-    if (this.state.status.status !== 'running') throw this.state.status
-    return this.state.status.admittedCount
-  }
-
-  /**
-   * Total number of people rejected.
-   */
-  get rejectedCount() {
-    if (this.state.status.status !== 'running') throw this.state.status
-    return this.state.status.rejectedCount
-  }
-
-  /**
-   * Get the current number of people with the attribute already admited.
-   */
-  public getCount(attribute: Keys): number {
-    return this.attributeCounts[attribute] ?? 0
-  }
-
-  public getCorrelations(attribute: Keys) {
-    if (!this.correlations[attribute])
-      throw new Error(`Missing correlation for: ${attribute}`)
-    return this.correlations[attribute]!
-  }
-
-  public getFrequency(attribute: Keys): number {
-    if (!this.frequencies[attribute])
-      throw new Error(`Missing frequency for: ${attribute}`)
-    return this.frequencies[attribute]!
-  }
-
-  /**
    * This returns an estimate of the number of people left in line with the given
    * attribute, this is calculated by:
    *
@@ -557,13 +539,14 @@ export class NightclubGameCounter implements GameCounter {
    * NOTE: This can be overly pessimistic, but prevents impossible game states.
    */
   public getEstimatedPeopleWithAttributeLeftInLine(attribute: Keys) {
-    const peopleInLineLeft = this.estimatedPeopleInLineLeft
-    const attributesCorrelations = this.correlations[attribute]!
+    const attributesCorrelations = this.getCorrelations(attribute)
     const attributeFrequency = this.getFrequency(attribute)
     const totalPeopleLeftInLine = this.gameData.constraints.reduce(
       (total, other) => {
         // skip current attribute
         if (attribute === other.attribute) return total
+        // skip if non-critical other attribute
+        if (!(other.attribute in this.criticalAttributes)) return total
         // check if any other constraints are negatively correlated
         if (attributesCorrelations[other.attribute]! < 0) return total
         // calculate total number of other people neded
@@ -576,7 +559,7 @@ export class NightclubGameCounter implements GameCounter {
         // substract negative correlated people
         return total - otherNeeded * (1 - frequency)
       },
-      peopleInLineLeft
+      this.estimatedPeopleInLineLeft
     )
     // assume that the person will show up by their frequency
     return totalPeopleLeftInLine * attributeFrequency
@@ -725,9 +708,7 @@ export class NightclubGameCounter implements GameCounter {
 
     const progress: GameProgress = {
       info,
-      critical: (critical_attributes as GameQuota[]).map(
-        (item) => item.attribute
-      ),
+      critical: critical_attributes,
       config: CONFIG,
       quotas: quotas.toSorted((a, b) => a.needed - b.needed),
       quotaProgress,
