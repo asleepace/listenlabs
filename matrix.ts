@@ -466,11 +466,8 @@ export class NightclubGameCounter implements GameCounter {
           peopleInLineLeft * this.getFrequency(current.attribute)
 
         // check if at thresholds... (maybe backwards?)
-        /**
-         * @testing was >=
-         */
         const isCriticalLineThreshold =
-          estimatedPeopleLeftInLine <= criticalLineThreshold
+          estimatedPeopleLeftInLine >= criticalLineThreshold
 
         const isCriticalCapacityThreshold =
           peopleNeeded >= criticalCapacityThreshold
