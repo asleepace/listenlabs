@@ -562,13 +562,11 @@ export class NightclubGameCounter implements GameCounter {
      *  if behind this will be negative (e.g. -1.02 -> 1.04 -> 1 - 1.04 = 0.96)
      */
     const progressSchedule =
-      totalProgress > 0
-        ? totalProgress
-        : Math.abs(1 - Math.pow(totalProgress, 2))
+      totalProgress > 0 ? totalProgress : 1 - Math.abs(totalProgress)
 
     // const threshold =
     //   CONFIG.MIN_THRESHOLD * (1 - totalProgress * CONFIG.THRESHOLD_RAMP)
-    const threshold = CONFIG.MIN_THRESHOLD * (1 - progressSchedule)
+    const threshold = Math.abs(1 - progressSchedule)
 
     /**
      * check if person has all attributes.
