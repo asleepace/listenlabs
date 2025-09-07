@@ -1,7 +1,7 @@
 {
-  "file": "./data/game-37c124f3-543c-46db-8148-b7a2aa8781b9.json",
+  "file": "./data/game-c74870f5-9f17-40f4-ae07-8a898df8f4e8.json",
   "game": {
-    "gameId": "37c124f3-543c-46db-8148-b7a2aa8781b9",
+    "gameId": "c74870f5-9f17-40f4-ae07-8a898df8f4e8",
     "constraints": [
       {
         "attribute": "underground_veteran",
@@ -96,12 +96,12 @@
     "nextPerson": {
       "personIndex": 1,
       "attributes": {
-        "underground_veteran": true,
-        "international": true,
+        "underground_veteran": false,
+        "international": false,
         "fashion_forward": true,
         "queer_friendly": false,
         "vinyl_collector": false,
-        "german_speaker": false
+        "german_speaker": true
       }
     }
   }

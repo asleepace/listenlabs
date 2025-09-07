@@ -1,7 +1,7 @@
 {
-  "file": "./data/game-61075126-60e6-4e84-8b12-00eb0dd46671.json",
+  "file": "./data/game-32250f56-bbb4-43b8-90a2-bc8e9106a8fe.json",
   "game": {
-    "gameId": "61075126-60e6-4e84-8b12-00eb0dd46671",
+    "gameId": "32250f56-bbb4-43b8-90a2-bc8e9106a8fe",
     "constraints": [
       {
         "attribute": "underground_veteran",
@@ -98,7 +98,7 @@
       "attributes": {
         "underground_veteran": true,
         "international": false,
-        "fashion_forward": true,
+        "fashion_forward": false,
         "queer_friendly": false,
         "vinyl_collector": false,
         "german_speaker": true
