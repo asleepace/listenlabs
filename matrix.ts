@@ -567,8 +567,8 @@ export class NightclubGameCounter implements GameCounter {
     // When on track: threshold = 0.5
     // Smooth S-curve transition
     // Bounded between 0.0 and 1.0
-    const threshold =
-      (1.0 + Math.tanh(1.0 - totalProgress / progressRatio)) / 2.0
+    const sigmoid = (1.0 + Math.tanh(1.0 - totalProgress / progressRatio)) / 2.0
+    const threshold = 1.0 - sigmoid
 
     // Option 3: Simple reciprocal with floor
     // Linear-ish but handles high values well
