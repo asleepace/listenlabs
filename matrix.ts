@@ -28,7 +28,6 @@ interface GameProgress {
   config: typeof CONFIG
   critical: string[]
   quotas: GameQuota[]
-  quotaProgress: Record<string, number>
   admissionRate: number
   admitted: number
   rejected: number
@@ -195,7 +194,7 @@ const CONFIG = {
    * @range 0.2 to 0.7
    * @default 0.7
    */
-  BASE_THRESHOLD: 0.5,
+  BASE_THRESHOLD: 0.45,
   MIN_THRESHOLD: 0.45,
   MAX_THRESHOLD: 0.95,
   /**
@@ -276,18 +275,18 @@ const CONFIG = {
    * Percentage of remaining people we need to fill quota.
    * @default 0.75 (75% percent)
    */
-  CRITICAL_IN_LINE_RATIO: 0.75,
+  CRITICAL_IN_LINE_RATIO: 0.8,
 
   /**
    * Percentage of remaining spots needed.
    * @default 0.8 (80% full)
    */
-  CRITICAL_CAPACITY_RATIO: 0.9,
+  CRITICAL_CAPACITY_RATIO: 0.8,
 
   /**
    * Number of scores needed for calculations.
    */
-  MIN_RAW_SCORES: 10,
+  MIN_RAW_SCORES: 5,
 }
 
 /**
@@ -459,6 +458,8 @@ export class NightclubGameCounter implements GameCounter {
     const criticalCapacityThreshold =
       totalSpotsLeft * CONFIG.CRITICAL_CAPACITY_RATIO
 
+    const totalQuotas = this.gameData.constraints.length
+
     this.criticalAttributes = this.gameData.constraints.reduce(
       (output, current) => {
         const peopleNeeded = this.getPeopleNeeded(current.attribute)
@@ -475,8 +476,9 @@ export class NightclubGameCounter implements GameCounter {
           peopleNeeded >= criticalCapacityThreshold
 
         if (isCriticalLineThreshold || isCriticalCapacityThreshold) {
-          const isRequired =
-            peopleNeeded + CONFIG.CRITICAL_REQUIRED_THRESHOLD >= totalSpotsLeft
+          // add some padding early on in game and reduce as quotas are me
+          const stagePadding = Math.round(totalQuotas / this.totalQuotasMet)
+          const isRequired = peopleNeeded + stagePadding >= totalSpotsLeft
 
           return {
             ...output,
@@ -517,6 +519,9 @@ export class NightclubGameCounter implements GameCounter {
     })
   }
 
+  /**
+   * @deprecated
+   */
   private normalizeScore(rawScore: number): number {
     if (this.rawScores.length < CONFIG.MIN_RAW_SCORES) {
       // Early game: simple scaling
@@ -557,6 +562,9 @@ export class NightclubGameCounter implements GameCounter {
     return Math.max(0.05, Math.min(0.95, 1.0 - sigmoid))
   }
 
+  /**
+   * @deprecated
+   */
   private getElasticThreshold(progressRatio: number) {
     const totalProgress =
       this.constraints.reduce((total, constraint) => {
@@ -586,6 +594,57 @@ export class NightclubGameCounter implements GameCounter {
         CONFIG.BASE_THRESHOLD - progressDelta * sensitivity
       )
     )
+
+    return threshold
+  }
+
+  /**
+   * calculate total quota progress
+   * @testing
+   */
+  private getTotalProgess() {
+    return (
+      this.constraints.reduce((total, constraint) => {
+        const currentCount = this.getCount(constraint.attribute)
+        if (currentCount >= constraint.minCount) return total + 1
+
+        // Progress = what we have / what we need total
+        const attrProgress = currentCount / constraint.minCount
+        return total + attrProgress
+      }, 0) / this.constraints.length
+    )
+  }
+
+  /**
+   * calculate total progress vs esitmate
+   * @testing
+   */
+  private getProgressThreshold() {
+    const totalProcessed = this.admittedCount + this.rejectedCount
+
+    // Where should we be in quota completion by now?
+    const expectedProgress = Math.min(totalProcessed / CONFIG.TARGET_RANGE, 1.0)
+    const progressRatio = this.admittedCount / this.maxCapacity
+    const totalProgress = this.getTotalProgess()
+    const sensitivity = 2.0
+
+    // Combined progress gap
+    const combinedDelta =
+      (totalProgress - progressRatio) * 0.8 + // capacity weight
+      (totalProgress - expectedProgress) * 0.4 // timeline weight
+
+    const threshold = Math.max(
+      CONFIG.MIN_THRESHOLD,
+      Math.min(
+        CONFIG.MAX_THRESHOLD,
+        CONFIG.BASE_THRESHOLD - combinedDelta * sensitivity
+      )
+    )
+
+    this.info['progress_ratio'] = Stats.round(progressRatio, 10_000)
+    this.info['progress_expected'] = Stats.round(expectedProgress, 10_000)
+    this.info['progress_total'] = Stats.round(totalProgress, 10_000)
+    this.info['threshold'] = Stats.round(threshold, 10_000)
 
     return threshold
   }
@@ -625,6 +684,16 @@ export class NightclubGameCounter implements GameCounter {
     const personAttributes = nextPerson.attributes
 
     /**
+     * if spots less than 20 make sure we meet required quotas.
+     * @testing
+     */
+    if (spotsLeft < 20) {
+      for (const [key, value] of Object.entries(this.criticalAttributes)) {
+        if (value.required && !personAttributes[key as Keys]) return false
+      }
+    }
+
+    /**
      * Calculate admission score
      */
     let score = this.calculateAdmissionScore(personAttributes)
@@ -632,14 +701,22 @@ export class NightclubGameCounter implements GameCounter {
     /**
      * dynamic threshold based on how many spots are left
      */
-    const progressRatio = this.admittedCount / this.maxCapacity
+    // const progressRatio = this.admittedCount / this.maxCapacity
+
+    // Expected progress: where we should be at this point in the line
+    // We want to fill quotas by person 5000 (halfway through the line)
+    // const totalProcessed = this.admittedCount + this.rejectedCount
+    // const targetProgress = Math.min(totalProcessed / CONFIG.TARGET_RANGE, 1.0)
+    // const actualProgress = this.admittedCount / CONFIG.MAX_CAPACITY
+    // const progressGrap = targetProgress - actualProgress
+    // const progressRatio = Math.max(actualProgress, targetProgress)
 
     /**
      * Should be easier to get in if we are ahead on quotas,
      * Should be harder to get in if we are behind in qoutas.
      * @testing dynamic schedule.
      */
-    const threshold = this.getElasticThreshold(progressRatio)
+    const threshold = this.getProgressThreshold()
 
     // const threshold =
     //   CONFIG.MIN_THRESHOLD * (1 - totalProgress * CONFIG.THRESHOLD_RAMP)
@@ -651,6 +728,11 @@ export class NightclubGameCounter implements GameCounter {
       (constraint) => personAttributes[constraint.attribute as Keys] === true
     )
 
+    // just for logging...
+    if (hasEveryAttribute) {
+      this.totalUnicorns++
+    }
+
     /**
      * person is a unicorn and has all critical attributes.
      */
@@ -658,30 +740,25 @@ export class NightclubGameCounter implements GameCounter {
       criticalKeys.length > 0 &&
       criticalKeys.every((attrKey) => personAttributes[attrKey])
 
-    const isEarlyGame = this.admittedCount <= CONFIG.MIN_RAW_SCORES
-    const isValidCombo =
-      personAttributes.international &&
-      (personAttributes.queer_friendly || personAttributes.vinyl_collector)
+    // const isEarlyGame = this.admittedCount <= CONFIG.MIN_RAW_SCORES
+    // const isValidCombo =
+    //   personAttributes.international &&
+    //   (personAttributes.queer_friendly || personAttributes.vinyl_collector)
 
     /**
      * calculate if we should admit this person.
      */
-    const shouldAdmit = isEarlyGame
-      ? isValidCombo
-      : score >= threshold || hasEveryCriticalAttribute || hasEveryAttribute
+    const shouldAdmit =
+      score > threshold || hasEveryCriticalAttribute || hasEveryAttribute
 
     /**
      * update generic game information for debugging.
      */
     this.totalScores.push(score)
-    this.info['unicorns'] = hasEveryAttribute
-      ? ++this.totalUnicorns
-      : this.totalUnicorns
-    this.info['prev_accepted_score'] = Stats.round(this.totalScores.at(-1) || 0)
     this.info['last_score'] = Stats.round(score)
-    this.info['avrg_score'] = Stats.average(this.totalAdmittedScores)
-    this.info['progress_ratio'] = Stats.round(progressRatio, 10_000)
-    this.info['threshold'] = threshold
+    this.info['avrg_score'] = Stats.round(
+      Stats.average(this.totalAdmittedScores)
+    )
     /**
      * Update the counts.
      */
@@ -769,7 +846,7 @@ export class NightclubGameCounter implements GameCounter {
       const needed = constraint.minCount - currentCount
 
       // @testing TODO: make dynamic?
-      if (needed <= (this.totalQuotasMet !== 0 ? 0 : 50)) return // Quota already met
+      if (needed <= (this.totalQuotasMet !== 0 ? 0 : 100)) return // Quota already met
 
       const frequency = frequencies[attr] || 0.5
       // const expectedRemaining =
@@ -882,7 +959,6 @@ export class NightclubGameCounter implements GameCounter {
    */
   public getProgress(): GameProgress {
     const quotas: { attribute: Keys; needed: number }[] = []
-    const quotaProgress: Record<string, number> = {}
 
     this.gameData.constraints.forEach((constraint) => {
       const attr = constraint.attribute
@@ -890,9 +966,6 @@ export class NightclubGameCounter implements GameCounter {
       if (quota > 0) {
         quotas.push({ attribute: attr as Keys, needed: quota })
       }
-      quotaProgress[attr] = Stats.round(
-        this.attributeCounts[attr]! / constraint.minCount
-      )
     })
 
     const { critical_attributes = [], ...info } = this.info
@@ -909,7 +982,6 @@ export class NightclubGameCounter implements GameCounter {
       critical: criticalAttributes,
       config: CONFIG,
       quotas: quotas.toSorted((a, b) => a.needed - b.needed),
-      quotaProgress,
       admissionRate:
         this.admittedCount / (this.admittedCount + this.rejectedCount),
       admitted: this.admittedCount,
