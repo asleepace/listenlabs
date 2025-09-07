@@ -177,7 +177,7 @@ const CONFIG = {
    * @range 0.2 to 0.7
    * @default 0.7
    */
-  MIN_THRESHOLD: 0.79, // (less = moderately lenient, 0.7=default)
+  MIN_THRESHOLD: 0.69, // (less = moderately lenient, 0.7=default)
   /**
    * How quickly threshold decreases as we fill up, lesser for gradual tightening.
    * Lower = consistent threshold throughout
@@ -506,7 +506,6 @@ export class NightclubGameCounter implements GameCounter {
      * check total progress and spots left
      */
     const spotsLeft = this.totalSpotsLeft
-    const peopleInLineLeft = this.estimatedPeopleInLineLeft
     this.criticalAttributes = this.getCriticalAttributes()
 
     const criticalKeys = Object.keys(this.criticalAttributes) as Keys[]
@@ -522,30 +521,9 @@ export class NightclubGameCounter implements GameCounter {
     const personAttributes = nextPerson.attributes
 
     /**
-     * check if we have any required critical attributes.
-     * @testing
-     */
-    let totalCriticalAttributes = 0
-    let possesedCriticalAttribute = 0
-    for (const [attrKey, critical] of Object.entries(this.criticalAttributes)) {
-      if (!critical.required) continue
-      totalCriticalAttributes++
-      if (!personAttributes[attrKey as Keys]) continue
-      possesedCriticalAttribute++
-    }
-
-    if (totalCriticalAttributes && !possesedCriticalAttribute) {
-      return false
-    }
-
-    /**
      * Calculate admission score
      */
-    let score = this.calculateAdmissionScore(
-      personAttributes,
-      spotsLeft,
-      peopleInLineLeft
-    )
+    let score = this.calculateAdmissionScore(personAttributes)
 
     /**
      * dynamic threshold based on how many spots are left
@@ -631,7 +609,8 @@ export class NightclubGameCounter implements GameCounter {
           // NOTE: the goal is to prevent two required attributes at the same time,
           // since this creates gridlock.
           return (
-            total - (criticalAttr.needed + CONFIG.CRITICAL_REQUIRED_THRESHOLD)
+            total -
+            (criticalAttr.needed + CONFIG.CRITICAL_REQUIRED_THRESHOLD + 1)
           )
         }
 
@@ -656,11 +635,7 @@ export class NightclubGameCounter implements GameCounter {
   /**
    * Calculate the persons admission score.
    */
-  private calculateAdmissionScore(
-    attributes: Record<string, boolean>,
-    spotsLeft: number,
-    peopleInLineLeft: number
-  ): number {
+  private calculateAdmissionScore(attributes: Record<string, boolean>): number {
     let score = 0
     const frequencies = this.frequencies
 
