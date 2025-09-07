@@ -74,6 +74,24 @@ namespace Stats {
     })
     return (max - min) / 2.0
   }
+
+  /**
+   * Calculate standard deviation.
+   */
+  export function stdDev(nums: number[]): number {
+    const avrg = Stats.average(nums)
+    const variance =
+      nums.reduce((sum, score) => sum + Math.pow(score - avrg, 2), 0) /
+      nums.length
+    return Math.max(Math.sqrt(variance), 0.1)
+  }
+
+  /**
+   * Calculate the sigmoid of a ratio.
+   */
+  export function sigmoid(ratio: number) {
+    return (1.0 + Math.tanh(1.0 - ratio)) / 2.0
+  }
 }
 
 /** ## Bouncer Configuration
@@ -263,6 +281,11 @@ const CONFIG = {
    * @default 0.8 (80% full)
    */
   CRITICAL_CAPACITY_RATIO: 0.8,
+
+  /**
+   * Number of scores needed for calculations.
+   */
+  MIN_RAW_SCORES: 5,
 }
 
 /**
@@ -503,12 +526,24 @@ export class NightclubGameCounter implements GameCounter {
   }
 
   private getRawScoreStdDev(): number {
-    if (this.rawScores.length < 5) return 1.0
+    if (this.rawScores.length < 50) return 1.0
     const avg = Stats.average(this.rawScores)
     const variance =
       this.rawScores.reduce((sum, score) => sum + Math.pow(score - avg, 2), 0) /
       this.rawScores.length
     return Math.max(Math.sqrt(variance), 0.1) // Prevent zero std dev
+  }
+
+  private calculateDynamicThreshold(
+    totalProgress: number,
+    progressRatio: number
+  ): number {
+    // Prevent division by zero
+    const safeProgressRatio = Math.max(progressRatio, 0.01)
+    // Bound totalProgress to prevent extreme values
+    const boundedProgress = Math.max(0.1, Math.min(totalProgress, 3.0))
+    const sigmoid = Stats.sigmoid(boundedProgress / safeProgressRatio)
+    return Math.max(0.05, Math.min(0.95, 1.0 - sigmoid))
   }
 
   /**
@@ -586,7 +621,7 @@ export class NightclubGameCounter implements GameCounter {
     // When on track: threshold = 0.5
     // Smooth S-curve transition
     // Bounded between 0.0 and 1.0
-    const sigmoid = (1.0 + Math.tanh(1.0 - totalProgress / progressRatio)) / 2.0
+    const sigmoid = this.calculateDynamicThreshold(totalProgress, progressRatio)
     const threshold = 1.0 - sigmoid
 
     // Option 3: Simple reciprocal with floor
