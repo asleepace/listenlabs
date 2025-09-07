@@ -1,5 +1,5 @@
 import { acceptOrRejectThenGetNext } from './src/play-game'
-import { initialize, loadGameFile, prettyPrint } from './src/disk'
+import { initialize, loadGameFile, saveGameFile, prettyPrint } from './src/disk'
 
 import { NightclubGameCounter } from './matrix'
 
@@ -71,6 +71,7 @@ export type GameState = {
   file: string
   game: Game
   status: GameStatus
+  output?: any
 }
 
 export type Keys = keyof Person['attributes']
@@ -104,6 +105,13 @@ async function runGameLoop(nextStatus: GameStatus): Promise<boolean> {
 
   console.log(counter.getProgress())
 
+  if (next.status !== 'completed') {
+    saveGameFile({
+      ...savedGame,
+      output: counter.getGameData(),
+    }).catch(() => {})
+  }
+
   if (next.status === 'failed') {
     console.warn('================ ❌ ================')
     throw next
@@ -112,7 +120,7 @@ async function runGameLoop(nextStatus: GameStatus): Promise<boolean> {
   if (next.status === 'completed') {
     console.log('================ ✅ ================')
     const scoreFile = Bun.file(`./scores-${+new Date()}.json`)
-    scoreFile.write(counter.getGameData())
+    scoreFile.write(JSON.stringify(counter.getGameData(), null, 2))
     console.log(next)
     return true
   }
