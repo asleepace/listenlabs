@@ -177,7 +177,7 @@ const CONFIG = {
    * @range 0.2 to 0.7
    * @default 0.7
    */
-  MIN_THRESHOLD: 0.71, // (less = moderately lenient, 0.7=default)
+  MIN_THRESHOLD: 0.77, // (less = moderately lenient, 0.7=default)
   /**
    * How quickly threshold decreases as we fill up, lesser for gradual tightening.
    * Lower = consistent threshold throughout
@@ -195,7 +195,7 @@ const CONFIG = {
    * @default 4000 (people)
    * @note current best score on leaderboard.
    */
-  TARGET_RANGE: 4500,
+  TARGET_RANGE: 5000,
 
   /**
    * Multiplier for how much being behind schedule matters.
@@ -262,7 +262,7 @@ const CONFIG = {
    * Percentage of remaining spots needed.
    * @default 0.8 (80% full)
    */
-  CRITICAL_CAPACITY_RATIO: 0.75,
+  CRITICAL_CAPACITY_RATIO: 0.85,
 }
 
 /**
