@@ -73,6 +73,25 @@ namespace Stats {
 }
 
 /** ## Bouncer Configuration
+ *  
+ * current best:
+    MIN_THRESHOLD: 0.75,
+    THRESHOLD_RAMP: 0.3,
+    TARGET_RANGE: 5000,
+    URGENCY_MODIFIER: 3,
+    CORRELATION_BONUS: 0.3,
+    NEGATIVE_CORRELATION_BONUS: 0.5,
+    NEGATIVE_CORRELATION_THRESHOLD: -0.5,
+    MULTI_ATTRIBUTE_BONUS: 0.5,
+    RARE_PERSON_BONUS: 0.5,
+    MAX_CAPACITY: 1000,
+    TOTAL_PEOPLE: 10000,
+    CRITICAL_THRESHOLD: 50,
+    EARLY_THRESHOLD: 100,
+    CRITICAL_IN_LINE_RATIO: 0.75,
+    CRITICAL_CAPACITY_RATIO: 0.8,
+    GUARENTEED: 10,
+
  
 HIGH IMPACT (tune these first):
  
@@ -151,11 +170,11 @@ const CONFIG = {
   // Admission threshold settings
   /**
    * Base admission score threshold less is more lenient early on.
-   * @note normalized game averages ~0.51 to admit
+   * @note normalized game averages ~0.51 to admit, current best with 0.75
    * @range 0.2 to 0.7
    * @default 0.7
    */
-  MIN_THRESHOLD: 0.6, // (less = moderately lenient, 0.7=default)
+  MIN_THRESHOLD: 0.67, // (less = moderately lenient, 0.7=default)
   /**
    * How quickly threshold decreases as we fill up, lesser for gradual tightening.
    * Lower = consistent threshold throughout
@@ -173,7 +192,7 @@ const CONFIG = {
    * @default 4000 (people)
    * @note current best score on leaderboard.
    */
-  TARGET_RANGE: 5000,
+  TARGET_RANGE: 4000,
 
   /**
    * Multiplier for how much being behind schedule matters.
