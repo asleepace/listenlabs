@@ -282,7 +282,7 @@ const CONFIG = {
    * Percentage of remaining spots needed.
    * @default 0.8 (80% full)
    */
-  CRITICAL_CAPACITY_RATIO: 0.8,
+  CRITICAL_CAPACITY_RATIO: 0.9,
 
   /**
    * Number of scores needed for calculations.
