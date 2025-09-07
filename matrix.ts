@@ -556,17 +556,29 @@ export class NightclubGameCounter implements GameCounter {
         return total + attrProgress
       }, 0) / this.constraints.length
 
-    /**
-     * calculate the threshold of people we can allow.
-     *
-     *  if behind this will be negative (e.g. -1.02 -> 1.04 -> 1 - 1.04 = 0.96)
-     */
-    const progressSchedule =
-      totalProgress > 0 ? totalProgress : 1 - Math.abs(totalProgress)
+    // Option 1: Exponential decay (recommended)
+    // When on track (ratio = 1.0): threshold ≈ 0.37
+    // When behind (ratio < 1.0): threshold approaches 1.0
+    // When ahead (ratio > 1.0): threshold approaches 0.0
+    // Handles any value > 0 gracefully
+    const threshold = Math.exp(-(totalProgress / progressRatio))
+
+    // OPTION #2:  Sigmoid/tanh for smoother transitions
+    // When on track: threshold = 0.5
+    // Smooth S-curve transition
+    // Bounded between 0.0 and 1.0
+    // const threshold = (1.0 + Math.tanh(1.0 - (totalProgress / progressRatio))) / 2.0;
+
+    // Option 3: Simple reciprocal with floor
+    // Linear-ish but handles high values well
+    // When ratio = 0: threshold = 1.0
+    // When ratio = 1: threshold = 0.5
+    // When ratio = ∞: threshold approaches 0.0
+    // const ratio = totalProgress / progressRatio;
+    // const threshold = Math.max(0.0, Math.min(1.0, 1.0 / (ratio + 1.0)));
 
     // const threshold =
     //   CONFIG.MIN_THRESHOLD * (1 - totalProgress * CONFIG.THRESHOLD_RAMP)
-    const threshold = Math.abs(1 - progressSchedule)
 
     /**
      * check if person has all attributes.
@@ -592,17 +604,15 @@ export class NightclubGameCounter implements GameCounter {
      * update generic game information for debugging.
      */
     this.totalScores.push(score)
+    this.info['unicorns'] = hasEveryAttribute
+      ? ++this.totalUnicorns
+      : this.totalUnicorns
     this.info['last_score'] = score
     this.info['best_score'] = Math.max(this.info['best_score'] ?? 0, score)
     this.info['lows_score'] = this.lowestAcceptedScore
     this.info['avrg_score'] = Stats.average(this.totalAdmittedScores)
+    this.info['progress'] = Stats.round(totalProgress, 10000) * 100
     this.info['threshold'] = threshold
-    this.info['unicorns'] = hasEveryAttribute
-      ? ++this.totalUnicorns
-      : this.totalUnicorns
-
-    this.info['progress'] = Stats.round(totalProgress, 10000)
-    this.info['schedule'] = progressSchedule
     /**
      * Update the counts.
      */
