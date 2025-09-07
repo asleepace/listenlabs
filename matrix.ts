@@ -178,7 +178,7 @@ const CONFIG = {
    * @range 0.2 to 0.7
    * @default 0.7
    */
-  MIN_THRESHOLD: 0.72, // (less = moderately lenient, 0.7=default)
+  MIN_THRESHOLD: 0.73, // (less = moderately lenient, 0.7=default)
   /**
    * How quickly threshold decreases as we fill up, lesser for gradual tightening.
    * Lower = consistent threshold throughout
@@ -206,23 +206,27 @@ const CONFIG = {
    * @default 2.2
    */
   URGENCY_MODIFIER: 3.0,
+
   /**
    * Reward for positively correlated attributes.
    * @range 0.1 to 0.5
    * @default 0.3
    */
   CORRELATION_BONUS: 0.3,
+
   /**
    * Bonus for rare combinations (negatively correlated but both needed).
    * @default 0.5
    */
   NEGATIVE_CORRELATION_BONUS: 0.5,
+
   /**
    * Correlation below this triggers special handling.
    * @range -0.7 to -0.3
    * @default -0.5
    */
   NEGATIVE_CORRELATION_THRESHOLD: -0.5,
+
   /**
    * Reward for people with multiple needed attributes (compounds)
    * Too high = over-value "jack of all trades"
@@ -231,6 +235,7 @@ const CONFIG = {
    * @default 0.5
    */
   MULTI_ATTRIBUTE_BONUS: 0.5,
+
   /**
    * Bonus for rare attribute combinations (negatively correlated)
    * @range 0.3 to 1.0
@@ -270,11 +275,6 @@ const CONFIG = {
    * Percentage of remaining spots needed.
    */
   CRITICAL_CAPACITY_RATIO: 0.8,
-
-  /**
-   * Arbitrary max value to guarentee admission.
-   */
-  GUARENTEED: 10,
 }
 
 /**
@@ -625,18 +625,17 @@ export class NightclubGameCounter implements GameCounter {
         if (attribute === other.attribute) return total
         // skip if non-critical other attribute
         if (!(other.attribute in this.criticalAttributes)) return total
-        // check if any other constraints are negatively correlated or required
-        const criticalAttr = this.criticalAttributes[other.attribute as Keys]!
         /**
          * before we only check if it was in critical attributes and negatively
          * correlated, but we should also check if the other one is required.
          * @testing
          */
-        if (
-          !criticalAttr.required &&
-          attributesCorrelations[other.attribute]! < 0
-        )
-          return total
+        const criticalAttr = this.criticalAttributes[other.attribute as Keys]!
+        if (criticalAttr.required) {
+          return total - criticalAttr.needed
+        }
+        // check if any other constraints are negatively correlated or required
+        if (attributesCorrelations[other.attribute]! < 0) return total
         // calculate total number of other people neded
         const otherNeeded =
           other.minCount - this.getCount(other.attribute as Keys)
@@ -666,7 +665,7 @@ export class NightclubGameCounter implements GameCounter {
 
     // If all quotas are met, admit everyone
     if (this.allQuotasMet || this.state.status.status !== 'running') {
-      return CONFIG.GUARENTEED // High score to guarantee admission (arbitrary)
+      return 10.0 // High score to guarantee admission (arbitrary)
     }
 
     const { admittedCount, rejectedCount } = this.state.status
