@@ -206,7 +206,7 @@ export class Berghain {
       endpoint.searchParams.set('gameId', this.current.game.gameId)
       endpoint.searchParams.set('personIndex', String(props.index))
       endpoint.searchParams.set('accept', props.accept ? 'true' : 'false')
-      console.log(endpoint.href)
+      // console.log(endpoint.href)
       return await this.fetch<GameStatus>(endpoint)
     } catch (e) {
       if (--this.maxRetries < 0) throw e
