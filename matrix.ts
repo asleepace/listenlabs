@@ -540,15 +540,15 @@ export class NightclubGameCounter implements GameCounter {
      * check if person has all attributes.
      */
     const hasEveryAttribute = this.constraints.every(
-      (constraint) => personAttributes[constraint.attribute as Keys]
+      (constraint) => personAttributes[constraint.attribute as Keys] === true
     )
 
     /**
      * person is a unicorn and has all critical attributes.
      */
-    const hasEveryCriticalAttribute = criticalKeys.every(
-      (attrKey) => personAttributes[attrKey]
-    )
+    const hasEveryCriticalAttribute =
+      criticalKeys.length &&
+      criticalKeys.every((attrKey) => personAttributes[attrKey])
 
     /**
      * calculate if we should admit this person.
