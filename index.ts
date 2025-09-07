@@ -1,6 +1,9 @@
 import { Bouncer } from './src/bouncer'
 import { Berghain, type ListenLabsConfig } from './src/berghain'
 
+/**
+ *  Configure listen labs default settings.
+ */
 const settings: ListenLabsConfig = {
   uniqueId: 'c9d5d12b-66e6-4d03-909b-5825fac1043b',
   baseUrl: 'https://berghain.challenges.listenlabs.ai/',
@@ -10,13 +13,12 @@ const settings: ListenLabsConfig = {
 /**
  *  Process command line arguments.
  */
-const args = Bun.argv.slice(2).reduce((output, current, index, array) => {
+Bun.argv.slice(2).forEach((current, index, array) => {
   const nextItem = array.at(index + 1)
   if (current === '--scenario' || (current === '-s' && nextItem)) {
     settings.scenario = String(Number(nextItem)) as '1' | '2' | '3'
   }
-  return output
-}, settings)
+})
 
 console.log('[game] settings:', settings)
 
