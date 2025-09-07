@@ -177,7 +177,7 @@ const CONFIG = {
    * @range 0.2 to 0.7
    * @default 0.7
    */
-  MIN_THRESHOLD: 0.508, // (less = moderately lenient, 0.7=default)
+  MIN_THRESHOLD: 0.71, // (less = moderately lenient, 0.7=default)
   /**
    * How quickly threshold decreases as we fill up, lesser for gradual tightening.
    * Lower = consistent threshold throughout
@@ -256,13 +256,13 @@ const CONFIG = {
    * Percentage of remaining people we need to fill quota.
    * @default 0.75 (75% percent)
    */
-  CRITICAL_IN_LINE_RATIO: 0.7,
+  CRITICAL_IN_LINE_RATIO: 0.8,
 
   /**
    * Percentage of remaining spots needed.
    * @default 0.8 (80% full)
    */
-  CRITICAL_CAPACITY_RATIO: 0.85,
+  CRITICAL_CAPACITY_RATIO: 0.75,
 }
 
 /**
@@ -339,6 +339,16 @@ export class NightclubGameCounter implements GameCounter {
    */
   private get estimatedPeopleInLineLeft(): number {
     return this.totalPeople - this.admittedCount - this.rejectedCount
+  }
+
+  /**
+   * Total number of quotas which have been reached.
+   */
+  private get totalQuotasMet(): number {
+    return this.gameData.constraints.reduce((total, constraint) => {
+      const constraintCount = this.getCount(constraint.attribute)
+      return total + (constraintCount <= constraint.minCount ? 1 : 0)
+    }, 0)
   }
 
   /**
@@ -653,12 +663,16 @@ export class NightclubGameCounter implements GameCounter {
       const attr = constraint.attribute
 
       if (!attributes[attr]) return
-      // if ((attr as Keys) === 'underground_veteran') return // fuck 'em
 
       const currentCount = this.getCount(attr)
       const needed = constraint.minCount - currentCount
 
-      if (needed <= 0) return // Quota already met
+      /**
+       * @testing prevent overfilling early attributes
+       * same as if ((attr as Keys) === 'underground_veteran') return // fuck 'em
+       */
+      const minNeeded = this.totalQuotasMet === 0 ? 50 : 0
+      if (needed <= minNeeded) return // Quota already met
 
       const frequency = frequencies[attr] || 0.5
       // const expectedRemaining =
