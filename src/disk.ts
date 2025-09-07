@@ -6,7 +6,7 @@ export function prettyPrint(obj: any) {
   console.log(JSON.stringify(obj, null, 2));
 }
 
-export async function saveGameFile(state: GameState) {
+export async function saveGameFile<T extends {}>(state: GameState) {
   const file = Bun.file(state.file, { type: "json" });
   await file.write(JSON.stringify(state, null, 2));
 }
@@ -30,19 +30,14 @@ export async function initialize(props: Parameters<typeof createGame>[0]) {
 
   prettyPrint({ game, status });
 
-  const file = `./game-${game.gameId}.json`
+  const file = `./data/game-${game.gameId}.json`;
 
   await saveGameFile({
     file,
-      game,
-      status,
-      metrics: {
-        totalWellDressed: 0,
-        totalYoung: 0,
-        winner: false,
-        score: 0,
-      },
+    game,
+    status,
+    output: undefined,
   });
 
-  return file
+  return file;
 }

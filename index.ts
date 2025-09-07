@@ -1,185 +1,129 @@
-import { config } from "./src/config";
-import { createGame } from "./src/create-game";
-import { acceptOrRejectThenGetNext } from "./src/play-game";
-import { initialize, loadGameFile, saveGameFile, prettyPrint } from "./src/disk";
+import { acceptOrRejectThenGetNext } from './src/play-game'
+import { initialize, loadGameFile, saveGameFile, prettyPrint } from './src/disk'
+
+import { NightclubGameCounter } from './matrix'
 
 export type GameConstraints = {
-  attribute: string;
-  minCount: number;
-};
+  attribute: string
+  minCount: number
+}
 
 export type Game = {
-  gameId: string;
-  constraints: GameConstraints[];
+  gameId: string
+  constraints: GameConstraints[]
   attributeStatistics: {
     relativeFrequencies: {
-      [attributeId: string]: number; // 0.0-1.0
-    };
+      [attributeId: string]: number // 0.0-1.0
+    }
     correlations: {
       [attributeId1: string]: {
-        [attributeId2: string]: number; // -1.0-1.0
-      };
-    };
-  };
-};
+        [attributeId2: string]: number // -1.0-1.0
+      }
+    }
+  }
+}
 
 type PersonAttributesScenario1 = {
-  well_dressed: true;
-  young: true;
-};
+  well_dressed: true
+  young: true
+}
 
-export type Person<T = PersonAttributesScenario1> = {
-  personIndex: number;
-  attributes: T;
-};
+type PersonAttributesScenario2 = {
+  techno_lover: boolean
+  well_connected: boolean
+  creative: boolean
+  berlin_local: boolean
+}
+
+export type PersonAttributesScenario3 = {
+  underground_veteran: boolean
+  international: boolean
+  fashion_forward: boolean
+  queer_friendly: boolean
+  vinyl_collector: boolean
+  german_speaker: boolean
+}
+
+export type Person<T = PersonAttributesScenario3> = {
+  personIndex: number
+  attributes: T
+}
 
 export type GameStatus =
   | {
-      status: "running";
-      admittedCount: number;
-      rejectedCount: number;
-      nextPerson: Person;
+      status: 'running'
+      admittedCount: number
+      rejectedCount: number
+      nextPerson: Person
     }
   | {
-      status: "completed";
-      rejectedCount: number;
-      nextPerson: null;
+      status: 'completed'
+      rejectedCount: number
+      nextPerson: null
     }
   | {
-      status: "failed";
-      reason: string;
-      nextPerson: null;
-    };
+      status: 'failed'
+      reason: string
+      nextPerson: null
+    }
 
 export type GameState = {
-  file: string;
-  game: Game;
-  status: GameStatus;
-  metrics: {
-    totalWellDressed: number;
-    totalYoung: number;
-    winner: boolean;
-    score: number;
-  };
-};
-
-
-const sleep = (time: number) => new Promise<void>((resolve) => {
-  setTimeout(() => resolve(), time)
-})
-
-
-function hasAllAttributes(person: Person) {
-  return Object.values(person.attributes).every(Boolean)
+  file: string
+  game: Game
+  status: GameStatus
+  output?: any
 }
 
-function hasSomeAttribute(person: Person) {
-  return Object.values(person.attributes).some(Boolean)
-}
+export type Keys = keyof Person['attributes']
 
-let totalWellDressed = 0
-let totalYoung = 0
+console.log('================ starting ================')
+console.warn('[game] triggering new game!')
 
-/**
- * Main function where we should let person in or not...
- */
-function shouldLetPersonIn({ status: next, metrics }: GameState): boolean {
-  if (next.nextPerson == null) return false;
+const file = await initialize({ scenario: '3' })
+console.warn('[game] game file:', file)
 
-  const totalCount = 'admittedCount' in next ? next.admittedCount : 0
+const savedGame = await loadGameFile({ file })
+const counter = new NightclubGameCounter(savedGame)
+await runGameLoop(savedGame.status).catch(console.warn)
 
-  const { nextPerson } = next
+console.log('=========================================')
 
-  // NOTE: count total number of people
-  if (next.nextPerson.attributes.well_dressed) {
-    totalWellDressed++
-  }
-  if (next.nextPerson.attributes.young) {
-    totalYoung++
-  }
+//
+// ====================== game loop ======================
+//
 
-  // calculate totals
+async function runGameLoop(nextStatus: GameStatus): Promise<boolean> {
+  if (nextStatus.status !== 'running') throw new Error('Invalid status!')
 
-  if (totalYoung > 600 && totalWellDressed > 600) {
-    return true
-  }
-
-  if (nextPerson.attributes.well_dressed && nextPerson.attributes.young) {
-    return true
-  }
-
-  if (totalYoung < 585 && nextPerson.attributes.young) {
-    return true
-  }
-
-  if (totalWellDressed < 585 && nextPerson.attributes.well_dressed) {
-    return true
-  }
-
-  const hasOneOrMoreAttribute = nextPerson.attributes.well_dressed || nextPerson.attributes.young 
-
-  if (totalCount < 900) {
-    return hasOneOrMoreAttribute || nextPerson.personIndex % 15 === 0
-  } else {
-    return hasOneOrMoreAttribute
-  }
-}
-
-
-function updateGameState(prevState: GameState, nextStatus: GameStatus): GameState {
-  return {
-    ...prevState,
-    status: nextStatus,
-    metrics: {
-      totalWellDressed: totalWellDressed,
-      totalYoung: totalYoung,
-      winner: false,
-      score: 'rejectedCount' in nextStatus ? nextStatus.rejectedCount : 0
-     }
-  }
-}
-
-/**
- * # Game Loop
- *
- *
- */
-async function runGameLoop(state: GameState): Promise<boolean> {
-  const accept = shouldLetPersonIn(state);
-  const index = state.status.nextPerson?.personIndex ?? 0
+  const accept = counter.admit(nextStatus)
 
   const next = await acceptOrRejectThenGetNext({
-    game: state.game,
-    index: index,
+    game: counter.state.game,
+    index: nextStatus.nextPerson.personIndex,
     accept,
-  });
+  })
 
-  if (next.status === "completed") {
-    const nextState: GameState = updateGameState(state, next)
-    await saveGameFile({ ...nextState, metrics: { totalWellDressed, totalYoung, winner: true, score: next.rejectedCount }})
-    return true;
+  console.log(counter.getProgress())
+
+  if (next.status !== 'completed') {
+    saveGameFile({
+      ...savedGame,
+      output: counter.getGameData(),
+    }).catch(() => {})
   }
-  if (next.status === "failed") {
-    await Bun.file(state.file).delete()
+
+  if (next.status === 'failed') {
+    console.warn('================ ❌ ================')
     throw next
   }
 
-  const nextState: GameState = updateGameState(state, next)
-  prettyPrint(nextState)
+  if (next.status === 'completed') {
+    console.log('================ ✅ ================')
+    const scoreFile = Bun.file(`./scores-${+new Date()}.json`)
+    scoreFile.write(JSON.stringify(counter.getGameData(), null, 2))
+    console.log(next)
+    return true
+  }
 
-  await saveGameFile(nextState);
-  return await runGameLoop(nextState);
+  return runGameLoop(next)
 }
-
-// ================= GAME START ===================== //
-
-async function triggerNewGame() {
-  const file = await initialize({ scenario: '1' })
-  const savedGame = await loadGameFile({ file })
-  await runGameLoop(savedGame);
-}
-
-// run forever
-triggerNewGame()
-  .finally(() => sleep(5 * 60 * 1_000))
-  .then(() => triggerNewGame())

@@ -1,0 +1,61 @@
+export const game = {
+  info: {
+    last_score: 0.05288791320018709,
+    best_score: 22.735423209137195,
+    avrg_score: 0.5390348579116382,
+  },
+  critical: [
+    'vinyl_collector',
+    'queer_friendly',
+    'underground_veteran',
+    'fashion_forward',
+    'international',
+    'german_speaker',
+  ],
+  config: {
+    MIN_THRESHOLD: 0.8,
+    THRESHOLD_RAMP: 0.3,
+    TARGET_RANGE: 6000,
+    URGENCY_MODIFIER: 4,
+    CORRELATION_BONUS: 0.3,
+    NEGATIVE_CORRELATION_BONUS: 0.5,
+    NEGATIVE_CORRELATION_THRESHOLD: -0.5,
+    MULTI_ATTRIBUTE_BONUS: 0.5,
+    RARE_PERSON_BONUS: 0.5,
+    MAX_CAPACITY: 1000,
+    TOTAL_PEOPLE: 10000,
+    CRITICAL_THRESHOLD: 50,
+    EARLY_THRESHOLD: 100,
+    MUST_HAVE_RATIO: 0.75,
+    GUARENTEED: 10,
+  },
+  quotas: [
+    {
+      attribute: 'vinyl_collector',
+      needed: 4,
+    },
+    {
+      attribute: 'queer_friendly',
+      needed: 16,
+    },
+    {
+      attribute: 'international',
+      needed: 55,
+    },
+    {
+      attribute: 'german_speaker',
+      needed: 72,
+    },
+  ],
+  quotaProgress: {
+    underground_veteran: 1.496,
+    international: 0.9153846153846154,
+    fashion_forward: 1.298181818181818,
+    queer_friendly: 0.936,
+    vinyl_collector: 0.98,
+    german_speaker: 0.91,
+  },
+  admissionRate: 0.21084845926551288,
+  admitted: 999,
+  rejected: 3739,
+}
