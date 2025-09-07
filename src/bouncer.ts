@@ -128,7 +128,7 @@ HIGH IMPACT (tune these first):
   Very minor impact
  
   **/
-const CONFIG = {
+export const CONFIG = {
   // Admission threshold settings
   /**
    * Base admission score threshold less is more lenient early on.

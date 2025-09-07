@@ -1,4 +1,4 @@
-import { Bouncer } from './src/bouncer'
+import { Bouncer, CONFIG } from './src/bouncer'
 import { Berghain, type ListenLabsConfig } from './src/berghain'
 
 /**
@@ -10,13 +10,34 @@ const settings: ListenLabsConfig = {
   scenario: '3',
 }
 
+const config = {
+  ...CONFIG,
+}
+
 /**
  *  Process command line arguments.
  */
 Bun.argv.slice(2).forEach((current, index, array) => {
   const nextItem = array.at(index + 1)
-  if (current === '--scenario' || (current === '-s' && nextItem)) {
-    settings.scenario = String(Number(nextItem)) as '1' | '2' | '3'
+
+  switch (current) {
+    case '--scenario':
+    case '-s': {
+      settings.scenario = String(Number(nextItem)) as '1' | '2' | '3'
+      break
+    }
+
+    case '--target':
+    case '-t': {
+      config.TARGET_RANGE = Number(nextItem)
+      break
+    }
+
+    case '--base':
+    case '-b': {
+      config.BASE_THRESHOLD = Number(nextItem)
+      break
+    }
   }
 })
 
