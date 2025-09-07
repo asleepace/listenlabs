@@ -526,6 +526,10 @@ export class NightclubGameCounter implements GameCounter {
     return 1.0 / (1.0 + Math.exp(-(rawScore - avgScore) / stdDev))
   }
 
+  /**
+   * @testing
+   * @deprecated
+   */
   private getRawScoreStdDev(): number {
     if (this.rawScores.length < CONFIG.MIN_RAW_SCORES) return 1.0
     const avg = Stats.average(this.rawScores)
@@ -535,6 +539,10 @@ export class NightclubGameCounter implements GameCounter {
     return Math.max(Math.sqrt(variance), 0.1) // Prevent zero std dev
   }
 
+  /**
+   * @testing
+   * @deprecated
+   */
   private calculateDynamicThreshold(
     totalProgress: number,
     progressRatio: number
@@ -545,6 +553,34 @@ export class NightclubGameCounter implements GameCounter {
     const boundedProgress = Math.max(0.1, Math.min(totalProgress, 3.0))
     const sigmoid = Stats.sigmoid(boundedProgress / safeProgressRatio)
     return Math.max(0.05, Math.min(0.95, 1.0 - sigmoid))
+  }
+
+  private getElasticThreshold(progressRatio: number) {
+    const totalProgress =
+      this.constraints.reduce((total, constraint) => {
+        const currentCount = this.getCount(constraint.attribute)
+        const totalNeeded = constraint.minCount - currentCount
+        if (totalNeeded < 1) return total + 1
+        const attrProgress =
+          totalNeeded > 0 ? currentCount / constraint.minCount : 1
+        return total + attrProgress
+      }, 0) / this.constraints.length
+
+    this.info['total_progress'] = Stats.round(totalProgress, 100)
+
+    // Calculate how far ahead/behind we are on quotas vs capacity
+    const progressDelta = totalProgress - progressRatio
+
+    // Elastic threshold that responds to the delta
+    const baseThreshold = 0.5 // Neutral point
+    const sensitivity = 2.0 // How much to adjust (tune this)
+
+    const threshold = Math.max(
+      0.05,
+      Math.min(0.95, baseThreshold + progressDelta * sensitivity)
+    )
+
+    return threshold
   }
 
   /**
@@ -577,12 +613,6 @@ export class NightclubGameCounter implements GameCounter {
     const criticalKeys = Object.keys(this.criticalAttributes) as Keys[]
 
     /**
-     * if at capacity reject everyone
-     * @testing
-     */
-    // if (spotsLeft < 0) return false
-
-    /**
      * Attributes for person to check.
      */
     const personAttributes = nextPerson.attributes
@@ -602,38 +632,7 @@ export class NightclubGameCounter implements GameCounter {
      * Should be harder to get in if we are behind in qoutas.
      * @testing dynamic schedule.
      */
-    const totalProgress =
-      this.constraints.reduce((total, constraint) => {
-        const currentCount = this.getCount(constraint.attribute)
-        const totalNeeded = constraint.minCount - currentCount
-        if (totalNeeded < 1) return total + 1
-        const attrProgress = totalNeeded > 0 ? currentCount / totalNeeded : 1
-        return total + attrProgress
-      }, 0) / this.constraints.length
-
-    // Option 1: Exponential decay (recommended)
-    // When on track (ratio = 1.0): threshold ≈ 0.37
-    // When behind (ratio < 1.0): threshold approaches 1.0
-    // When ahead (ratio > 1.0): threshold approaches 0.0
-    // Handles any value > 0 gracefully
-    // const threshold = Math.exp(-(totalProgress / progressRatio))
-
-    // OPTION #2:  Sigmoid/tanh for smoother transitions
-    // When on track: threshold = 0.5
-    // Smooth S-curve transition
-    // Bounded between 0.0 and 1.0
-    const threshold = this.calculateDynamicThreshold(
-      totalProgress,
-      progressRatio
-    )
-
-    // Option 3: Simple reciprocal with floor
-    // Linear-ish but handles high values well
-    // When ratio = 0: threshold = 1.0
-    // When ratio = 1: threshold = 0.5
-    // When ratio = ∞: threshold approaches 0.0
-    // const ratio = totalProgress / progressRatio;
-    // const threshold = Math.max(0.0, Math.min(1.0, 1.0 / (ratio + 1.0)));
+    const threshold = this.getElasticThreshold(progressRatio)
 
     // const threshold =
     //   CONFIG.MIN_THRESHOLD * (1 - totalProgress * CONFIG.THRESHOLD_RAMP)
@@ -669,7 +668,6 @@ export class NightclubGameCounter implements GameCounter {
     this.info['best_score'] = Math.max(this.info['best_score'] ?? 0, score)
     this.info['lows_score'] = this.lowestAcceptedScore
     this.info['avrg_score'] = Stats.average(this.totalAdmittedScores)
-    this.info['total_progress'] = Stats.round(totalProgress, 10_000)
     this.info['progress_ratio'] = Stats.round(progressRatio, 10_000)
     this.info['threshold'] = threshold
     /**
