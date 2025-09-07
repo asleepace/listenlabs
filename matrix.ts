@@ -287,7 +287,7 @@ const CONFIG = {
   /**
    * Number of scores needed for calculations.
    */
-  MIN_RAW_SCORES: 5,
+  MIN_RAW_SCORES: 10,
 }
 
 /**
@@ -658,11 +658,17 @@ export class NightclubGameCounter implements GameCounter {
       criticalKeys.length > 0 &&
       criticalKeys.every((attrKey) => personAttributes[attrKey])
 
+    const isEarlyGame = this.admittedCount <= CONFIG.MIN_RAW_SCORES
+    const isValidCombo =
+      personAttributes.international &&
+      (personAttributes.queer_friendly || personAttributes.vinyl_collector)
+
     /**
      * calculate if we should admit this person.
      */
-    const shouldAdmit =
-      score >= threshold || hasEveryCriticalAttribute || hasEveryAttribute
+    const shouldAdmit = isEarlyGame
+      ? isValidCombo
+      : score >= threshold || hasEveryCriticalAttribute || hasEveryAttribute
 
     /**
      * update generic game information for debugging.
