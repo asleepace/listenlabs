@@ -516,8 +516,9 @@ export class NightclubGameCounter implements GameCounter {
   }
 
   private normalizeScore(rawScore: number): number {
-    if (this.rawScores.length < 50) {
-      return 0.5
+    if (this.rawScores.length < CONFIG.MIN_RAW_SCORES) {
+      // Early game: simple scaling
+      return Math.min(rawScore / 5.0, 1.0)
     }
     const avgScore = Stats.average(this.rawScores) || 0.5
     const stdDev = this.getRawScoreStdDev() || 0.2
@@ -526,7 +527,7 @@ export class NightclubGameCounter implements GameCounter {
   }
 
   private getRawScoreStdDev(): number {
-    if (this.rawScores.length < 50) return 1.0
+    if (this.rawScores.length < CONFIG.MIN_RAW_SCORES) return 1.0
     const avg = Stats.average(this.rawScores)
     const variance =
       this.rawScores.reduce((sum, score) => sum + Math.pow(score - avg, 2), 0) /
