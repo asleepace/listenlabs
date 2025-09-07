@@ -91,7 +91,6 @@ namespace Stats {
     MAX_CAPACITY: 1000,
     TOTAL_PEOPLE: 10000,
     CRITICAL_THRESHOLD: 50,
-    EARLY_THRESHOLD: 100,
     CRITICAL_IN_LINE_RATIO: 0.75,
     CRITICAL_CAPACITY_RATIO: 0.8,
     GUARENTEED: 10,
@@ -246,35 +245,24 @@ const CONFIG = {
    * Total people in line to select from (constant)
    */
   TOTAL_PEOPLE: 10_000,
-  /**
-   * When to panic about unfilled quotas.
-   * Lower = panic mode engages late
-   * Higher = conservative/safe approach
-   * @range 10 to 100
-   * @default 60 (people)
-   */
-  CRITICAL_THRESHOLD: 50,
-  /**
-   * Threshold where we can be more lenient at start of night.
-   * @default 100 (people)
-   */
-  EARLY_THRESHOLD: 100,
 
   /**
    * Number of available spots left where attribute becomes required.
+   * @default 1 (person)
    */
-  REQUIRED_THRESHOLD: 10,
+  CRITICAL_REQUIRED_THRESHOLD: 10,
 
   /**
    * Percentage of remaining people we need to fill quota.
    * @default 0.75 (75% percent)
    */
-  CRITICAL_IN_LINE_RATIO: 0.75,
+  CRITICAL_IN_LINE_RATIO: 0.7,
 
   /**
    * Percentage of remaining spots needed.
+   * @default 0.8 (80% full)
    */
-  CRITICAL_CAPACITY_RATIO: 0.8,
+  CRITICAL_CAPACITY_RATIO: 0.9,
 }
 
 /**
@@ -452,7 +440,8 @@ export class NightclubGameCounter implements GameCounter {
 
         if (isCriticalLineThreshold || isCriticalCapacityThreshold) {
           const isRequired =
-            this.totalSpotsLeft - peopleNeeded < CONFIG.REQUIRED_THRESHOLD
+            this.totalSpotsLeft - peopleNeeded <
+            CONFIG.CRITICAL_REQUIRED_THRESHOLD
 
           return {
             ...output,
