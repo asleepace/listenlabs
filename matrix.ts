@@ -177,7 +177,7 @@ const CONFIG = {
    * @range 0.2 to 0.7
    * @default 0.7
    */
-  MIN_THRESHOLD: 0.69, // (less = moderately lenient, 0.7=default)
+  MIN_THRESHOLD: 0.508, // (less = moderately lenient, 0.7=default)
   /**
    * How quickly threshold decreases as we fill up, lesser for gradual tightening.
    * Lower = consistent threshold throughout
@@ -195,7 +195,7 @@ const CONFIG = {
    * @default 4000 (people)
    * @note current best score on leaderboard.
    */
-  TARGET_RANGE: 6000,
+  TARGET_RANGE: 4500,
 
   /**
    * Multiplier for how much being behind schedule matters.
@@ -215,7 +215,7 @@ const CONFIG = {
    * Bonus for rare combinations (negatively correlated but both needed).
    * @default 0.5
    */
-  NEGATIVE_CORRELATION_BONUS: 0.5,
+  NEGATIVE_CORRELATION_BONUS: 0.6,
   /**
    * Correlation below this triggers special handling.
    * @range -0.7 to -0.3
@@ -250,7 +250,7 @@ const CONFIG = {
    * Number of available spots left where attribute becomes required.
    * @default 1 (person)
    */
-  CRITICAL_REQUIRED_THRESHOLD: 10,
+  CRITICAL_REQUIRED_THRESHOLD: 5,
 
   /**
    * Percentage of remaining people we need to fill quota.
@@ -262,7 +262,7 @@ const CONFIG = {
    * Percentage of remaining spots needed.
    * @default 0.8 (80% full)
    */
-  CRITICAL_CAPACITY_RATIO: 0.9,
+  CRITICAL_CAPACITY_RATIO: 0.85,
 }
 
 /**
@@ -440,8 +440,8 @@ export class NightclubGameCounter implements GameCounter {
 
         if (isCriticalLineThreshold || isCriticalCapacityThreshold) {
           const isRequired =
-            this.totalSpotsLeft - peopleNeeded <
-            CONFIG.CRITICAL_REQUIRED_THRESHOLD
+            this.totalSpotsLeft >=
+            peopleNeeded + CONFIG.CRITICAL_REQUIRED_THRESHOLD
 
           return {
             ...output,
@@ -506,6 +506,7 @@ export class NightclubGameCounter implements GameCounter {
      * check total progress and spots left
      */
     const spotsLeft = this.totalSpotsLeft
+    const totalSpotsLeft = this.estimatedPeopleInLineLeft
     this.criticalAttributes = this.getCriticalAttributes()
 
     const criticalKeys = Object.keys(this.criticalAttributes) as Keys[]
@@ -547,7 +548,7 @@ export class NightclubGameCounter implements GameCounter {
      * person is a unicorn and has all critical attributes.
      */
     const hasEveryCriticalAttribute =
-      criticalKeys.length &&
+      criticalKeys.length > 0 &&
       criticalKeys.every((attrKey) => personAttributes[attrKey])
 
     /**
