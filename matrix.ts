@@ -622,8 +622,10 @@ export class NightclubGameCounter implements GameCounter {
     // When on track: threshold = 0.5
     // Smooth S-curve transition
     // Bounded between 0.0 and 1.0
-    const sigmoid = this.calculateDynamicThreshold(totalProgress, progressRatio)
-    const threshold = 1.0 - sigmoid
+    const threshold = this.calculateDynamicThreshold(
+      totalProgress,
+      progressRatio
+    )
 
     // Option 3: Simple reciprocal with floor
     // Linear-ish but handles high values well
