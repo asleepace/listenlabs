@@ -756,12 +756,8 @@ export class NightclubGameCounter implements GameCounter {
       const currentCount = this.getCount(attr)
       const needed = constraint.minCount - currentCount
 
-      /**
-       * @testing prevent overfilling early attributes
-       * same as if ((attr as Keys) === 'underground_veteran') return // fuck 'em
-       */
-      const minNeeded = this.totalQuotasMet === 0 ? 50 : 0
-      if (needed <= minNeeded) return // Quota already met
+      // TODO: make dynamic?
+      if (needed <= 0) return // Quota already met
 
       const frequency = frequencies[attr] || 0.5
       // const expectedRemaining =
