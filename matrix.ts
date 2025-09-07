@@ -196,7 +196,7 @@ const CONFIG = {
    * @default 0.7
    */
   BASE_THRESHOLD: 0.5,
-  MIN_THRESHOLD: 0.05, // (less = moderately lenient, 0.7=default)
+  MIN_THRESHOLD: 0.45,
   MAX_THRESHOLD: 0.95,
   /**
    * How quickly threshold decreases as we fill up, lesser for gradual tightening.
