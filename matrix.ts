@@ -194,7 +194,7 @@ const CONFIG = {
    * @range 0.2 to 0.7
    * @default 0.7
    */
-  BASE_THRESHOLD: 0.45,
+  BASE_THRESHOLD: 0.49,
   MIN_THRESHOLD: 0.45,
   MAX_THRESHOLD: 0.95,
   /**
@@ -379,7 +379,7 @@ export class NightclubGameCounter implements GameCounter {
   /**
    * The total number of quotas which need to be met (constant)
    */
-  private get totalQoutas(): number {
+  private get totalQuotas(): number {
     return this.gameData.constraints.length
   }
 
@@ -701,6 +701,20 @@ export class NightclubGameCounter implements GameCounter {
     }
 
     /**
+     * for the first 5 people skip if they don't posses the following
+     * @testing
+     */
+    if (this.admittedCount < CONFIG.MIN_RAW_SCORES) {
+      const isRarePerson =
+        personAttributes.international &&
+        (personAttributes.german_speaker ||
+          personAttributes.queer_friendly ||
+          personAttributes.vinyl_collector)
+
+      if (!isRarePerson) return false
+    }
+
+    /**
      * Calculate admission score
      */
     let score = this.calculateAdmissionScore(personAttributes)
@@ -810,12 +824,12 @@ export class NightclubGameCounter implements GameCounter {
         //   )
         //}
 
-        // check if any other constraints are negatively correlated or required
-        if (
-          !criticalAttr.required &&
+        const hasNegativeCorrelation =
           attributesCorrelations[other.attribute]! < 0
-        )
-          return total
+
+        // check if any other constraints are negatively correlated or required
+        if (!criticalAttr.required && !hasNegativeCorrelation) return total
+
         // calculate total number of other people neded
         const otherNeeded =
           other.minCount - this.getCount(other.attribute as Keys)
@@ -857,7 +871,9 @@ export class NightclubGameCounter implements GameCounter {
       const needed = constraint.minCount - currentCount
 
       // @testing TODO: make dynamic?
-      if (needed <= (this.totalQuotasMet !== 0 ? 0 : 100)) return // Quota already met
+      const importance = this.totalQuotas < 3 ? 100 : 0
+
+      if (needed <= importance) return // Quota already met or can be ignored
 
       const frequency = frequencies[attr] || 0.5
       // const expectedRemaining =
@@ -895,7 +911,12 @@ export class NightclubGameCounter implements GameCounter {
        * @testing boost critical attributes.
        */
       if (critical && critical.required) {
-        componentScore *= 1.2
+        componentScore *= 1.5
+      } else if (critical) {
+        // if component is critical, but not required
+        // then focus on finishing others first and reduce
+        // importantance by half
+        componentScore *= 0.5
       }
 
       // Special boost for attributes that need above their natural rate
@@ -949,7 +970,6 @@ export class NightclubGameCounter implements GameCounter {
     }
 
     this.rawScores.push(score)
-
     return this.normalizeScore(score)
   }
 
