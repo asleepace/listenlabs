@@ -559,10 +559,10 @@ export class NightclubGameCounter implements GameCounter {
     const totalProgress =
       this.constraints.reduce((total, constraint) => {
         const currentCount = this.getCount(constraint.attribute)
-        const totalNeeded = constraint.minCount - currentCount
-        if (totalNeeded < 1) return total + 1
-        const attrProgress =
-          totalNeeded > 0 ? currentCount / constraint.minCount : 1
+        if (currentCount >= constraint.minCount) return total + 1
+
+        // Progress = what we have / what we need total
+        const attrProgress = currentCount / constraint.minCount
         return total + attrProgress
       }, 0) / this.constraints.length
 
