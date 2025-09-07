@@ -492,6 +492,25 @@ export class NightclubGameCounter implements GameCounter {
     })
   }
 
+  private normalizeScore(score: number): number {
+    const avgScore = this.averageScore || 0.5
+    const stdDev = this.getScoreStdDev() || 0.2
+
+    // Sigmoid centered on average with adaptive scaling
+    return 1.0 / (1.0 + Math.exp(-(score - avgScore) / stdDev))
+  }
+
+  private getScoreStdDev(): number {
+    if (this.totalScores.length < 5) return 0.2
+    const avg = this.averageScore
+    const variance =
+      this.totalScores.reduce(
+        (sum, score) => sum + Math.pow(score - avg, 2),
+        0
+      ) / this.totalScores.length
+    return Math.sqrt(variance)
+  }
+
   /**
    * Check if we should admit or reject the next person in line.
    */
@@ -797,7 +816,7 @@ export class NightclubGameCounter implements GameCounter {
       score *= 1 + CONFIG.MULTI_ATTRIBUTE_BONUS * (usefulAttributes - 1)
     }
 
-    return score
+    return this.normalizeScore(score)
   }
 
   public getGameData() {
