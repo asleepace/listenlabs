@@ -377,6 +377,13 @@ export class NightclubGameCounter implements GameCounter {
   }
 
   /**
+   * The total number of quotas which need to be met (constant)
+   */
+  private get totalQoutas(): number {
+    return this.gameData.constraints.length
+  }
+
+  /**
    * True when all quotas have been fulfilled.
    */
   private get allQuotasMet(): boolean {
@@ -687,7 +694,7 @@ export class NightclubGameCounter implements GameCounter {
      * if spots less than 20 make sure we meet required quotas.
      * @testing
      */
-    if (spotsLeft < 20) {
+    if (spotsLeft < 100) {
       for (const [key, value] of Object.entries(this.criticalAttributes)) {
         if (value.required && !personAttributes[key as Keys]) return false
       }
@@ -795,16 +802,20 @@ export class NightclubGameCounter implements GameCounter {
          * @testing
          */
         const criticalAttr = this.criticalAttributes[other.attribute as Keys]!
-        if (criticalAttr.needed) {
-          // NOTE: the goal is to prevent two required attributes at the same time,
-          // since this creates gridlock.
-          return (
-            total - (criticalAttr.needed + CONFIG.CRITICAL_REQUIRED_THRESHOLD)
-          )
-        }
+        // if (criticalAttr.needed) {
+        //   // NOTE: the goal is to prevent two required attributes at the same time,
+        //   // since this creates gridlock.
+        //   return (
+        //     total - (criticalAttr.needed + CONFIG.CRITICAL_REQUIRED_THRESHOLD)
+        //   )
+        //}
 
         // check if any other constraints are negatively correlated or required
-        if (attributesCorrelations[other.attribute]! < 0) return total
+        if (
+          !criticalAttr.required &&
+          attributesCorrelations[other.attribute]! < 0
+        )
+          return total
         // calculate total number of other people neded
         const otherNeeded =
           other.minCount - this.getCount(other.attribute as Keys)
