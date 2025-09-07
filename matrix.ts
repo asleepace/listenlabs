@@ -261,6 +261,11 @@ const CONFIG = {
   EARLY_THRESHOLD: 100,
 
   /**
+   * Number of available spots left where attribute becomes required.
+   */
+  REQUIRED_THRESHOLD: 10,
+
+  /**
    * Percentage of remaining people we need to fill quota.
    * @default 0.75 (75% percent)
    */
@@ -270,11 +275,6 @@ const CONFIG = {
    * Percentage of remaining spots needed.
    */
   CRITICAL_CAPACITY_RATIO: 0.8,
-
-  /**
-   * Arbitrary max value to guarentee admission.
-   */
-  GUARENTEED: 10,
 }
 
 /**
@@ -307,7 +307,7 @@ export class NightclubGameCounter implements GameCounter {
   public totalScores: number[] = []
   public totalAdmittedScores: number[] = []
   public lowestAcceptedScore = Infinity
-  public totalBoosted = 0
+  public totalUnicorns = 0
   public stats = {
     average: 0,
     medium: 0,
@@ -451,11 +451,14 @@ export class NightclubGameCounter implements GameCounter {
           peopleNeeded >= criticalCapacityThreshold
 
         if (isCriticalLineThreshold || isCriticalCapacityThreshold) {
+          const isRequired =
+            this.totalSpotsLeft - peopleNeeded < CONFIG.REQUIRED_THRESHOLD
+
           return {
             ...output,
             [current.attribute as Keys]: {
               needed: peopleNeeded,
-              required: this.totalSpotsLeft - peopleNeeded <= 1,
+              required: isRequired,
             },
           }
         } else {
@@ -548,17 +551,6 @@ export class NightclubGameCounter implements GameCounter {
     )
 
     /**
-     * this is a quick hack to win the game
-     * @testing
-     */
-    const isEarlyGameBoost =
-      this.totalBoosted < 25 &&
-      (personAttributes.german_speaker || personAttributes.international) &&
-      (personAttributes.queer_friendly ||
-        personAttributes.vinyl_collector ||
-        (personAttributes.german_speaker && personAttributes.international))
-
-    /**
      * dynamic threshold based on how many spots are left
      */
     const progressRatio = this.admittedCount / this.maxCapacity
@@ -570,17 +562,11 @@ export class NightclubGameCounter implements GameCounter {
       CONFIG.MIN_THRESHOLD * (1 - progressRatio * CONFIG.THRESHOLD_RAMP)
 
     /**
-     * update generic game information for debugging.
+     * check if person has all attributes.
      */
-    this.totalScores.push(score)
-    this.info['last_score'] = score
-    this.info['best_score'] = Math.max(this.info['best_score'] ?? 0, score)
-    this.info['lows_score'] = this.lowestAcceptedScore
-    this.info['avrg_score'] = Stats.average(this.totalAdmittedScores)
-    this.info['threshold'] = threshold
-    this.info['early_boost'] = isEarlyGameBoost
-      ? ++this.totalBoosted
-      : this.totalBoosted
+    const hasEveryAttribute = this.constraints.every(
+      (constraint) => personAttributes[constraint.attribute as Keys]
+    )
 
     /**
      * person is a unicorn and has all critical attributes.
@@ -593,7 +579,20 @@ export class NightclubGameCounter implements GameCounter {
      * calculate if we should admit this person.
      */
     const shouldAdmit =
-      score >= threshold || hasEveryCriticalAttribute || isEarlyGameBoost
+      score >= threshold || hasEveryCriticalAttribute || hasEveryAttribute
+
+    /**
+     * update generic game information for debugging.
+     */
+    this.totalScores.push(score)
+    this.info['last_score'] = score
+    this.info['best_score'] = Math.max(this.info['best_score'] ?? 0, score)
+    this.info['lows_score'] = this.lowestAcceptedScore
+    this.info['avrg_score'] = Stats.average(this.totalAdmittedScores)
+    this.info['threshold'] = threshold
+    this.info['unicorns'] = hasEveryAttribute
+      ? ++this.totalUnicorns
+      : this.totalUnicorns
 
     /**
      * Update the counts.
@@ -666,7 +665,7 @@ export class NightclubGameCounter implements GameCounter {
 
     // If all quotas are met, admit everyone
     if (this.allQuotasMet || this.state.status.status !== 'running') {
-      return CONFIG.GUARENTEED // High score to guarantee admission (arbitrary)
+      return 10.0 // High score to guarantee admission (arbitrary)
     }
 
     const { admittedCount, rejectedCount } = this.state.status
