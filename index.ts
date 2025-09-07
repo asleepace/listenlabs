@@ -28,7 +28,9 @@ console.log('[game] settings:', settings)
 await Berghain.initialize({ scenario: settings.scenario })
   .withBouncer(
     Bouncer.intialize({
-      MAX_CAPACITY: 10_000,
+      TARGET_RANGE: 4000,
+      BASE_THRESHOLD: 0.49,
+      MIN_RAW_SCORES: 5,
     })
   )
   .startNewGame()
