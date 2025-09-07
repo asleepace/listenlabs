@@ -256,13 +256,13 @@ const CONFIG = {
    * Percentage of remaining people we need to fill quota.
    * @default 0.75 (75% percent)
    */
-  CRITICAL_IN_LINE_RATIO: 0.8,
+  CRITICAL_IN_LINE_RATIO: 0.75,
 
   /**
    * Percentage of remaining spots needed.
    * @default 0.8 (80% full)
    */
-  CRITICAL_CAPACITY_RATIO: 0.85,
+  CRITICAL_CAPACITY_RATIO: 0.9,
 }
 
 /**
@@ -543,10 +543,24 @@ export class NightclubGameCounter implements GameCounter {
     const progressRatio = this.admittedCount / this.maxCapacity
 
     /**
+     * Should be easier to get in if we are ahead on quotas,
+     * Should be harder to get in if we are behind in qoutas.
+     * @testing dynamic schedule.
+     */
+    const totalProgress =
+      this.constraints.reduce((total, constraint) => {
+        const currentCount = this.getCount(constraint.attribute)
+        const totalNeeded = constraint.minCount - currentCount
+        if (totalNeeded < 1) return total + 1
+        const attrProgress = currentCount / totalNeeded
+        return total + attrProgress
+      }, 0) / this.constraints.length
+
+    /**
      * calculate the threshold of people we can allow.
      */
     const threshold =
-      CONFIG.MIN_THRESHOLD * (1 - progressRatio * CONFIG.THRESHOLD_RAMP)
+      CONFIG.MIN_THRESHOLD * (1 - totalProgress * CONFIG.THRESHOLD_RAMP)
 
     /**
      * check if person has all attributes.
@@ -701,15 +715,19 @@ export class NightclubGameCounter implements GameCounter {
       /**
        * @testing improve score of critical attributes.
        */
-      const criticalBonus = attr in this.criticalAttributes ? 1.5 : 1
+      const critical = this.criticalAttributes[constraint.attribute as Keys]
 
       // Component score combines all factors
       let componentScore = (urgency + riskFactor) * Math.log(scarcityFactor + 1)
 
       /**
-       * @testing
+       * @testing boost critical attributes.
        */
-      componentScore *= criticalBonus
+      if (critical && critical.required) {
+        componentScore *= 2.0
+      } else if (critical) {
+        componentScore += 0.5
+      }
 
       // Special boost for attributes that need above their natural rate
       const quotaRate = constraint.minCount / CONFIG.MAX_CAPACITY
