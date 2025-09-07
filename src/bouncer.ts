@@ -650,7 +650,7 @@ export class Bouncer implements BergainBouncer {
      * if spots less than 20 make sure we meet required quotas.
      * @testing
      */
-    if (spotsLeft < 100) {
+    if (spotsLeft < 100 && criticalKeys.length > 0) {
       for (const [key, value] of Object.entries(this.criticalAttributes)) {
         if (value.required && !personAttributes[key as Keys]) return false
       }
