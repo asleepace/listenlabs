@@ -596,7 +596,7 @@ export class Bouncer implements BergainBouncer {
     //   (totalProgress - progressRatio) * 0.8 + // capacity weight
     //   (totalProgress - expectedProgress) * 0.4 // timeline weight
 
-    const delta = (totalProgress - expectedProgress) * 0.5
+    const delta = (expectedProgress - totalProgress) * 0.5
 
     const threshold = Math.max(
       CONFIG.MIN_THRESHOLD,
