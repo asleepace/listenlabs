@@ -167,7 +167,7 @@ export class Berghain {
           accept: admit,
         })
         if (this.current.status.status !== 'running') break
-        prettyPrint(this.bouncer.getProgress())
+        console.log(this.bouncer.getProgress()) // better to console here
       }
 
       if (this.current.status.status === 'failed') {
