@@ -587,28 +587,28 @@ export class Bouncer implements BergainBouncer {
 
     // Where should we be in quota completion by now?
     const expectedProgress = Math.min(totalProcessed / CONFIG.TARGET_RANGE, 1.0)
-    const progressRatio = this.admittedCount / this.maxCapacity
+    // const progressRatio = this.admittedCount / this.maxCapacity
     const totalProgress = this.getTotalProgess()
     const sensitivity = 2.0
 
     // Combined progress gap
-    const combinedDelta =
-      (totalProgress - progressRatio) * 0.8 + // capacity weight
-      (totalProgress - expectedProgress) * 0.4 // timeline weight
+    // const combinedDelta =
+    //   (totalProgress - progressRatio) * 0.8 + // capacity weight
+    //   (totalProgress - expectedProgress) * 0.4 // timeline weight
+
+    const delta = (totalProgress - expectedProgress) * 0.5
 
     const threshold = Math.max(
       CONFIG.MIN_THRESHOLD,
       Math.min(
         CONFIG.MAX_THRESHOLD,
-        CONFIG.BASE_THRESHOLD - combinedDelta * sensitivity
+        CONFIG.BASE_THRESHOLD - delta * sensitivity
       )
     )
 
-    this.info['progress_ratio'] = Stats.round(progressRatio, 10_000)
     this.info['progress_expected'] = Stats.round(expectedProgress, 10_000)
     this.info['progress_total'] = Stats.round(totalProgress, 10_000)
     this.info['threshold'] = Stats.round(threshold, 10_000)
-
     return threshold
   }
 
