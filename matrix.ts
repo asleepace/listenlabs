@@ -595,12 +595,11 @@ export class NightclubGameCounter implements GameCounter {
     this.info['unicorns'] = hasEveryAttribute
       ? ++this.totalUnicorns
       : this.totalUnicorns
-    this.info['progress'] = totalProgress
-
-    /**
-     * Update the counts.
-     */
-    this.updateCounts(personAttributes, score, shouldAdmit)
+    ;(this.info['progress'] = Stats.round(totalProgress)),
+      /**
+       * Update the counts.
+       */
+      this.updateCounts(personAttributes, score, shouldAdmit)
 
     /**
      * Return our decision.
