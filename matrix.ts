@@ -195,7 +195,7 @@ const CONFIG = {
    * @default 4000 (people)
    * @note current best score on leaderboard.
    */
-  TARGET_RANGE: 5000,
+  TARGET_RANGE: 4000,
 
   /**
    * Multiplier for how much being behind schedule matters.
