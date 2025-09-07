@@ -513,8 +513,9 @@ export class NightclubGameCounter implements GameCounter {
 
     /**
      * if at capacity reject everyone
+     * @testing
      */
-    if (spotsLeft < 0) return false
+    // if (spotsLeft < 0) return false
 
     /**
      * Attributes for person to check.
@@ -610,8 +611,7 @@ export class NightclubGameCounter implements GameCounter {
           // NOTE: the goal is to prevent two required attributes at the same time,
           // since this creates gridlock.
           return (
-            total -
-            (criticalAttr.needed + CONFIG.CRITICAL_REQUIRED_THRESHOLD + 1)
+            total - (criticalAttr.needed + CONFIG.CRITICAL_REQUIRED_THRESHOLD)
           )
         }
 
@@ -655,7 +655,7 @@ export class NightclubGameCounter implements GameCounter {
       if (!attributes[attr]) return
       // if ((attr as Keys) === 'underground_veteran') return // fuck 'em
 
-      const currentCount = this.attributeCounts[attr]!
+      const currentCount = this.getCount(attr)
       const needed = constraint.minCount - currentCount
 
       if (needed <= 0) return // Quota already met
@@ -683,6 +683,8 @@ export class NightclubGameCounter implements GameCounter {
 
       // Risk factor: can we afford to wait?
       const riskFactor = needed / Math.max(expectedRemaining, 1)
+
+      // TODO: add close to zero value?
 
       // Component score combines all factors
       let componentScore = (urgency + riskFactor) * Math.log(scarcityFactor + 1)
