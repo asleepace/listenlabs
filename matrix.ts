@@ -612,7 +612,8 @@ export class NightclubGameCounter implements GameCounter {
     this.info['best_score'] = Math.max(this.info['best_score'] ?? 0, score)
     this.info['lows_score'] = this.lowestAcceptedScore
     this.info['avrg_score'] = Stats.average(this.totalAdmittedScores)
-    this.info['progress'] = Stats.round(totalProgress, 10000) * 100
+    this.info['total_progress'] = Stats.round(totalProgress, 10_000)
+    this.info['progress_ratio'] = Stats.round(progressRatio, 10_000)
     this.info['threshold'] = threshold
     /**
      * Update the counts.
