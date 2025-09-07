@@ -561,13 +561,14 @@ export class NightclubGameCounter implements GameCounter {
     // When behind (ratio < 1.0): threshold approaches 1.0
     // When ahead (ratio > 1.0): threshold approaches 0.0
     // Handles any value > 0 gracefully
-    const threshold = Math.exp(-(totalProgress / progressRatio))
+    // const threshold = Math.exp(-(totalProgress / progressRatio))
 
     // OPTION #2:  Sigmoid/tanh for smoother transitions
     // When on track: threshold = 0.5
     // Smooth S-curve transition
     // Bounded between 0.0 and 1.0
-    // const threshold = (1.0 + Math.tanh(1.0 - (totalProgress / progressRatio))) / 2.0;
+    const threshold =
+      (1.0 + Math.tanh(1.0 - totalProgress / progressRatio)) / 2.0
 
     // Option 3: Simple reciprocal with floor
     // Linear-ish but handles high values well
