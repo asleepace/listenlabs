@@ -293,6 +293,7 @@ export class NightclubGameCounter implements GameCounter {
   public info: Record<string, any> = {}
 
   public totalScores: number[] = []
+  public rawScores: number[] = []
   public totalAdmittedScores: number[] = []
   public lowestAcceptedScore = Infinity
   public totalUnicorns = 0
@@ -347,7 +348,7 @@ export class NightclubGameCounter implements GameCounter {
   private get totalQuotasMet(): number {
     return this.gameData.constraints.reduce((total, constraint) => {
       const constraintCount = this.getCount(constraint.attribute)
-      return total + (constraintCount <= constraint.minCount ? 1 : 0)
+      return total + (constraintCount >= constraint.minCount ? 1 : 0)
     }, 0)
   }
 
@@ -450,8 +451,7 @@ export class NightclubGameCounter implements GameCounter {
 
         if (isCriticalLineThreshold || isCriticalCapacityThreshold) {
           const isRequired =
-            this.totalSpotsLeft >=
-            peopleNeeded + CONFIG.CRITICAL_REQUIRED_THRESHOLD
+            peopleNeeded + CONFIG.CRITICAL_REQUIRED_THRESHOLD >= totalSpotsLeft
 
           return {
             ...output,
@@ -492,23 +492,23 @@ export class NightclubGameCounter implements GameCounter {
     })
   }
 
-  private normalizeScore(score: number): number {
-    const avgScore = this.averageScore || 0.5
-    const stdDev = this.getScoreStdDev() || 0.2
-
+  private normalizeScore(rawScore: number): number {
+    if (this.rawScores.length < 50) {
+      return 0.5
+    }
+    const avgScore = Stats.average(this.rawScores) || 0.5
+    const stdDev = this.getRawScoreStdDev() || 0.2
     // Sigmoid centered on average with adaptive scaling
-    return 1.0 / (1.0 + Math.exp(-(score - avgScore) / stdDev))
+    return 1.0 / (1.0 + Math.exp(-(rawScore - avgScore) / stdDev))
   }
 
-  private getScoreStdDev(): number {
-    if (this.totalScores.length < 5) return 0.2
-    const avg = this.averageScore
+  private getRawScoreStdDev(): number {
+    if (this.rawScores.length < 5) return 1.0
+    const avg = Stats.average(this.rawScores)
     const variance =
-      this.totalScores.reduce(
-        (sum, score) => sum + Math.pow(score - avg, 2),
-        0
-      ) / this.totalScores.length
-    return Math.sqrt(variance)
+      this.rawScores.reduce((sum, score) => sum + Math.pow(score - avg, 2), 0) /
+      this.rawScores.length
+    return Math.max(Math.sqrt(variance), 0.1) // Prevent zero std dev
   }
 
   /**
@@ -815,6 +815,8 @@ export class NightclubGameCounter implements GameCounter {
     if (usefulAttributes > 1) {
       score *= 1 + CONFIG.MULTI_ATTRIBUTE_BONUS * (usefulAttributes - 1)
     }
+
+    this.rawScores.push(score)
 
     return this.normalizeScore(score)
   }
