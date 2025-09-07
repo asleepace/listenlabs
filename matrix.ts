@@ -613,18 +613,22 @@ export class NightclubGameCounter implements GameCounter {
         if (attribute === other.attribute) return total
         // skip if non-critical other attribute
         if (!(other.attribute in this.criticalAttributes)) return total
-        // check if any other constraints are negatively correlated or required
-        const criticalAttr = this.criticalAttributes[other.attribute as Keys]!
         /**
          * before we only check if it was in critical attributes and negatively
          * correlated, but we should also check if the other one is required.
          * @testing
          */
-        if (
-          !criticalAttr.required &&
-          attributesCorrelations[other.attribute]! < 0
-        )
-          return total
+        const criticalAttr = this.criticalAttributes[other.attribute as Keys]!
+        if (criticalAttr.needed) {
+          // NOTE: the goal is to prevent two required attributes at the same time,
+          // since this creates gridlock.
+          return (
+            total - (criticalAttr.needed + CONFIG.CRITICAL_REQUIRED_THRESHOLD)
+          )
+        }
+
+        // check if any other constraints are negatively correlated or required
+        if (attributesCorrelations[other.attribute]! < 0) return total
         // calculate total number of other people neded
         const otherNeeded =
           other.minCount - this.getCount(other.attribute as Keys)
@@ -777,7 +781,9 @@ export class NightclubGameCounter implements GameCounter {
       if (quota > 0) {
         quotas.push({ attribute: attr as Keys, needed: quota })
       }
-      quotaProgress[attr] = this.attributeCounts[attr]! / constraint.minCount
+      quotaProgress[attr] = Stats.round(
+        this.attributeCounts[attr]! / constraint.minCount
+      )
     })
 
     const { critical_attributes = [], ...info } = this.info
