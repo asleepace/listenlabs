@@ -566,7 +566,7 @@ export class NightclubGameCounter implements GameCounter {
         return total + attrProgress
       }, 0) / this.constraints.length
 
-    this.info['total_progress'] = Stats.round(totalProgress, 100)
+    this.info['progress_total'] = Stats.round(totalProgress, 100)
 
     // Calculate how far ahead/behind we are on quotas vs capacity
     const progressDelta = totalProgress - progressRatio
