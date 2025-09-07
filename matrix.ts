@@ -177,7 +177,7 @@ const CONFIG = {
    * @range 0.2 to 0.7
    * @default 0.7
    */
-  MIN_THRESHOLD: 0.77, // (less = moderately lenient, 0.7=default)
+  MIN_THRESHOLD: 0.75, // (less = moderately lenient, 0.7=default)
   /**
    * How quickly threshold decreases as we fill up, lesser for gradual tightening.
    * Lower = consistent threshold throughout
@@ -559,8 +559,9 @@ export class NightclubGameCounter implements GameCounter {
     /**
      * calculate the threshold of people we can allow.
      */
-    const threshold =
-      CONFIG.MIN_THRESHOLD * (1 - totalProgress * CONFIG.THRESHOLD_RAMP)
+    // const threshold =
+    //   CONFIG.MIN_THRESHOLD * (1 - totalProgress * CONFIG.THRESHOLD_RAMP)
+    const threshold = CONFIG.MIN_THRESHOLD * (1 - totalProgress)
 
     /**
      * check if person has all attributes.
@@ -594,6 +595,7 @@ export class NightclubGameCounter implements GameCounter {
     this.info['unicorns'] = hasEveryAttribute
       ? ++this.totalUnicorns
       : this.totalUnicorns
+    this.info['progress'] = totalProgress
 
     /**
      * Update the counts.
@@ -724,9 +726,7 @@ export class NightclubGameCounter implements GameCounter {
        * @testing boost critical attributes.
        */
       if (critical && critical.required) {
-        componentScore *= 2.0
-      } else if (critical) {
-        componentScore += 0.5
+        componentScore *= 1.2
       }
 
       // Special boost for attributes that need above their natural rate
