@@ -1,4 +1,6 @@
-import type { Keys, GameState, Person } from '.'
+import type { Keys, GameState, Person } from './types'
+import type { BergainBouncer } from './berghain'
+import { Stats } from './stats'
 
 interface Constraint {
   attribute: string
@@ -32,61 +34,6 @@ interface GameProgress {
 type CriticalAttributes = Partial<
   Record<Keys, { needed: number; required: boolean }>
 >
-
-namespace Stats {
-  /**
-   * Calculate the average value of an array.
-   */
-  export function average(items: number[]): number {
-    if (!items || items.length === 0) return 0
-    return items.reduce((total, current) => total + current, 0) / items.length
-  }
-
-  /**
-   * Round the number to the specified places.
-   */
-  export function round(num: number, places = 100): number {
-    return Math.round(num * places) / places
-  }
-
-  /**
-   * Quickly convert a decimal to a percentage with 2 decimals.
-   */
-  export function percent(num: number): number {
-    return Stats.round(num, 10_000)
-  }
-
-  /**
-   * Calculate the median value.
-   */
-  export function median(nums: number[]): number {
-    let max = 0
-    let min = Infinity
-    nums.forEach((n) => {
-      max = Math.max(n, max)
-      min = Math.min(n, min)
-    })
-    return (max - min) / 2.0
-  }
-
-  /**
-   * Calculate standard deviation.
-   */
-  export function stdDev(nums: number[]): number {
-    const avrg = Stats.average(nums)
-    const variance =
-      nums.reduce((sum, score) => sum + Math.pow(score - avrg, 2), 0) /
-      nums.length
-    return Math.max(Math.sqrt(variance), 0.1)
-  }
-
-  /**
-   * Calculate the sigmoid of a ratio.
-   */
-  export function sigmoid(ratio: number) {
-    return (1.0 + Math.tanh(1.0 - ratio)) / 2.0
-  }
-}
 
 /** ## Bouncer Configuration
  *  
@@ -284,6 +231,8 @@ const CONFIG = {
   MIN_RAW_SCORES: 5,
 }
 
+type BouncerConfig = typeof CONFIG
+
 /**
  *  ## Nightclub Bouncer
  *
@@ -301,7 +250,19 @@ const CONFIG = {
  *
  *  @scoring You score is the number of people you rejected before filling the venue (the less the better).
  */
-export class NightclubGameCounter {
+export class Bouncer implements BergainBouncer {
+  /**
+   *  allows overriding settings by the caller and returns an initializer/
+   */
+  static intialize(overrides: Partial<BouncerConfig>) {
+    Object.entries(overrides).forEach(([key, value]) => {
+      // @ts-ignore
+      if (key in CONFIG) CONFIG[key] = value
+      else throw new Error(`MISSING_CONFIG_KEY: ${key}!`)
+    })
+    return (gameState: GameState) => new Bouncer(gameState)
+  }
+
   private gameData: GameData
   private attributeCounts: Record<string, number> = {}
   private maxCapacity = CONFIG.MAX_CAPACITY
@@ -968,17 +929,6 @@ export class NightclubGameCounter {
     return this.normalizeScore(score)
   }
 
-  public getGameData() {
-    const targetScore = 5_000 // rejections
-    return {
-      ...this.getProgress(),
-      accuracy: Stats.percent(
-        Math.abs(targetScore - this.rejectedCount) / targetScore
-      ),
-      scores: this.totalScores,
-    }
-  }
-
   /**
    * Helper method to calculate current progress.
    * @note this is just for tracking.
@@ -1015,5 +965,20 @@ export class NightclubGameCounter {
     }
 
     return progress
+  }
+
+  /**
+   * Called when the game finishes to save any useful information
+   * to the game file.
+   */
+  public getOutput() {
+    const targetScore = CONFIG.TARGET_RANGE // rejections
+    return {
+      ...this.getProgress(),
+      accuracy: Stats.percent(
+        Math.abs(targetScore - this.rejectedCount) / targetScore
+      ),
+      scores: this.totalScores,
+    }
   }
 }
