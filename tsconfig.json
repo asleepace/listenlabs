@@ -1,4 +1,6 @@
 {
+  "include": ["**/*.{ts,json}"],
+  "exclude": ["node_modules", "data", "example"],
   "compilerOptions": {
     // Environment setup & latest features
     "lib": ["ESNext"],

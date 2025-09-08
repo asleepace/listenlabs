@@ -3,7 +3,7 @@ import type {
   GameStatus,
   PersonAttributes,
   PersonAttributesScenario3,
-} from './types'
+} from '../types'
 import { Stats } from './stats'
 
 type Frequencies<Attributes extends PersonAttributes> = {

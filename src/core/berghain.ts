@@ -1,4 +1,4 @@
-import type { GameStatus, Game, GameState, GameStatusRunning } from './types'
+import type { GameStatus, Game, GameState, GameStatusRunning } from '../types'
 
 export type ListenLabsConfig = {
   uniqueId: string

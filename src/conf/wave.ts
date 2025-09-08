@@ -1,4 +1,7 @@
-export const STRATEGY_WAVE = {
+import { BASE_CONFIG, type GameConfig } from './game-config'
+
+export const WAVE_CONFIG: GameConfig = {
+  ...BASE_CONFIG,
   BASE_THRESHOLD: 0.55, // Higher base for more selectivity
   MIN_THRESHOLD: 0.35, // Lower floor for aggressive recovery
   MAX_THRESHOLD: 0.8, // Lower ceiling to prevent over-restriction

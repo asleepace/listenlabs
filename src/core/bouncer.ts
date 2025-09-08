@@ -1,5 +1,6 @@
-import type { GameState, Person, PersonAttributes } from './types'
+import type { GameState, Person, PersonAttributes } from '../types'
 import type { BergainBouncer } from './berghain'
+import { BASE_CONFIG, type GameConfig } from '../conf/game-config'
 import { Stats } from './stats'
 import { Metrics } from './metrics'
 
@@ -14,7 +15,7 @@ interface GameQuota<Attributes extends PersonAttributes> {
 }
 
 interface GameProgress<Attributes extends PersonAttributes> {
-  config: typeof CONFIG
+  config: GameConfig
   critical: string[]
   quotas: GameQuota<Attributes>[]
   admissionRate: number
@@ -27,209 +28,6 @@ type CriticalAttributes<Attributes extends PersonAttributes> = Partial<
   Record<keyof Attributes, { needed: number; required: boolean }>
 >
 
-/** ## Bouncer Configuration
- *  
- * current best:
-    MIN_THRESHOLD: 0.75,
-    THRESHOLD_RAMP: 0.3,
-    TARGET_RANGE: 5000,
-    URGENCY_MODIFIER: 3,
-    CORRELATION_BONUS: 0.3,
-    NEGATIVE_CORRELATION_BONUS: 0.5,
-    NEGATIVE_CORRELATION_THRESHOLD: -0.5,
-    MULTI_ATTRIBUTE_BONUS: 0.5,
-    RARE_PERSON_BONUS: 0.5,
-    MAX_CAPACITY: 1000,
-    TOTAL_PEOPLE: 10000,
-    CRITICAL_THRESHOLD: 50,
-    CRITICAL_IN_LINE_RATIO: 0.75,
-    CRITICAL_CAPACITY_RATIO: 0.8,
-    GUARENTEED: 10,
-
- 
-HIGH IMPACT (tune these first):
- 
-1. MIN_THRESHOLD (Range: 0.2 - 0.7)
-
-  Impact: Controls base admission strictness
-  Sweet spot: 0.3 - 0.5
-  Lower = more lenient early (admit more people)
-  Higher = stricter (risk not filling venue)
- 
-2. TARGET_RANGE (Range: 2000 - 6000)
-
-  Impact: When you aim to complete quotas
-  Sweet spot: 3500 - 4500
-  Lower = rush to fill quotas early (risk running out of spots)
-  Higher = spread out (risk missing rare attributes)
-  Depends on rarest attribute frequency
-
-3. URGENCY_MODIFIER (Range: 1.0 - 6.0)
-
-  Impact: How much being behind schedule matters
-  Sweet spot: 2.5 - 4.0
-  Lower = relaxed about timing (risk missing quotas)
-  Higher = panic when behind (risk over-admitting)
-
-==== MEDIUM IMPACT (fine-tune after high impact) ====
-
-4. THRESHOLD_RAMP (Range: 0.2 - 0.8)
-
-  Impact: How threshold changes as venue fills
-  Sweet spot: 0.4 - 0.6
-  Lower = consistent threshold throughout
-  Higher = gets much stricter as you fill up
-
-5. MULTI_ATTRIBUTE_BONUS (Range: 0.3 - 1.5)
-
-  Impact: Reward for people with multiple needed attributes
-  Sweet spot: 0.5 - 0.8
-  Too high = over-value "jack of all trades"
-  Too low = miss efficient multi-quota fills
-
-6. CRITICAL_THRESHOLD (Range: 10 - 100)
-
-  Impact: When to panic about unfilled quotas
-  Sweet spot: 30 - 60
-  Lower = panic mode engages late
-  Higher = conservative/safe approach
-
-==== LOW IMPACT (minor tweaks) ====
-
-7. CORRELATION_BONUS (Range: 0.1 - 0.5)
-
-  Impact: Reward for positively correlated attributes
-  Sweet spot: 0.2 - 0.3
-  Minor effect on overall strategy
-
-8. NEGATIVE_CORRELATION_BONUS (Range: 0.3 - 1.0)
-
-  Impact: Reward for rare combinations
-  Sweet spot: 0.5 - 0.7
-  Helps with edge cases
-
-9. RARE_PERSON_BONUS (Range: 0.3 - 1.0)
-
-  Impact: Extra boost for rare combos
-  Similar to NEGATIVE_CORRELATION_BONUS
-
-10. NEGATIVE_CORRELATION_THRESHOLD (Range: -0.7 to -0.3)
-
-  Impact: What counts as "negatively correlated"
-  Sweet spot: -0.4 to -0.5
-  Very minor impact
- 
-  **/
-export const CONFIG = {
-  // Admission threshold settings
-  /**
-   * Base admission score threshold less is more lenient early on.
-   * @note normalized game averages ~0.51 to admit, current best with 0.75
-   * @range 0.2 to 0.7
-   * @default 0.7
-   */
-  BASE_THRESHOLD: 0.48,
-  MIN_THRESHOLD: 0.36,
-  MAX_THRESHOLD: 0.91,
-  /**
-   * How quickly threshold decreases as we fill up, lesser for gradual tightening.
-   * Lower = consistent threshold throughout
-   * Higher = gets much stricter as you fill up
-   * @range 0.2 to 0.8
-   * @default 0.5
-   */
-  THRESHOLD_RAMP: 0.3,
-
-  /**
-   * Aim to complete all quotas by persons by this value (out of 10,000)
-   * Lower = rush to fill quotas early (risk running out of spots)
-   * Higher = spread out (risk missing rare attributes)
-   * @range 2000 to 6000
-   * @default 4000 (people)
-   * @note current best score on leaderboard.
-   */
-  TARGET_RANGE: 4000,
-
-  /**
-   * Multiplier for how much being behind schedule matters.
-   * Lower = relaxed about timing (risk missing quotas)
-   * Higher = panic when behind (risk over-admitting)
-   * @range 1.0 to 6.0
-   * @default 2.2
-   */
-  URGENCY_MODIFIER: 3.0,
-  /**
-   * Reward for positively correlated attributes.
-   * @range 0.1 to 0.5
-   * @default 0.3
-   */
-  CORRELATION_BONUS: 0.3,
-  /**
-   * Bonus for rare combinations (negatively correlated but both needed).
-   * @default 0.5
-   */
-  NEGATIVE_CORRELATION_BONUS: 0.7,
-  /**
-   * Correlation below this triggers special handling.
-   * @range -0.7 to -0.3
-   * @default -0.5
-   */
-  NEGATIVE_CORRELATION_THRESHOLD: -0.5,
-  /**
-   * Reward for people with multiple needed attributes (compounds)
-   * Too high = over-value "jack of all trades"
-   * Too low = miss efficient multi-quota fills
-   * @range 0.5 to 0.8
-   * @default 0.5
-   */
-  MULTI_ATTRIBUTE_BONUS: 0.5,
-  /**
-   * Bonus for rare attribute combinations (negatively correlated)
-   * @range 0.3 to 1.0
-   * @default 0.5
-   */
-  RARE_PERSON_BONUS: 0.5,
-
-  /**
-   * Total maximum people we can admit (constant)
-   */
-  MAX_CAPACITY: 1_000,
-  /**
-   * Total people in line to select from (constant)
-   */
-  TOTAL_PEOPLE: 10_000,
-
-  /**
-   * Number of available spots left where attribute becomes required.
-   * @default 1 (person)
-   */
-  CRITICAL_REQUIRED_THRESHOLD: 5,
-
-  /**
-   * Percentage of remaining people we need to fill quota.
-   * @default 0.75 (75% percent)
-   */
-  CRITICAL_IN_LINE_RATIO: 0.8,
-
-  /**
-   * Percentage of remaining spots needed.
-   * @default 0.8 (80% full)
-   */
-  CRITICAL_CAPACITY_RATIO: 0.8,
-
-  /**
-   * Number of scores needed for calculations.
-   */
-  MIN_RAW_SCORES: 5,
-
-  /**
-   * Print stategy info at end.
-   */
-  MESSAGE: '',
-}
-
-export type BouncerConfig = typeof CONFIG
-
 // ... existing interfaces and CONFIG ...
 
 export class Bouncer<
@@ -237,18 +35,15 @@ export class Bouncer<
   Keys extends keyof Attributes = keyof Attributes
 > implements BergainBouncer
 {
-  static intialize(overrides: Partial<BouncerConfig>) {
-    Object.entries(overrides).forEach(([key, value]) => {
-      // @ts-ignore
-      if (key in CONFIG) CONFIG[key] = value
-      else throw new Error(`MISSING_CONFIG_KEY: ${key}!`)
-    })
+  static CONFIG = BASE_CONFIG
+  static intialize(overrides: Partial<GameConfig>) {
+    Bouncer.CONFIG = Object.assign(Bouncer.CONFIG, overrides)
     return (gameState: GameState) => new Bouncer(gameState)
   }
 
   private metrics: Metrics<Attributes>
-  private maxCapacity = CONFIG.MAX_CAPACITY
-  private totalPeople = CONFIG.TOTAL_PEOPLE
+  private maxCapacity = Bouncer.CONFIG.MAX_CAPACITY
+  private totalPeople = Bouncer.CONFIG.TOTAL_PEOPLE
 
   public progress: GameProgress<Attributes>
   public state: GameState
@@ -336,7 +131,7 @@ export class Bouncer<
 
       // Enhanced logic using estimated remaining
       const isRequired =
-        needed >= totalSpotsLeft - CONFIG.CRITICAL_REQUIRED_THRESHOLD
+        needed >= totalSpotsLeft - Bouncer.CONFIG.CRITICAL_REQUIRED_THRESHOLD
       const isEstimateShort = needed > estimatedRemaining * 0.8 // Need more than 80% of estimated remaining
 
       // An attribute becomes critical if:
@@ -369,7 +164,7 @@ export class Bouncer<
   }
 
   private normalizeScore(rawScore: number): number {
-    if (this.rawScores.length < CONFIG.MIN_RAW_SCORES) {
+    if (this.rawScores.length < Bouncer.CONFIG.MIN_RAW_SCORES) {
       return Math.min(rawScore / 5.0, 1.0)
     }
     const avgScore = Stats.average(this.rawScores) || 0.5
@@ -419,7 +214,10 @@ export class Bouncer<
 
   private getProgressThreshold(): number {
     const totalProcessed = this.admittedCount + this.rejectedCount
-    const expectedProgress = Math.min(totalProcessed / CONFIG.TARGET_RANGE, 1.0)
+    const expectedProgress = Math.min(
+      totalProcessed / Bouncer.CONFIG.TARGET_RANGE,
+      1.0
+    )
     const totalProgress = this.metrics.totalProgress
 
     // Calculate how far off we are from expected
@@ -433,9 +231,9 @@ export class Bouncer<
     const adjustment = sigmoid * maxAdjustment
 
     const threshold = Stats.clamp(
-      CONFIG.BASE_THRESHOLD - adjustment, // Subtract because behind = lower threshold
-      CONFIG.MIN_THRESHOLD,
-      CONFIG.MAX_THRESHOLD
+      Bouncer.CONFIG.BASE_THRESHOLD - adjustment, // Subtract because behind = lower threshold
+      Bouncer.CONFIG.MIN_THRESHOLD,
+      Bouncer.CONFIG.MAX_THRESHOLD
     )
 
     // Enhanced logging
@@ -498,7 +296,7 @@ export class Bouncer<
     }
 
     // Early game strategy using metrics
-    if (this.admittedCount < CONFIG.MIN_RAW_SCORES) {
+    if (this.admittedCount < Bouncer.CONFIG.MIN_RAW_SCORES) {
       const rarestAttrs = this.metrics.getRarestAttributes().slice(0, 2)
       const hasRareAttr = rarestAttrs.some((attr) => personAttributes[attr])
       const hasMultipleUseful =
@@ -566,18 +364,21 @@ export class Bouncer<
       const frequency = this.metrics.frequencies[attr]
       const attrDifficulty = difficulty.get(attr)!
 
-      const quotaRate = constraint.minCount / CONFIG.MAX_CAPACITY
+      const quotaRate = constraint.minCount / Bouncer.CONFIG.MAX_CAPACITY
 
       // If this attribute is much more common than its quota rate AND we're early game
       const isOverabundant = frequency > quotaRate * 2.0
-      const isEarlyGame = totalProcessed < CONFIG.TARGET_RANGE * 0.5
+      const isEarlyGame = totalProcessed < Bouncer.CONFIG.TARGET_RANGE * 0.5
 
       // Base scoring factors
-      const targetProgress = Math.min(totalProcessed / CONFIG.TARGET_RANGE, 1.0)
+      const targetProgress = Math.min(
+        totalProcessed / Bouncer.CONFIG.TARGET_RANGE,
+        1.0
+      )
       const actualProgress = this.metrics.getProgress(attr)
       const progressGap = targetProgress - actualProgress
       const urgency =
-        progressGap > 0 ? progressGap * CONFIG.URGENCY_MODIFIER : 0
+        progressGap > 0 ? progressGap * Bouncer.CONFIG.URGENCY_MODIFIER : 0
 
       // Enhanced risk calculation using estimated remaining
       const expectedRemaining = this.getEstimatedPeopleWithAttributeLeftInLine(
@@ -614,7 +415,8 @@ export class Bouncer<
       strongPairs.forEach((pair) => {
         const otherAttr = pair.attr1 === attr ? pair.attr2 : pair.attr1
         if (attributes[otherAttr as any]) {
-          correlationBonus += pair.correlation * CONFIG.CORRELATION_BONUS
+          correlationBonus +=
+            pair.correlation * Bouncer.CONFIG.CORRELATION_BONUS
         }
       })
 
@@ -627,7 +429,7 @@ export class Bouncer<
         const otherAttr = pair.attr1 === attr ? pair.attr2 : pair.attr1
         if (attributes[otherAttr as any]) {
           correlationBonus +=
-            Math.abs(pair.correlation) * CONFIG.RARE_PERSON_BONUS
+            Math.abs(pair.correlation) * Bouncer.CONFIG.RARE_PERSON_BONUS
         }
       })
 
@@ -637,7 +439,7 @@ export class Bouncer<
     // Multi-attribute bonus
     const usefulCount = usefulAttributes.length
     if (usefulCount > 1) {
-      score *= 1 + CONFIG.MULTI_ATTRIBUTE_BONUS * (usefulCount - 1)
+      score *= 1 + Bouncer.CONFIG.MULTI_ATTRIBUTE_BONUS * (usefulCount - 1)
     }
 
     this.rawScores.push(score)
@@ -700,7 +502,7 @@ export class Bouncer<
     return {
       info: enhancedInfo,
       critical: criticalAttributes,
-      config: CONFIG,
+      config: Bouncer.CONFIG,
       quotas: incompleteQuotas.sort((a, b) => a.needed - b.needed) as any,
       admissionRate:
         this.admittedCount / (this.admittedCount + this.rejectedCount),
@@ -716,7 +518,8 @@ export class Bouncer<
     return {
       ...this.getProgress(),
       accuracy: Stats.percent(
-        Math.abs(CONFIG.TARGET_RANGE - this.rejectedCount) / CONFIG.TARGET_RANGE
+        Math.abs(Bouncer.CONFIG.TARGET_RANGE - this.rejectedCount) /
+          Bouncer.CONFIG.TARGET_RANGE
       ),
       scores: this.totalScores,
       metrics_analysis: analysis,
