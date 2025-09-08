@@ -1,7 +1,8 @@
 import { parseArgs } from 'util'
 import { BASE_CONFIG, type GameConfig } from '../conf/game-config'
 
-const getTypeThenCast = (key: keyof GameConfig, value: string | boolean) => {
+const getTypeThenCast = (keyString: string, value: string | boolean) => {
+  const key = keyString.toUpperCase() as keyof GameConfig
   if (!(key in BASE_CONFIG))
     throw new Error('Invalid command line argument: ' + key)
   if (typeof BASE_CONFIG[key] === 'number') {
