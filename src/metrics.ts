@@ -441,7 +441,8 @@ export class Metrics<
       const frequency = stats.frequency
 
       // Risk = how much we need vs how rare it is
-      return needed / Math.max(frequency, 0.01)
+      const riskScore = needed / Math.max(frequency, 0.01)
+      return Math.min(riskScore, 10.0)
     })
 
     const riskScore = riskFactors.length > 0 ? Stats.average(riskFactors) : 0

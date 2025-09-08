@@ -1,4 +1,4 @@
-import type { Keys, GameState, Person } from './types'
+import type { GameState, Person, PersonAttributes } from './types'
 import type { BergainBouncer } from './berghain'
 import { Stats } from './stats'
 import { Metrics } from './metrics'
@@ -8,32 +8,23 @@ interface Constraint {
   minCount: number
 }
 
-interface GameData {
-  gameId: string
-  constraints: Constraint[]
-  attributeStatistics: {
-    relativeFrequencies: Record<string, number>
-    correlations: Record<string, Record<string, number>>
-  }
-}
-
-interface GameQuota {
-  attribute: Keys
+interface GameQuota<Attributes extends PersonAttributes> {
+  attribute: keyof Attributes
   needed: number
 }
 
-interface GameProgress {
+interface GameProgress<Attributes extends PersonAttributes> {
   config: typeof CONFIG
   critical: string[]
-  quotas: GameQuota[]
+  quotas: GameQuota<Attributes>[]
   admissionRate: number
   admitted: number
   rejected: number
   info: any
 }
 
-type CriticalAttributes = Partial<
-  Record<Keys, { needed: number; required: boolean }>
+type CriticalAttributes<Attributes extends PersonAttributes> = Partial<
+  Record<keyof Attributes, { needed: number; required: boolean }>
 >
 
 /** ## Bouncer Configuration
@@ -234,27 +225,13 @@ export const CONFIG = {
 
 export type BouncerConfig = typeof CONFIG
 
-/**
- *  ## Nightclub Bouncer
- *
- *  You're the bouncer at a night club. Your goal is to fill the venue with N=1000 people
- *  while satisfying constraints like "at least 40% Berlin locals",  or "at least 80% wearing all black".
- *
- *  People arrive one by one, and you must immediately decide whether to let them in or turn them away.
- *  Your challenge is to fill the venue with as few rejections as possible while meeting all minimum requirements.
- *
- *  - People arrive sequentially with binary attributes (e.g., female/male, young/old, regular/new)
- *  - You must make immediate accept/reject decisions
- *  - The game ends when either:
- *    (a) venue is full (1000 people)
- *    (b) you rejected 10,000 people
- *
- *  @scoring You score is the number of people you rejected before filling the venue (the less the better).
- */
-export class Bouncer implements BergainBouncer {
-  /**
-   *  allows overriding settings by the caller and returns an initializer/
-   */
+// ... existing interfaces and CONFIG ...
+
+export class Bouncer<
+  Attributes extends PersonAttributes,
+  Keys extends keyof Attributes = keyof Attributes
+> implements BergainBouncer
+{
   static intialize(overrides: Partial<BouncerConfig>) {
     Object.entries(overrides).forEach(([key, value]) => {
       // @ts-ignore
@@ -264,12 +241,11 @@ export class Bouncer implements BergainBouncer {
     return (gameState: GameState) => new Bouncer(gameState)
   }
 
-  private gameData: GameData
-  private attributeCounts: Record<string, number> = {}
+  private metrics: Metrics<Attributes>
   private maxCapacity = CONFIG.MAX_CAPACITY
   private totalPeople = CONFIG.TOTAL_PEOPLE
 
-  public progress: GameProgress
+  public progress: GameProgress<Attributes>
   public state: GameState
   public info: Record<string, any> = {}
 
@@ -278,323 +254,130 @@ export class Bouncer implements BergainBouncer {
   public totalAdmittedScores: number[] = []
   public lowestAcceptedScore = Infinity
   public totalUnicorns = 0
-  public stats = {
-    average: 0,
-    medium: 0,
-    mode: 0,
-  }
 
-  public criticalAttributes: CriticalAttributes = {}
+  public criticalAttributes: CriticalAttributes<Attributes> = {}
 
   constructor(initialData: GameState) {
-    this.gameData = initialData.game
+    this.metrics = new Metrics(initialData.game)
     this.state = initialData
-    this.gameData.constraints.forEach((constraint) => {
-      this.attributeCounts[constraint.attribute] = 0
-    })
     this.progress = this.getProgress()
   }
 
-  // getters
-
+  // Simplified getters using metrics
   private get constraints() {
-    return this.gameData.constraints
+    return this.metrics.constraints
   }
 
-  private get correlations() {
-    return this.gameData.attributeStatistics.correlations
-  }
-
-  private get frequencies() {
-    return this.gameData.attributeStatistics.relativeFrequencies
-  }
-
-  /**
-   * Total number of available spots left for entries.
-   */
   private get totalSpotsLeft(): number {
     return this.maxCapacity - this.admittedCount
   }
 
-  /**
-   * Estimated number of people left in the line to check.
-   */
   private get estimatedPeopleInLineLeft(): number {
     return this.totalPeople - this.admittedCount - this.rejectedCount
   }
 
-  /**
-   * Total number of quotas which have been reached.
-   */
-  private get totalQuotasMet(): number {
-    return this.gameData.constraints.reduce((total, constraint) => {
-      const constraintCount = this.getCount(constraint.attribute)
-      return total + (constraintCount >= constraint.minCount ? 1 : 0)
-    }, 0)
-  }
-
-  /**
-   * The total number of quotas which need to be met (constant)
-   */
-  private get totalQuotas(): number {
-    return this.gameData.constraints.length
-  }
-
-  /**
-   * True when all quotas have been fulfilled.
-   */
   private get allQuotasMet(): boolean {
-    return this.gameData.constraints.every(
-      (constraint) =>
-        this.attributeCounts[constraint.attribute]! >= constraint.minCount
-    )
+    return this.metrics.allConstraintsMet
   }
 
-  /**
-   * Get the current average score (with normalized values 0.0 to 1.0)
-   */
-  private get averageScore(): number {
-    return Stats.average(
-      this.totalScores.map((item) => (item > 1.0 ? 1 : item))
-    )
-  }
-
-  /**
-   * Total number of people admitted.
-   */
   get admittedCount() {
     if (this.state.status.status !== 'running') throw this.state.status
     return this.state.status.admittedCount
   }
 
-  /**
-   * Total number of people rejected.
-   */
   get rejectedCount() {
     if (this.state.status.status !== 'running') throw this.state.status
     return this.state.status.rejectedCount
   }
 
-  /**
-   * Get the current number of people with the attribute already admited.
-   */
-  public getCount(attribute: Keys | string): number {
-    if (!(attribute in this.attributeCounts))
-      throw new Error(`Missing attribute count for: ${attribute}`)
-    return this.attributeCounts[attribute] ?? 0
+  // Delegate counting methods to metrics
+  public getCount(attribute: Keys): number {
+    return this.metrics.getCount(attribute)
   }
 
   public getCorrelations(attribute: Keys | string) {
-    if (!(attribute in this.correlations))
-      throw new Error(`Missing correlation for: ${attribute}`)
-    return this.correlations[attribute]!
+    return this.metrics.correlations[attribute as Keys]
   }
 
   public getFrequency(attribute: Keys | string): number {
-    if (!(attribute in this.frequencies))
-      throw new Error(`Missing frequency for: ${attribute}`)
-    return this.frequencies[attribute]!
+    return this.metrics.frequencies[attribute as Keys]
   }
 
-  /**
-   * Get the total number of people left to fill the attributes quota.
-   */
   private getPeopleNeeded(attribute: Keys | string): number {
-    const constraint = this.constraints.find(
-      (constraint) => constraint.attribute === attribute
-    )
-    if (!constraint) throw new Error('Missing constraint for:' + attribute)
-    const totalPeople = constraint.minCount - this.getCount(attribute)
-    return totalPeople > 0 ? totalPeople : 0
+    return this.metrics.getNeeded(attribute as Keys)
   }
 
-  /**
-   * If we need more than 80% of expected remaining people for quota, or
-   * we need 90% of total spot available.
-   */
-  private getCriticalAttributes(): CriticalAttributes {
+  // Enhanced critical attributes using metrics insights
+  private getCriticalAttributes(): CriticalAttributes<Attributes> {
     const peopleInLineLeft = this.estimatedPeopleInLineLeft
     const totalSpotsLeft = this.totalSpotsLeft
 
-    const criticalLineThreshold =
-      peopleInLineLeft * CONFIG.CRITICAL_IN_LINE_RATIO
+    // Use metrics risk assessment
+    const riskAssessment = this.metrics.getRiskAssessment()
+    const incompleteConstraints = this.metrics.getIncompleteConstraints()
 
-    const criticalCapacityThreshold =
-      totalSpotsLeft * CONFIG.CRITICAL_CAPACITY_RATIO
+    this.criticalAttributes = {}
 
-    this.criticalAttributes = this.gameData.constraints.reduce(
-      (output, current) => {
-        const peopleNeeded = this.getPeopleNeeded(current.attribute)
-        if (!peopleNeeded) return output
+    incompleteConstraints.forEach((constraint) => {
+      const attr = constraint.attribute
+      const needed = constraint.needed
+      const frequency = this.metrics.frequencies[attr]
 
-        const estimatedPeopleLeftInLine =
-          peopleInLineLeft * this.getFrequency(current.attribute)
+      const estimatedRemaining = peopleInLineLeft * frequency
+      const isCritical = riskAssessment.criticalAttributes.includes(attr)
+      const isRequired =
+        needed >= totalSpotsLeft - CONFIG.CRITICAL_REQUIRED_THRESHOLD
 
-        // check if at thresholds... (maybe backwards?)
-        const isCriticalLineThreshold =
-          estimatedPeopleLeftInLine >= criticalLineThreshold
-
-        const isCriticalCapacityThreshold =
-          peopleNeeded >= criticalCapacityThreshold
-
-        if (isCriticalLineThreshold || isCriticalCapacityThreshold) {
-          const isRequired = peopleNeeded >= totalSpotsLeft
-
-          return {
-            ...output,
-            [current.attribute as Keys]: {
-              needed: peopleNeeded,
-              required: isRequired,
-            },
-          }
-        } else {
-          return output
+      if (isCritical || isRequired) {
+        this.criticalAttributes[attr] = {
+          needed,
+          required: isRequired,
         }
-      },
-      {} as Record<Keys, { needed: number; required: boolean }>
-    )
-
-    // do a second pass to make sure two attrs don't both become required
+      }
+    })
 
     return this.criticalAttributes
   }
 
-  /**
-   * Update our current counts when we admint a new person.
-   * @param person
-   * @param shouldAdmit
-   */
-  updateCounts(
-    attributes: Person['attributes'],
+  private updateCounts(
+    attributes: Attributes,
     score: number,
     shouldAdmit: boolean
   ) {
     if (!shouldAdmit) return
+
     this.totalAdmittedScores.push(score)
     this.lowestAcceptedScore = Math.min(score, this.lowestAcceptedScore)
-    Object.entries(attributes).forEach(([attr, hasAttr]) => {
-      if (hasAttr && this.attributeCounts[attr] !== undefined) {
-        this.attributeCounts[attr]++
-      }
-    })
+
+    // Use metrics to update counts
+    this.metrics.updateCounts(attributes)
   }
 
-  /**
-   * @deprecated
-   */
   private normalizeScore(rawScore: number): number {
     if (this.rawScores.length < CONFIG.MIN_RAW_SCORES) {
-      // Early game: simple scaling
       return Math.min(rawScore / 5.0, 1.0)
     }
     const avgScore = Stats.average(this.rawScores) || 0.5
-    const stdDev = this.getRawScoreStdDev() || 0.2
-    // Sigmoid centered on average with adaptive scaling
+    const stdDev = Stats.stdDev(this.rawScores) || 0.2
     return 1.0 / (1.0 + Math.exp(-(rawScore - avgScore) / stdDev))
   }
 
-  /**
-   * @testing
-   * @deprecated
-   */
-  private getRawScoreStdDev(): number {
-    if (this.rawScores.length < CONFIG.MIN_RAW_SCORES) return 1.0
-    const avg = Stats.average(this.rawScores)
-    const variance =
-      this.rawScores.reduce((sum, score) => sum + Math.pow(score - avg, 2), 0) /
-      this.rawScores.length
-    return Math.max(Math.sqrt(variance), 0.1) // Prevent zero std dev
-  }
-
-  /**
-   * @testing
-   * @deprecated
-   */
-  private calculateDynamicThreshold(
-    totalProgress: number,
-    progressRatio: number
-  ): number {
-    // Prevent division by zero
-    const safeProgressRatio = Math.max(progressRatio, 0.01)
-    // Bound totalProgress to prevent extreme values
-    const boundedProgress = Math.max(0.1, Math.min(totalProgress, 3.0))
-    const sigmoid = Stats.sigmoid(boundedProgress / safeProgressRatio)
-    return Math.max(0.05, Math.min(0.95, 1.0 - sigmoid))
-  }
-
-  /**
-   * @deprecated
-   */
-  private getElasticThreshold(progressRatio: number) {
-    const totalProgress =
-      this.constraints.reduce((total, constraint) => {
-        const currentCount = this.getCount(constraint.attribute)
-        if (currentCount >= constraint.minCount) return total + 1
-
-        // Progress = what we have / what we need total
-        const attrProgress = currentCount / constraint.minCount
-        return total + attrProgress
-      }, 0) / this.constraints.length
-
-    this.info['progress_total'] = Stats.round(totalProgress, 100)
-
-    // Calculate how far ahead/behind we are on quotas vs capacity
-    const progressDelta = totalProgress - progressRatio
-
-    // Elastic threshold that responds to the delta
-    const sensitivity = 5.0 // How much to adjust (tune this)
-
-    /**
-     * @testing this was CONFIG.BASE_THRESHOLD + progressDelta * sensitivity
-     */
-    const threshold = Math.max(
-      CONFIG.MIN_THRESHOLD,
-      Math.min(
-        CONFIG.MAX_THRESHOLD,
-        CONFIG.BASE_THRESHOLD - progressDelta * sensitivity
-      )
-    )
-
-    return threshold
-  }
-
-  /**
-   * calculate total quota progress
-   * @testing
-   */
-  private getTotalProgess() {
-    return (
-      this.constraints.reduce((total, constraint) => {
-        const currentCount = this.getCount(constraint.attribute)
-        if (currentCount >= constraint.minCount) return total + 1
-
-        // Progress = what we have / what we need total
-        const attrProgress = currentCount / constraint.minCount
-        return total + attrProgress
-      }, 0) / this.constraints.length
-    )
-  }
-
-  /**
-   * calculate total progress vs esitmate
-   * @testing
-   */
-  private getProgressThreshold() {
+  // Improved threshold calculation using metrics
+  private getProgressThreshold(): number {
     const totalProcessed = this.admittedCount + this.rejectedCount
-
-    // Where should we be in quota completion by now?
     const expectedProgress = Math.min(totalProcessed / CONFIG.TARGET_RANGE, 1.0)
-    // const progressRatio = this.admittedCount / this.maxCapacity
-    const totalProgress = this.getTotalProgess()
-    const sensitivity = 2.0
+    const totalProgress = this.metrics.totalProgress
 
-    // Combined progress gap
-    // const combinedDelta =
-    //   (totalProgress - progressRatio) * 0.8 + // capacity weight
-    //   (totalProgress - expectedProgress) * 0.4 // timeline weight
+    // Use metrics efficiency analysis
+    const efficiency = this.metrics.getEfficiencyMetrics()
+    const riskAssessment = this.metrics.getRiskAssessment()
+
+    // Adjust sensitivity based on risk
+    const baseSensitivity = 2.0
+    const riskMultiplier = Stats.clamp(riskAssessment.riskScore / 5.0, 0.5, 2.0)
+    const sensitivity = baseSensitivity * riskMultiplier
 
     const delta = (expectedProgress - totalProgress) * 0.5
-
     const threshold = Math.max(
       CONFIG.MIN_THRESHOLD,
       Math.min(
@@ -603,379 +386,249 @@ export class Bouncer implements BergainBouncer {
       )
     )
 
+    // Enhanced logging with metrics insights
     this.info['expected_progress'] = Stats.round(expectedProgress, 10_000)
     this.info['total_progress'] = Stats.round(totalProgress, 10_000)
+    this.info['efficiency'] = efficiency.actualEfficiency
+    this.info['risk_score'] = riskAssessment.riskScore
     this.info['threshold'] = Stats.round(threshold, 10_000)
+
     return threshold
   }
 
-  /**
-   * Check if we should admit or reject the next person in line.
-   */
   admit(status: GameState['status']): boolean {
-    this.state.status = status // update state status
+    this.state.status = status
     const { nextPerson } = status
 
-    /**
-     * prevent issues when network request fails
-     */
     if (!nextPerson) return false
 
-    /**
-     * auto-admit if all quotas already met.
-     */
     if (this.allQuotasMet) {
       console.log('[game] auto-admitting all quotas met...')
       return true
     }
 
-    /**
-     * check total progress and spots left
-     */
     const spotsLeft = this.totalSpotsLeft
-    const peopleLeftInLine = this.estimatedPeopleInLineLeft
     this.criticalAttributes = this.getCriticalAttributes()
-
     const criticalKeys = Object.keys(this.criticalAttributes) as Keys[]
-
-    /**
-     * Attributes for person to check.
-     */
     const personAttributes = nextPerson.attributes
 
-    /**
-     * if spots less than 20 make sure we meet required quotas.
-     * @testing
-     */
-    if (spotsLeft < 100 && criticalKeys.length > 0) {
+    // Enhanced critical attribute check
+    if (criticalKeys.length > 0) {
       for (const [key, value] of Object.entries(this.criticalAttributes)) {
-        if (value.required && !personAttributes[key as Keys]) return false
+        if (!value || !personAttributes) continue
+        if (value.required && !personAttributes[key as any]) return false
       }
     }
 
-    /**
-     * for the first 5 people skip if they don't posses the following
-     * @testing
-     */
+    // Early game strategy using metrics
     if (this.admittedCount < CONFIG.MIN_RAW_SCORES) {
-      const isRarePerson =
-        personAttributes.international &&
-        (personAttributes.german_speaker ||
-          personAttributes.queer_friendly ||
-          personAttributes.vinyl_collector)
+      const rarestAttrs = this.metrics.getRarestAttributes().slice(0, 2)
+      const hasRareAttr = rarestAttrs.some((attr) => personAttributes[attr])
+      const hasMultipleUseful =
+        this.metrics.countUsefulAttributes(personAttributes as any) >= 2
 
-      if (!isRarePerson) return false
+      if (!hasRareAttr && !hasMultipleUseful) return false
     }
 
-    /**
-     * Calculate admission score
-     */
-    let score = this.calculateAdmissionScore(personAttributes)
-
-    /**
-     * dynamic threshold based on how many spots are left
-     */
-    // const progressRatio = this.admittedCount / this.maxCapacity
-
-    // Expected progress: where we should be at this point in the line
-    // We want to fill quotas by person 5000 (halfway through the line)
-    // const totalProcessed = this.admittedCount + this.rejectedCount
-    // const targetProgress = Math.min(totalProcessed / CONFIG.TARGET_RANGE, 1.0)
-    // const actualProgress = this.admittedCount / CONFIG.MAX_CAPACITY
-    // const progressGrap = targetProgress - actualProgress
-    // const progressRatio = Math.max(actualProgress, targetProgress)
-
-    /**
-     * Should be easier to get in if we are ahead on quotas,
-     * Should be harder to get in if we are behind in qoutas.
-     * @testing dynamic schedule.
-     */
+    const score = this.calculateAdmissionScore(personAttributes)
     const threshold = this.getProgressThreshold()
 
-    // const threshold =
-    //   CONFIG.MIN_THRESHOLD * (1 - totalProgress * CONFIG.THRESHOLD_RAMP)
-
-    /**
-     * check if person has all attributes.
-     */
-    const hasEveryAttribute = this.constraints.every(
-      (constraint) => personAttributes[constraint.attribute as Keys] === true
+    // Use metrics for better person evaluation
+    const hasEveryAttribute = this.metrics.hasAllAttributes(
+      personAttributes as any
     )
-
-    // just for logging...
-    if (hasEveryAttribute) {
-      this.totalUnicorns++
-    }
-
-    /**
-     * person is a unicorn and has all critical attributes.
-     */
     const hasEveryCriticalAttribute =
       criticalKeys.length > 0 &&
-      criticalKeys.every((attrKey) => personAttributes[attrKey])
+      criticalKeys.every((attr) => personAttributes[attr]!)
 
-    // const isEarlyGame = this.admittedCount <= CONFIG.MIN_RAW_SCORES
-    // const isValidCombo =
-    //   personAttributes.international &&
-    //   (personAttributes.queer_friendly || personAttributes.vinyl_collector)
+    if (hasEveryAttribute) this.totalUnicorns++
 
-    /**
-     * calculate if we should admit this person.
-     */
     const shouldAdmit =
       score > threshold || hasEveryCriticalAttribute || hasEveryAttribute
 
-    /**
-     * update generic game information for debugging.
-     */
+    // Enhanced logging
     this.totalScores.push(score)
     this.info['last_score'] = Stats.round(score)
-    this.info['avrg_score'] = Stats.round(
+    this.info['useful_attrs'] = this.metrics.countUsefulAttributes(
+      personAttributes as any
+    )
+    this.info['avg_score'] = Stats.round(
       Stats.average(this.totalAdmittedScores)
     )
-    /**
-     * Update the counts.
-     */
-    this.updateCounts(personAttributes, score, shouldAdmit)
 
-    /**
-     * Return our decision.
-     */
+    // Add metrics summary to info
+    const summary = this.metrics.getSummary()
+    this.info['metrics_summary'] = summary
+
+    this.updateCounts(personAttributes as any, score, shouldAdmit)
     return shouldAdmit
   }
 
-  /**
-   * This returns an estimate of the number of people left in line with the given
-   * attribute, this is calculated by:
-   *
-   *  1. Get total estimate people left in line
-   *  2. Subtract non-correlated people x their frequency
-   *  3. Multiply the remaining number by the attributes frequency
-   *
-   * NOTE: This can be overly pessimistic, but prevents impossible game states.
-   */
-  public getEstimatedPeopleWithAttributeLeftInLine(attribute: Keys) {
-    const attributesCorrelations = this.getCorrelations(attribute)
-    const attributeFrequency = this.getFrequency(attribute)
-    const totalPeopleLeftInLine = this.gameData.constraints.reduce(
-      (total, other) => {
-        // skip current attribute
-        if (attribute === other.attribute) return total
-        // skip if non-critical other attribute
-        if (!(other.attribute in this.criticalAttributes)) return total
-        /**
-         * before we only check if it was in critical attributes and negatively
-         * correlated, but we should also check if the other one is required.
-         * @testing
-         */
-        const criticalAttr = this.criticalAttributes[other.attribute as Keys]!
-        // if (criticalAttr.needed) {
-        //   // NOTE: the goal is to prevent two required attributes at the same time,
-        //   // since this creates gridlock.
-        //   return (
-        //     total - (criticalAttr.needed + CONFIG.CRITICAL_REQUIRED_THRESHOLD)
-        //   )
-        //}
-
-        const hasNegativeCorrelation =
-          attributesCorrelations[other.attribute]! < 0
-
-        // check if any other constraints are negatively correlated or required
-        if (!criticalAttr.required && !hasNegativeCorrelation) return total
-
-        // calculate total number of other people neded
-        const otherNeeded =
-          other.minCount - this.getCount(other.attribute as Keys)
-        // if we don't need other person just return total
-        if (otherNeeded < 0) return total
-        // get the frequncy then substract from total
-        const frequency = this.getFrequency(other.attribute as Keys)
-        // substract negative correlated people
-        return total - otherNeeded * (1 - frequency)
-      },
-      this.estimatedPeopleInLineLeft
-    )
-    // assume that the person will show up by their frequency
-    return totalPeopleLeftInLine * attributeFrequency
-  }
-
-  /**
-   * Calculate the persons admission score.
-   */
+  // Improved score calculation using metrics insights
   private calculateAdmissionScore(attributes: Record<string, boolean>): number {
-    let score = 0
-    const frequencies = this.frequencies
-
-    // If all quotas are met, admit everyone
     if (this.allQuotasMet || this.state.status.status !== 'running') {
-      return 10.0 // High score to guarantee admission (arbitrary)
+      return 10.0
     }
 
-    const { admittedCount, rejectedCount } = this.state.status
-    const totalProcessed = admittedCount + rejectedCount
+    let score = 0
+    const totalProcessed = this.admittedCount + this.rejectedCount
 
-    // Calculate score for each attribute the person has
-    this.gameData.constraints.forEach((constraint) => {
-      const attr = constraint.attribute
+    // Get strategic insights from metrics
+    const difficulty = this.metrics.getQuotaDifficulty()
+    const correlationInsights = this.metrics.getCorrelationInsights()
+    const usefulAttributes = this.metrics.getUsefulAttributes(
+      attributes as Attributes
+    )
 
-      if (!attributes[attr]) return
+    // Score each useful attribute
+    usefulAttributes.forEach((attr) => {
+      const constraint = this.constraints.find((c) => c.attribute === attr)
+      if (!constraint) return
 
-      const currentCount = this.getCount(attr)
-      const needed = constraint.minCount - currentCount
+      const needed = this.metrics.getNeeded(attr)
+      const frequency = this.metrics.frequencies[attr]
+      const attrDifficulty = difficulty.get(attr)!
 
-      // @testing TODO: make dynamic?
-      const importance = this.totalQuotas < 3 ? 100 : 0
-
-      if (needed <= importance) return // Quota already met or can be ignored
-
-      const frequency = frequencies[attr] || 0.5
-      // const expectedRemaining =
-      //   (peopleInLineLeft - otherNonCorrelatedPeopleLeft) * frequency
-
-      const expectedRemaining = this.getEstimatedPeopleWithAttributeLeftInLine(
-        constraint.attribute as Keys
-      )
-
-      // Expected progress: where we should be at this point in the line
-      // We want to fill quotas by person 5000 (halfway through the line)
+      // Base scoring factors
       const targetProgress = Math.min(totalProcessed / CONFIG.TARGET_RANGE, 1.0)
-      const actualProgress = currentCount / constraint.minCount
+      const actualProgress = this.metrics.getProgress(attr)
       const progressGap = targetProgress - actualProgress
-
-      // Base urgency: how behind schedule are we?
       const urgency =
         progressGap > 0 ? progressGap * CONFIG.URGENCY_MODIFIER : 0
 
-      // Scarcity factor: how rare is this attribute?
-      const scarcityFactor = 1 / Math.max(frequency, 0.01)
-
-      // Risk factor: can we afford to wait?
+      // Enhanced risk calculation using estimated remaining
+      const expectedRemaining = this.getEstimatedPeopleWithAttributeLeftInLine(
+        attr as Keys
+      )
       const riskFactor = needed / Math.max(expectedRemaining, 1)
 
-      /**
-       * @testing improve score of critical attributes.
-       */
-      const critical = this.criticalAttributes[constraint.attribute as Keys]
+      // Use difficulty ranking from metrics
+      const difficultyMultiplier = attrDifficulty.difficulty / 10.0
 
-      // Component score combines all factors
-      let componentScore = (urgency + riskFactor) * Math.log(scarcityFactor + 1)
+      let componentScore = (urgency + riskFactor) * difficultyMultiplier
 
-      /**
-       * @testing boost critical attributes.
-       */
-      if (critical && critical.required) {
+      // Critical attribute adjustments
+      const critical = this.criticalAttributes[attr]
+      if (critical?.required) {
         componentScore *= 1.5
       } else if (critical) {
-        // if component is critical, but not required
-        // then focus on finishing others first and reduce
-        // importantance by half
         componentScore *= 0.5
       }
 
-      // Special boost for attributes that need above their natural rate
-      const quotaRate = constraint.minCount / CONFIG.MAX_CAPACITY
-      if (quotaRate > frequency * 1.5) {
-        // Changed from 1.2 - only boost REALLY overdemanded
-        componentScore *= 1.5 // Fixed multiplier instead of ratio
-      }
-
-      // Add correlation bonus for multiple needed attributes
+      // Correlation bonuses using insights
       let correlationBonus = 0
-      this.gameData.constraints.forEach((otherConstraint) => {
-        if (otherConstraint.attribute === attr) return
 
-        const otherAttr = otherConstraint.attribute
-        const otherNeeded =
-          otherConstraint.minCount - this.attributeCounts[otherAttr]!
+      // Check for strong positive correlations
+      const strongPairs = correlationInsights.strongPairs.filter(
+        (pair) =>
+          (pair.attr1 === attr || pair.attr2 === attr) && pair.bothNeeded
+      )
+      strongPairs.forEach((pair) => {
+        const otherAttr = pair.attr1 === attr ? pair.attr2 : pair.attr1
+        if (attributes[otherAttr as any]) {
+          correlationBonus += pair.correlation * CONFIG.CORRELATION_BONUS
+        }
+      })
 
-        if (attributes[otherAttr] && otherNeeded > 0) {
-          const correlation = this.correlations[attr]?.[otherAttr] || 0
-
-          // Special handling for negatively correlated attributes
-          if (correlation < CONFIG.NEGATIVE_CORRELATION_THRESHOLD) {
-            // If negatively correlated but both needed, this person is extra valuable
-            correlationBonus += Math.abs(correlation) * CONFIG.RARE_PERSON_BONUS // Reward rare combination
-          } else {
-            // Positive correlation is good when both are needed
-            correlationBonus += correlation * 0.2
-          }
+      // Check for conflict pairs (negatively correlated but both needed)
+      const conflictPairs = correlationInsights.conflictPairs.filter(
+        (pair) =>
+          (pair.attr1 === attr || pair.attr2 === attr) && pair.bothNeeded
+      )
+      conflictPairs.forEach((pair) => {
+        const otherAttr = pair.attr1 === attr ? pair.attr2 : pair.attr1
+        if (attributes[otherAttr as any]) {
+          correlationBonus +=
+            Math.abs(pair.correlation) * CONFIG.RARE_PERSON_BONUS
         }
       })
 
       score += componentScore * (1 + correlationBonus)
     })
 
-    // Bonus for having multiple useful attributes
-    const usefulAttributes = Object.entries(attributes).filter(
-      ([attr, has]) => {
-        if (!has) return false
-        const constraint = this.gameData.constraints.find(
-          (c) => c.attribute === attr
-        )
-        if (!constraint) return false
-        return this.attributeCounts[attr]! < constraint.minCount
-      }
-    ).length
-
-    // Give multiplicative bonus for multiple attributes (compounds nicely)
-    if (usefulAttributes > 1) {
-      score *= 1 + CONFIG.MULTI_ATTRIBUTE_BONUS * (usefulAttributes - 1)
+    // Multi-attribute bonus
+    const usefulCount = usefulAttributes.length
+    if (usefulCount > 1) {
+      score *= 1 + CONFIG.MULTI_ATTRIBUTE_BONUS * (usefulCount - 1)
     }
 
     this.rawScores.push(score)
+
+    // Trim arrays for memory management
+    if (this.rawScores.length > 1000) {
+      this.rawScores = this.rawScores.slice(-500)
+    }
+
     return this.normalizeScore(score)
   }
 
-  /**
-   * Helper method to calculate current progress.
-   * @note this is just for tracking.
-   */
-  public getProgress(): GameProgress {
-    const quotas: { attribute: Keys; needed: number }[] = []
+  // Simplified estimation using metrics
+  public getEstimatedPeopleWithAttributeLeftInLine(attribute: Keys): number {
+    const frequency = this.metrics.frequencies[attribute]
+    const peopleLeft = this.estimatedPeopleInLineLeft
 
-    this.gameData.constraints.forEach((constraint) => {
-      const attr = constraint.attribute
-      const quota = constraint.minCount - this.attributeCounts[attr]!
-      if (quota > 0) {
-        quotas.push({ attribute: attr as Keys, needed: quota })
+    // Use correlation insights for better estimation
+    const correlationInsights = this.metrics.getCorrelationInsights()
+    const conflicts = correlationInsights.conflictPairs.filter(
+      (pair) => pair.attr1 === attribute || pair.attr2 === attribute
+    )
+
+    // Reduce estimate if there are critical conflicts
+    let adjustedEstimate = peopleLeft * frequency
+    conflicts.forEach((conflict) => {
+      if (conflict.bothNeeded) {
+        const reduction = Math.abs(conflict.correlation) * 0.3
+        adjustedEstimate *= 1 - reduction
       }
     })
 
-    const { critical_attributes = [], ...info } = this.info
+    return Math.max(adjustedEstimate, 1)
+  }
+
+  public getProgress(): GameProgress<Attributes> {
+    const incompleteQuotas = this.metrics
+      .getIncompleteConstraints()
+      .map((cp) => ({
+        attribute: cp.attribute,
+        needed: cp.needed,
+      }))
 
     const criticalAttributes = Object.entries(this.criticalAttributes).map(
-      ([key, value]) => {
-        if (value.required) return `${key}!`
-        return key
-      }
+      ([key, value]) => (value?.required ? `${key}!` : key)
     )
 
-    const progress: GameProgress = {
-      info,
+    // Enhanced info with metrics insights
+    const metricsAnalysis = this.metrics.getDetailedAnalysis()
+    const enhancedInfo = {
+      ...this.info,
+      metrics_efficiency: metricsAnalysis.efficiency.actualEfficiency,
+      metrics_risk: metricsAnalysis.risk.riskScore,
+      metrics_balance: metricsAnalysis.variability.isBalanced,
+      recommendations: metricsAnalysis.efficiency.recommendations,
+    }
+
+    return {
+      info: enhancedInfo,
       critical: criticalAttributes,
       config: CONFIG,
-      quotas: quotas.toSorted((a, b) => a.needed - b.needed),
+      quotas: incompleteQuotas.sort((a, b) => a.needed - b.needed) as any,
       admissionRate:
         this.admittedCount / (this.admittedCount + this.rejectedCount),
       admitted: this.admittedCount,
       rejected: this.rejectedCount,
     }
-
-    return progress
   }
 
-  /**
-   * Called when the game finishes to save any useful information
-   * to the game file.
-   */
   public getOutput() {
-    const targetScore = CONFIG.TARGET_RANGE // rejections
+    const analysis = this.metrics.getDetailedAnalysis()
     return {
       ...this.getProgress(),
       accuracy: Stats.percent(
-        Math.abs(targetScore - this.rejectedCount) / targetScore
+        Math.abs(CONFIG.TARGET_RANGE - this.rejectedCount) / CONFIG.TARGET_RANGE
       ),
       scores: this.totalScores,
+      metrics_analysis: analysis,
+      final_summary: this.metrics.getSummary(),
     }
   }
 }

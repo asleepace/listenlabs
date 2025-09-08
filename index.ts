@@ -1,4 +1,4 @@
-import { Bouncer, CONFIG } from './src/bouncer2'
+import { Bouncer, CONFIG } from './src/bouncer'
 import { Berghain, type ListenLabsConfig } from './src/berghain'
 
 /**
