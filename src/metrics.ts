@@ -452,6 +452,13 @@ export class Metrics<
 
       const expectedWithAttribute = availablePeople * frequency
       const riskRatio = needed / Math.max(expectedWithAttribute, 1)
+      const scaledRisk = Stats.clamp(riskRatio * 3, 0, 10) // Define before logging
+
+      console.log(
+        `${String(
+          constraint.attribute
+        )}: need=${needed}, freq=${frequency}, expected=${expectedWithAttribute}, ratio=${riskRatio}, scaled=${scaledRisk}`
+      )
 
       // More conservative subtraction for rarer attributes
       const peopleUsed = Math.min(needed, expectedWithAttribute * 0.8)
