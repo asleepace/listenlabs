@@ -421,25 +421,33 @@ export class Bouncer<
     const criticalKeys = Object.keys(this.criticalAttributes) as Keys[]
     const personAttributes = nextPerson.attributes
 
-    // Enhanced critical attribute check
-    // In admit(), modify the critical attribute check
     if (criticalKeys.length > 0) {
       const requiredAttributes = Object.entries(this.criticalAttributes)
         .filter(([_, value]) => value?.required)
         .map(([key, _]) => key)
 
-      // If multiple attributes are required AND we're very close to completion
       const isEndgame = this.metrics.totalProgress > 0.95
       const hasMultipleRequired = requiredAttributes.length > 1
 
       if (isEndgame && hasMultipleRequired) {
-        // In endgame, only require the person has ANY critical attribute, not ALL
-        const hasAnyCritical = requiredAttributes.some(
-          (attr) => personAttributes[attr as any]
-        )
-        if (!hasAnyCritical) return false
+        const totalNeeded = Object.values(this.criticalAttributes)
+          .filter((value) => value?.required)
+          .reduce((sum, value) => sum + (value?.needed || 0), 0)
+
+        if (totalNeeded > this.totalSpotsLeft * 1.5) {
+          const hasAnyCritical = requiredAttributes.some(
+            (attr) => personAttributes[attr as any]
+          )
+          if (!hasAnyCritical) return false
+        } else {
+          // Still have reasonable space, use AND logic
+          for (const [key, value] of Object.entries(this.criticalAttributes)) {
+            if (!value || !personAttributes) continue
+            if (value.required && !personAttributes[key as any]) return false
+          }
+        }
       } else {
-        // Normal critical logic: must have ALL required attributes
+        // Normal case: not endgame OR single required attribute - use AND logic
         for (const [key, value] of Object.entries(this.criticalAttributes)) {
           if (!value || !personAttributes) continue
           if (value.required && !personAttributes[key as any]) return false
@@ -543,9 +551,9 @@ export class Bouncer<
       // Critical attribute adjustments
       const critical = this.criticalAttributes[attr]
       if (critical?.required) {
-        componentScore *= 1.5
+        componentScore *= 1.5 // Strong boost for required
       } else if (critical) {
-        componentScore *= 0.5
+        componentScore *= 1.1 // Small boost for critical
       }
 
       if (isOverabundant && isEarlyGame) {
