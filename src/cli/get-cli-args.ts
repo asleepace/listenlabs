@@ -58,7 +58,7 @@ export function getCliArgs(baseConfig: GameConfig = BASE_CONFIG) {
       },
     },
     strict: true,
-    allowPositionals: false,
+    allowPositionals: true,
   })
 
   return Object.entries(values).reduce((output, [key, value]) => {
