@@ -454,7 +454,14 @@ export class Bouncer<
     const spotsLeft = this.totalSpotsLeft
     const incompleteQuotas = this.metrics.getIncompleteConstraints()
     const totalNeeded = incompleteQuotas.reduce((sum, q) => sum + q.needed, 0)
-    return spotsLeft <= 50 && totalNeeded >= spotsLeft && spotsLeft > 0
+
+    // Trigger endgame when either:
+    // 1. Very few spots left (≤50), OR
+    // 2. Quotas becoming tight (need >60% of remaining spots)
+    return (
+      spotsLeft > 0 &&
+      (spotsLeft <= 50 || (totalNeeded >= spotsLeft * 0.6 && spotsLeft <= 200))
+    )
   }
 
   private getEndgameScore(attributes: Record<string, boolean>): number {

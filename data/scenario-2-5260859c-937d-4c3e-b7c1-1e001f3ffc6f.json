@@ -57,43 +57,41 @@
   },
   "status": {
     "status": "running",
-    "admittedCount": 21,
-    "rejectedCount": 98,
+    "admittedCount": 999,
+    "rejectedCount": 4730,
     "nextPerson": {
-      "personIndex": 119,
+      "personIndex": 5729,
       "attributes": {
         "techno_lover": true,
         "well_connected": false,
         "creative": false,
-        "berlin_local": false
+        "berlin_local": true
       }
     }
   },
   "output": {
     "info": {
-      "natural_progress": 0.0393,
-      "target_quota_progress": 0.0433,
-      "actual_quota_progress": 0.0298,
-      "progress_gap": 0.0135,
-      "progress_adjustment": 0.0121,
-      "rate_adjustment": 0,
-      "threshold": 0.5,
-      "regular_score": 0.46,
+      "natural_progress": 1,
+      "target_quota_progress": 1,
+      "actual_quota_progress": 0.9996,
+      "progress_gap": 0.0004,
+      "progress_adjustment": 0.0003,
+      "rate_adjustment": -0.02,
+      "threshold": 0.49,
+      "regular_score": 0,
       "endgame_score": 0,
-      "raw_score": 0.46,
+      "raw_score": 0,
       "deflation_factor": 1,
-      "last_score": 0.46,
+      "last_score": 0,
       "is_endgame": false,
       "critical_attrs": 0,
       "has_critical": false,
       "has_some_critical": false,
       "emergency_eligible": false,
-      "metrics_efficiency": 0.03,
+      "metrics_efficiency": 1,
       "metrics_risk": 0.68,
       "metrics_balance": true,
-      "recommendations": [
-        "Prioritize techno_lover (2% complete)"
-      ]
+      "recommendations": []
     },
     "critical": [],
     "config": {
@@ -118,54 +116,37 @@
       "MESSAGE": "Base Configuration - Balanced Strategy",
       "SCENARIO": "2"
     },
-    "quotas": [
-      {
-        "attribute": "creative",
-        "needed": 291
-      },
-      {
-        "attribute": "well_connected",
-        "needed": 431
-      },
-      {
-        "attribute": "techno_lover",
-        "needed": 636
-      },
-      {
-        "attribute": "berlin_local",
-        "needed": 731
-      }
-    ],
-    "admissionRate": 0.17647058823529413,
-    "admitted": 21,
-    "rejected": 98,
-    "natural_progress": 0.0393,
-    "target_quota_progress": 0.0433,
-    "actual_quota_progress": 0.0298,
-    "progress_gap": 0.0135,
-    "progress_adjustment": 0.0121,
-    "rate_adjustment": 0,
-    "threshold": 0.5,
-    "regular_score": 0.46,
+    "quotas": [],
+    "admissionRate": 0.17437598184674463,
+    "admitted": 999,
+    "rejected": 4730,
+    "natural_progress": 1,
+    "target_quota_progress": 1,
+    "actual_quota_progress": 0.9996,
+    "progress_gap": 0.0004,
+    "progress_adjustment": 0.0003,
+    "rate_adjustment": -0.02,
+    "threshold": 0.49,
+    "regular_score": 0,
     "endgame_score": 0,
-    "raw_score": 0.46,
+    "raw_score": 0,
     "deflation_factor": 1,
-    "last_score": 0.46,
+    "last_score": 0,
     "is_endgame": false,
     "critical_attrs": 0,
     "has_critical": false,
     "has_some_critical": false,
     "emergency_eligible": false,
     "rate_analysis": {
-      "currentRate": 0.1765,
+      "currentRate": 0.1744,
       "targetRate": 0.19,
-      "deviation": -0.0135,
+      "deviation": -0.0156,
       "status": "optimal",
       "recommendation": "Admission rate is well-calibrated"
     },
     "critical_progress": [],
-    "spots_left": 979,
-    "people_left": 9881,
-    "incomplete_quotas": 4
+    "spots_left": 1,
+    "people_left": 4271,
+    "incomplete_quotas": 0
   }
 }
