@@ -60,9 +60,12 @@ export class Bouncer<
   Keys extends keyof Attributes = keyof Attributes
 > implements BergainBouncer
 {
-  static CONFIG = BASE_CONFIG
+  static CONFIG = { ...BASE_CONFIG, ...TUNED_CONFIG }
   static intialize(overrides: Partial<GameConfig>) {
-    // Bouncer.CONFIG = Object.assign(Bouncer.CONFIG, overrides)
+    Object.entries(overrides).forEach(([key, value]) => {
+      // @ts-ignore
+      Bouncer.CONFIG[key as keyof GameConfig] = value
+    })
 
     return (gameState: GameState) => new Bouncer(gameState)
   }
@@ -100,11 +103,13 @@ export class Bouncer<
   }
 
   private get totalSpotsLeft(): number {
-    return this.maxCapacity - this.admittedCount
+    return Bouncer.CONFIG.MAX_CAPACITY! - this.admittedCount
   }
 
   private get estimatedPeopleInLineLeft(): number {
-    return this.totalPeople - this.admittedCount - this.rejectedCount
+    return (
+      Bouncer.CONFIG.TOTAL_PEOPLE! - this.admittedCount - this.rejectedCount
+    )
   }
 
   private get allQuotasMet(): boolean {
@@ -163,7 +168,10 @@ export class Bouncer<
       // Enhanced logic using estimated remaining
       const isRequired =
         needed >=
-        Math.max(1, totalSpotsLeft - Bouncer.CONFIG.CRITICAL_REQUIRED_THRESHOLD)
+        Math.max(
+          1,
+          totalSpotsLeft - Bouncer.CONFIG.CRITICAL_REQUIRED_THRESHOLD!
+        )
 
       const isEstimateShort = needed > estimatedRemaining * 0.8 // Need more than 80% of estimated remaining
 
@@ -219,7 +227,7 @@ export class Bouncer<
       (total, current) => total + current.minCount,
       0
     )
-    const targetAdmissionRate = totalNeeded / this.totalPeople
+    const targetAdmissionRate = totalNeeded / (Bouncer.CONFIG.TOTAL_PEOPLE || 1)
     const currentRate =
       this.admittedCount / (this.admittedCount + this.rejectedCount)
 
@@ -227,8 +235,8 @@ export class Bouncer<
     const adjustment = this.rateGap * 0.2 // MOVE THE 0.2 HERE, reduce from 0.5
 
     const threshold = Stats.clamp(
-      Bouncer.CONFIG.BASE_THRESHOLD + adjustment,
-      Bouncer.CONFIG.MIN_THRESHOLD,
+      Bouncer.CONFIG.BASE_THRESHOLD! + adjustment,
+      Bouncer.CONFIG.MIN_THRESHOLD!,
       0.95 // RAISE MAX_THRESHOLD from 0.8
     )
 
@@ -244,7 +252,7 @@ export class Bouncer<
   private getProgressThresholdWave(): number {
     const totalProcessed = this.admittedCount + this.rejectedCount
     const naturalProgress = Math.min(
-      totalProcessed / Bouncer.CONFIG.TARGET_RANGE,
+      totalProcessed / Bouncer.CONFIG.TARGET_RANGE!,
       1.0
     )
 
