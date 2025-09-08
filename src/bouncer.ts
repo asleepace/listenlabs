@@ -313,7 +313,7 @@ export class Bouncer<
     const totalSpotsLeft = this.totalSpotsLeft
 
     // Use metrics risk assessment
-    const riskAssessment = this.metrics.getRiskAssessment()
+    const riskAssessment = this.metrics.getRiskAssessment(peopleInLineLeft)
     const incompleteConstraints = this.metrics.getIncompleteConstraints()
 
     this.criticalAttributes = {}
@@ -370,7 +370,9 @@ export class Bouncer<
 
     // Use metrics efficiency analysis
     const efficiency = this.metrics.getEfficiencyMetrics()
-    const riskAssessment = this.metrics.getRiskAssessment()
+    const riskAssessment = this.metrics.getRiskAssessment(
+      this.estimatedPeopleInLineLeft
+    )
 
     // Adjust sensitivity based on risk
     const baseSensitivity = 1.0 // lower=less sensitive
@@ -457,7 +459,7 @@ export class Bouncer<
     )
 
     // Add metrics summary to info
-    const summary = this.metrics.getSummary()
+    const summary = this.metrics.getSummary(this.estimatedPeopleInLineLeft)
     this.info['metrics_summary'] = summary
 
     this.updateCounts(personAttributes as any, score, shouldAdmit)
@@ -598,7 +600,9 @@ export class Bouncer<
     )
 
     // Enhanced info with metrics insights
-    const metricsAnalysis = this.metrics.getDetailedAnalysis()
+    const metricsAnalysis = this.metrics.getDetailedAnalysis(
+      this.estimatedPeopleInLineLeft
+    )
     const enhancedInfo = {
       ...this.info,
       metrics_efficiency: metricsAnalysis.efficiency.actualEfficiency,
@@ -620,7 +624,9 @@ export class Bouncer<
   }
 
   public getOutput() {
-    const analysis = this.metrics.getDetailedAnalysis()
+    const analysis = this.metrics.getDetailedAnalysis(
+      this.estimatedPeopleInLineLeft
+    )
     return {
       ...this.getProgress(),
       accuracy: Stats.percent(
@@ -628,7 +634,7 @@ export class Bouncer<
       ),
       scores: this.totalScores,
       metrics_analysis: analysis,
-      final_summary: this.metrics.getSummary(),
+      final_summary: this.metrics.getSummary(this.estimatedPeopleInLineLeft),
     }
   }
 }

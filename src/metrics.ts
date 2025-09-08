@@ -428,21 +428,36 @@ export class Metrics<
     }
   }
 
-  getRiskAssessment(): {
+  getRiskAssessment(peopleRemaining: number): {
     criticalAttributes: (keyof Attributes)[]
     riskScore: number
     timeRemaining: number
     feasibilityScore: number
   } {
     const incomplete = this.getIncompleteConstraints()
-    const riskFactors = incomplete.map((constraint) => {
+
+    // Sort by difficulty/rarity to process hardest first
+    const sortedIncomplete = incomplete.sort((a, b) => {
+      const freqA = this._attributeStats.get(a.attribute)!.frequency
+      const freqB = this._attributeStats.get(b.attribute)!.frequency
+      return freqA - freqB // Rarest first
+    })
+
+    let availablePeople = peopleRemaining
+
+    const riskFactors = sortedIncomplete.map((constraint) => {
       const stats = this._attributeStats.get(constraint.attribute)!
       const needed = constraint.needed
       const frequency = stats.frequency
 
-      // Risk = how much we need vs how rare it is
-      const riskScore = needed / Math.max(frequency, 0.01)
-      return Math.min(riskScore, 10.0)
+      const expectedWithAttribute = availablePeople * frequency
+      const riskRatio = needed / Math.max(expectedWithAttribute, 1)
+
+      // More conservative subtraction for rarer attributes
+      const peopleUsed = Math.min(needed, expectedWithAttribute * 0.8)
+      availablePeople = Math.max(0, availablePeople - peopleUsed)
+
+      return Stats.clamp(riskRatio * 3, 0, 10)
     })
 
     const riskScore = riskFactors.length > 0 ? Stats.average(riskFactors) : 0
@@ -518,7 +533,7 @@ export class Metrics<
   }
 
   // Enhanced debug/info methods
-  getSummary(): {
+  getSummary(peopleInLineLeft: number): {
     totalConstraints: number
     completedConstraints: number
     totalProgress: number
@@ -530,7 +545,7 @@ export class Metrics<
     isBalanced: boolean
   } {
     const efficiency = this.getEfficiencyMetrics()
-    const risk = this.getRiskAssessment()
+    const risk = this.getRiskAssessment(peopleInLineLeft)
     const variability = this.getProgressVariability()
 
     return {
@@ -546,13 +561,13 @@ export class Metrics<
     }
   }
 
-  getDetailedAnalysis() {
+  getDetailedAnalysis(peopleInLineLeft: number) {
     return {
       progress: this.getProgressDistribution(),
       variability: this.getProgressVariability(),
       difficulty: this.getQuotaDifficulty(),
       efficiency: this.getEfficiencyMetrics(),
-      risk: this.getRiskAssessment(),
+      risk: this.getRiskAssessment(peopleInLineLeft),
       correlations: this.getCorrelationInsights(),
     } as const
   }
