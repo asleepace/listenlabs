@@ -128,7 +128,7 @@ export const CONFIG = {
    * @range 0.2 to 0.7
    * @default 0.7
    */
-  BASE_THRESHOLD: 0.49,
+  BASE_THRESHOLD: 0.65,
   MIN_THRESHOLD: 0.45,
   MAX_THRESHOLD: 0.95,
   /**
@@ -373,7 +373,7 @@ export class Bouncer<
     const riskAssessment = this.metrics.getRiskAssessment()
 
     // Adjust sensitivity based on risk
-    const baseSensitivity = 2.0
+    const baseSensitivity = 1.0 // lower=less sensitive
     const riskMultiplier = Stats.clamp(riskAssessment.riskScore / 5.0, 0.5, 2.0)
     const sensitivity = baseSensitivity * riskMultiplier
 
