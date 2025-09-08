@@ -141,8 +141,9 @@ export interface GameConfig {
   // Misc settings
 
   /**
-   * Minimum number of scores needed for statistical calculations.
-   * @default 5
+   * Total number of raw score needed before making calculations.
+   * @range 1 - 100
+   * @default 10
    */
   MIN_RAW_SCORES: number
 
@@ -191,8 +192,10 @@ export const BASE_CONFIG: GameConfig = {
   CRITICAL_IN_LINE_RATIO: 0.75,
   CRITICAL_CAPACITY_RATIO: 0.75,
 
+  // DEFAULTS
+  MIN_RAW_SCORES: 1,
+
   // Misc
-  MIN_RAW_SCORES: 5,
   MESSAGE: 'Base Configuration - Balanced Strategy',
   SCENARIO: '3',
 }

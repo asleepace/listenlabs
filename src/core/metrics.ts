@@ -6,23 +6,23 @@ import type {
 } from '../types'
 import { Stats } from './stats'
 
-type Frequencies<Attributes extends PersonAttributes> = {
+export type Frequencies<Attributes extends PersonAttributes> = {
   readonly [K in keyof Attributes]: number
 }
 
-type Correlations<Attributes extends PersonAttributes> = {
+export type Correlations<Attributes extends PersonAttributes> = {
   readonly [K in keyof Attributes]: {
     readonly [J in keyof Attributes]: number
   }
 }
 
-type Constraint<Attributes extends PersonAttributes> = {
+export type Constraint<Attributes extends PersonAttributes> = {
   readonly attribute: keyof Attributes
   readonly minCount: number
   count: number
 }
 
-type ConstraintProgress<Attributes extends PersonAttributes> = {
+export type ConstraintProgress<Attributes extends PersonAttributes> = {
   readonly attribute: keyof Attributes
   readonly current: number
   readonly needed: number
@@ -30,7 +30,7 @@ type ConstraintProgress<Attributes extends PersonAttributes> = {
   readonly completed: boolean
 }
 
-type AttributeStats<Attributes extends PersonAttributes> = {
+export type AttributeStats<Attributes extends PersonAttributes> = {
   readonly attribute: keyof Attributes
   readonly frequency: number
   readonly rarity: number
@@ -38,7 +38,7 @@ type AttributeStats<Attributes extends PersonAttributes> = {
   readonly overdemanded: boolean
 }
 
-type AttributeRisk<Attributes extends PersonAttributes> = {
+export type AttributeRisk<Attributes extends PersonAttributes> = {
   criticalAttributes: (keyof Attributes)[]
   riskScore: number
   timeRemaining: number
@@ -566,7 +566,7 @@ export class Metrics<
     }
   }
 
-  getDetailedAnalysis(peopleInLineLeft: number) {
+  getDetailedAnalysis() {
     return {
       progress: this.getProgressDistribution(),
       variability: this.getProgressVariability(),

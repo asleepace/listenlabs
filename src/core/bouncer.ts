@@ -1,13 +1,8 @@
-import type { GameState, Person, PersonAttributes } from '../types'
+import type { GameState, PersonAttributes } from '../types'
 import type { BergainBouncer } from './berghain'
 import { BASE_CONFIG, type GameConfig } from '../conf/game-config'
 import { Stats } from './stats'
-import { Metrics } from './metrics'
-
-interface Constraint {
-  attribute: string
-  minCount: number
-}
+import { Metrics, type AttributeRisk } from './metrics'
 
 interface GameQuota<Attributes extends PersonAttributes> {
   attribute: keyof Attributes
@@ -28,7 +23,37 @@ type CriticalAttributes<Attributes extends PersonAttributes> = Partial<
   Record<keyof Attributes, { needed: number; required: boolean }>
 >
 
-// ... existing interfaces and CONFIG ...
+// fine tune config here...
+
+const TUNED_CONFIG: Partial<GameConfig> = {
+  // Threshold settings - allow wider range for rate control
+  BASE_THRESHOLD: 0.588, // Lower base for more lenient starting point
+  MIN_THRESHOLD: 0.25, // Much lower floor for aggressive recovery
+  MAX_THRESHOLD: 0.95, // Higher ceiling for selectivity
+
+  // Game timing - not used in constant rate but keep reasonable
+  TARGET_RANGE: 4000, // Keep existing
+
+  // Scoring modifiers - crucial for constant rate approach
+  URGENCY_MODIFIER: 2.5, // Lower since urgency handled by rate control
+  MULTI_ATTRIBUTE_BONUS: 0.9, // High - people with multiple attributes are very valuable
+
+  // Critical detection - more aggressive
+  CRITICAL_REQUIRED_THRESHOLD: 50, // Higher buffer before panic mode
+  CRITICAL_IN_LINE_RATIO: 0.75, // More aggressive critical detection
+  CRITICAL_CAPACITY_RATIO: 0.8, // More aggressive
+
+  // Less important with simplified approach
+  CORRELATION_BONUS: 0.2,
+  NEGATIVE_CORRELATION_BONUS: 0.5,
+  NEGATIVE_CORRELATION_THRESHOLD: -0.5,
+  RARE_PERSON_BONUS: 0.4,
+
+  // Constants
+  MAX_CAPACITY: 1000,
+  TOTAL_PEOPLE: 10000,
+  MIN_RAW_SCORES: 1,
+}
 
 export class Bouncer<
   Attributes extends PersonAttributes,
@@ -37,7 +62,8 @@ export class Bouncer<
 {
   static CONFIG = BASE_CONFIG
   static intialize(overrides: Partial<GameConfig>) {
-    Bouncer.CONFIG = Object.assign(Bouncer.CONFIG, overrides)
+    // Bouncer.CONFIG = Object.assign(Bouncer.CONFIG, overrides)
+
     return (gameState: GameState) => new Bouncer(gameState)
   }
 
@@ -54,9 +80,10 @@ export class Bouncer<
   public totalAdmittedScores: number[] = []
   public lowestAcceptedScore = Infinity
   public totalUnicorns = 0
+  public rateGap = 0
 
   public criticalAttributes: CriticalAttributes<Attributes> = {}
-  public riskAssessment: ReturnType<(typeof this.metrics)['getRiskAssessment']>
+  public riskAssessment: AttributeRisk<Attributes>
 
   constructor(initialData: GameState) {
     this.metrics = new Metrics(initialData.game)
@@ -113,6 +140,10 @@ export class Bouncer<
 
   // Enhanced critical attributes using metrics insights
   private getCriticalAttributes(): CriticalAttributes<Attributes> {
+    if (this.admittedCount < 100) {
+      return {}
+    }
+
     const peopleInLineLeft = this.estimatedPeopleInLineLeft
     const totalSpotsLeft = this.totalSpotsLeft
 
@@ -131,7 +162,9 @@ export class Bouncer<
 
       // Enhanced logic using estimated remaining
       const isRequired =
-        needed >= totalSpotsLeft - Bouncer.CONFIG.CRITICAL_REQUIRED_THRESHOLD
+        needed >=
+        Math.max(1, totalSpotsLeft - Bouncer.CONFIG.CRITICAL_REQUIRED_THRESHOLD)
+
       const isEstimateShort = needed > estimatedRemaining * 0.8 // Need more than 80% of estimated remaining
 
       // An attribute becomes critical if:
@@ -141,10 +174,21 @@ export class Bouncer<
       if (isCritical || isRequired || isEstimateShort) {
         this.criticalAttributes[attr] = {
           needed,
-          required: isRequired || isEstimateShort, // Either capacity or estimate constraint makes it required
+          required: false, // Don't set required yet
         }
       }
     })
+
+    // only make ONE attribute required at a time
+    const criticalAttrs = Object.entries(this.criticalAttributes)
+    if (criticalAttrs.length > 0) {
+      // Sort by most urgent and only make the top one required
+      const mostUrgent = criticalAttrs.sort(
+        ([_, a], [__, b]) => b!.needed - a!.needed
+      )[0]
+
+      this.criticalAttributes[mostUrgent![0]]!.required = true
+    }
 
     return this.criticalAttributes
   }
@@ -163,83 +207,69 @@ export class Bouncer<
     this.metrics.updateCounts(attributes)
   }
 
+  // normalize score values
   private normalizeScore(rawScore: number): number {
-    if (this.rawScores.length < Bouncer.CONFIG.MIN_RAW_SCORES) {
-      return Math.min(rawScore / 5.0, 1.0)
-    }
-    const avgScore = Stats.average(this.rawScores) || 0.5
-    const stdDev = Stats.stdDev(this.rawScores) || 0.2
-    return 1.0 / (1.0 + Math.exp(-(rawScore - avgScore) / stdDev))
+    // Simple normalization for the log-based scoring
+    return Math.min(rawScore / 4.0, 1.0) // Divide by ~max expected score
   }
 
-  // Improved threshold calculation using metrics
-  // private getProgressThresholdOld(): number {
-  //   const totalProcessed = this.admittedCount + this.rejectedCount
-  //   const expectedProgress = Math.min(totalProcessed / CONFIG.TARGET_RANGE, 1.0)
-  //   const totalProgress = this.metrics.totalProgress
-
-  //   // Use metrics efficiency analysis
-  //   const efficiency = this.metrics.getEfficiencyMetrics()
-  //   this.riskAssessment = this.metrics.getRiskAssessment(
-  //     this.estimatedPeopleInLineLeft
-  //   )
-
-  //   // Adjust sensitivity based on risk
-  //   const baseSensitivity = 1.0 // lower=less sensitive
-  //   const riskMultiplier = Stats.clamp(
-  //     this.riskAssessment.riskScore / 5.0,
-  //     0.5,
-  //     2.0
-  //   )
-  //   const sensitivity = baseSensitivity * riskMultiplier
-
-  //   const delta = (expectedProgress - totalProgress) * 0.5
-  //   const threshold = Math.max(
-  //     CONFIG.MIN_THRESHOLD,
-  //     Math.min(
-  //       CONFIG.MAX_THRESHOLD,
-  //       CONFIG.BASE_THRESHOLD - delta * sensitivity
-  //     )
-  //   )
-
-  //   // Enhanced logging with metrics insights
-  //   this.info['expected_progress'] = Stats.round(expectedProgress, 10_000)
-  //   this.info['total_progress'] = Stats.round(totalProgress, 10_000)
-  //   this.info['efficiency'] = efficiency.actualEfficiency
-  //   this.info['risk_score'] = this.riskAssessment.riskScore
-  //   this.info['threshold'] = Stats.round(threshold, 10_000)
-
-  //   return threshold
-  // }
-
+  // calculate progress threshold
   private getProgressThreshold(): number {
+    const totalNeeded = this.constraints.reduce(
+      (total, current) => total + current.minCount,
+      0
+    )
+    const targetAdmissionRate = totalNeeded / this.totalPeople
+    const currentRate =
+      this.admittedCount / (this.admittedCount + this.rejectedCount)
+
+    this.rateGap = currentRate - targetAdmissionRate
+    const adjustment = this.rateGap * 0.2 // MOVE THE 0.2 HERE, reduce from 0.5
+
+    const threshold = Stats.clamp(
+      Bouncer.CONFIG.BASE_THRESHOLD + adjustment,
+      Bouncer.CONFIG.MIN_THRESHOLD,
+      0.95 // RAISE MAX_THRESHOLD from 0.8
+    )
+
+    // Debug logging
+    this.info['target_rate'] = Stats.round(targetAdmissionRate, 10000)
+    this.info['current_rate'] = Stats.round(currentRate, 10000)
+    this.info['rate_gap'] = Stats.round(this.rateGap, 10000)
+    this.info['threshold'] = Stats.round(threshold, 10000)
+
+    return threshold
+  }
+
+  private getProgressThresholdWave(): number {
     const totalProcessed = this.admittedCount + this.rejectedCount
-    const expectedProgress = Math.min(
+    const naturalProgress = Math.min(
       totalProcessed / Bouncer.CONFIG.TARGET_RANGE,
       1.0
     )
-    const totalProgress = this.metrics.totalProgress
 
-    // Calculate how far off we are from expected
-    const progressGap = expectedProgress - totalProgress
+    // Target being 10% ahead of the natural schedule
+    const targetProgress = Math.min(naturalProgress * 1.1, 1.0)
+    const actualProgress = this.metrics.totalProgress
 
-    // Use a sigmoid function to create smooth, aggressive adjustments
-    const sigmoid = Math.tanh(progressGap * 3.0) // 3.0 controls steepness
+    // Now the gap measures against the "10% ahead" target
+    const progressGap = targetProgress - actualProgress
 
-    // Base adjustment range - when behind, go much lower; when ahead, go higher
-    const maxAdjustment = 0.15 // Can swing threshold by ±15%
+    const sigmoid = Math.tanh(progressGap * 4.0)
+    const maxAdjustment = 0.25
     const adjustment = sigmoid * maxAdjustment
 
     const threshold = Stats.clamp(
-      Bouncer.CONFIG.BASE_THRESHOLD - adjustment, // Subtract because behind = lower threshold
+      Bouncer.CONFIG.BASE_THRESHOLD - adjustment,
       Bouncer.CONFIG.MIN_THRESHOLD,
       Bouncer.CONFIG.MAX_THRESHOLD
     )
 
-    // Enhanced logging
+    // Debug logging
+    this.info['natural_progress'] = Stats.round(naturalProgress, 10000)
+    this.info['target_progress'] = Stats.round(targetProgress, 10000)
+    this.info['actual_progress'] = Stats.round(actualProgress, 10000)
     this.info['progress_gap'] = Stats.round(progressGap, 10000)
-    this.info['sigmoid_adj'] = Stats.round(sigmoid, 100)
-    this.info['threshold_adj'] = Stats.round(adjustment, 100)
     this.info['threshold'] = Stats.round(threshold, 10000)
 
     return threshold
@@ -261,48 +291,12 @@ export class Bouncer<
     const criticalKeys = Object.keys(this.criticalAttributes) as Keys[]
     const personAttributes = nextPerson.attributes
 
+    // In admit() method, replace the complex critical check with:
     if (criticalKeys.length > 0) {
-      const requiredAttributes = Object.entries(this.criticalAttributes)
-        .filter(([_, value]) => value?.required)
-        .map(([key, _]) => key)
-
-      const isEndgame = this.metrics.totalProgress > 0.95
-      const hasMultipleRequired = requiredAttributes.length > 1
-
-      if (isEndgame && hasMultipleRequired) {
-        const totalNeeded = Object.values(this.criticalAttributes)
-          .filter((value) => value?.required)
-          .reduce((sum, value) => sum + (value?.needed || 0), 0)
-
-        if (totalNeeded > this.totalSpotsLeft * 1.5) {
-          const hasAnyCritical = requiredAttributes.some(
-            (attr) => personAttributes[attr as any]
-          )
-          if (!hasAnyCritical) return false
-        } else {
-          // Still have reasonable space, use AND logic
-          for (const [key, value] of Object.entries(this.criticalAttributes)) {
-            if (!value || !personAttributes) continue
-            if (value.required && !personAttributes[key as any]) return false
-          }
-        }
-      } else {
-        // Normal case: not endgame OR single required attribute - use AND logic
-        for (const [key, value] of Object.entries(this.criticalAttributes)) {
-          if (!value || !personAttributes) continue
-          if (value.required && !personAttributes[key as any]) return false
-        }
+      for (const [key, value] of Object.entries(this.criticalAttributes)) {
+        if (!value || !personAttributes) continue
+        if (value.required && !personAttributes[key as any]) return false
       }
-    }
-
-    // Early game strategy using metrics
-    if (this.admittedCount < Bouncer.CONFIG.MIN_RAW_SCORES) {
-      const rarestAttrs = this.metrics.getRarestAttributes().slice(0, 2)
-      const hasRareAttr = rarestAttrs.some((attr) => personAttributes[attr])
-      const hasMultipleUseful =
-        this.metrics.countUsefulAttributes(personAttributes as any) >= 2
-
-      if (!hasRareAttr && !hasMultipleUseful) return false
     }
 
     const score = this.calculateAdmissionScore(personAttributes)
@@ -339,142 +333,60 @@ export class Bouncer<
     return shouldAdmit
   }
 
-  // Improved score calculation using metrics insights
+  // calculate admission scores
   private calculateAdmissionScore(attributes: Record<string, boolean>): number {
-    if (this.allQuotasMet || this.state.status.status !== 'running') {
-      return 10.0
-    }
+    if (this.allQuotasMet) return 1.0
 
-    let score = 0
-    const totalProcessed = this.admittedCount + this.rejectedCount
-
-    // Get strategic insights from metrics
-    const difficulty = this.metrics.getQuotaDifficulty()
-    const correlationInsights = this.metrics.getCorrelationInsights()
     const usefulAttributes = this.metrics.getUsefulAttributes(
       attributes as Attributes
     )
+    if (usefulAttributes.length === 0) return 0.0
 
-    // Score each useful attribute
+    let totalScore = 0
+    const allProgresses = this.constraints.map((c) =>
+      this.metrics.getProgress(c.attribute)
+    )
+    const avgProgress = Stats.average(allProgresses)
+
     usefulAttributes.forEach((attr) => {
-      const constraint = this.constraints.find((c) => c.attribute === attr)
-      if (!constraint) return
-
       const needed = this.metrics.getNeeded(attr)
+      const progress = this.metrics.getProgress(attr)
+
+      // Base urgency: 0-1 based on how much we need
+      const urgencyScore = Math.min(needed / 200, 1.0)
+
+      // Proactive priority: boost attributes that are falling behind BEFORE they become critical
+      let priorityMultiplier = 1.0
+      if (progress < avgProgress * 0.8) {
+        priorityMultiplier = 2.0 // 2x boost for lagging quotas
+      } else if (progress > avgProgress * 1.2) {
+        priorityMultiplier = 0.3 // Penalize overfilled quotas
+      }
+
+      // Early intervention: boost rare attributes early
       const frequency = this.metrics.frequencies[attr]
-      const attrDifficulty = difficulty.get(attr)!
+      const rarityBoost = frequency < 0.1 ? 1.5 : 1.0 // 1.5x for very rare attributes
 
-      const quotaRate = constraint.minCount / Bouncer.CONFIG.MAX_CAPACITY
-
-      // If this attribute is much more common than its quota rate AND we're early game
-      const isOverabundant = frequency > quotaRate * 2.0
-      const isEarlyGame = totalProcessed < Bouncer.CONFIG.TARGET_RANGE * 0.5
-
-      // Base scoring factors
-      const targetProgress = Math.min(
-        totalProcessed / Bouncer.CONFIG.TARGET_RANGE,
-        1.0
-      )
-      const actualProgress = this.metrics.getProgress(attr)
-      const progressGap = targetProgress - actualProgress
-      const urgency =
-        progressGap > 0 ? progressGap * Bouncer.CONFIG.URGENCY_MODIFIER : 0
-
-      // Enhanced risk calculation using estimated remaining
-      const expectedRemaining = this.getEstimatedPeopleWithAttributeLeftInLine(
-        attr as Keys
-      )
-      const riskFactor = needed / Math.max(expectedRemaining, 1)
-
-      // Use difficulty ranking from metrics
-      const difficultyMultiplier = attrDifficulty.difficulty / 10.0
-
-      let componentScore = (urgency + riskFactor) * difficultyMultiplier
-
-      // Critical attribute adjustments
-      const critical = this.criticalAttributes[attr]
-      if (critical?.required) {
-        componentScore *= 1.5 // Strong boost for required
-      } else if (critical) {
-        componentScore *= 1.1 // Small boost for critical
-      }
-
-      if (isOverabundant && isEarlyGame) {
-        // Reduce importance of overabundant attributes early
-        componentScore *= 0.7
-      }
-
-      // Correlation bonuses using insights
-      let correlationBonus = 0
-
-      // Check for strong positive correlations
-      const strongPairs = correlationInsights.strongPairs.filter(
-        (pair) =>
-          (pair.attr1 === attr || pair.attr2 === attr) && pair.bothNeeded
-      )
-      strongPairs.forEach((pair) => {
-        const otherAttr = pair.attr1 === attr ? pair.attr2 : pair.attr1
-        if (attributes[otherAttr as any]) {
-          correlationBonus +=
-            pair.correlation * Bouncer.CONFIG.CORRELATION_BONUS
-        }
-      })
-
-      // Check for conflict pairs (negatively correlated but both needed)
-      const conflictPairs = correlationInsights.conflictPairs.filter(
-        (pair) =>
-          (pair.attr1 === attr || pair.attr2 === attr) && pair.bothNeeded
-      )
-      conflictPairs.forEach((pair) => {
-        const otherAttr = pair.attr1 === attr ? pair.attr2 : pair.attr1
-        if (attributes[otherAttr as any]) {
-          correlationBonus +=
-            Math.abs(pair.correlation) * Bouncer.CONFIG.RARE_PERSON_BONUS
-        }
-      })
-
-      score += componentScore * (1 + correlationBonus)
+      const attributeScore = urgencyScore * priorityMultiplier * rarityBoost
+      totalScore += attributeScore
     })
 
-    // Multi-attribute bonus
-    const usefulCount = usefulAttributes.length
-    if (usefulCount > 1) {
-      score *= 1 + Bouncer.CONFIG.MULTI_ATTRIBUTE_BONUS * (usefulCount - 1)
+    // Multi-attribute bonus: strong reward for efficiency
+    if (usefulAttributes.length > 1) {
+      totalScore *= 1 + (usefulAttributes.length - 1) * 0.3
     }
 
-    this.rawScores.push(score)
-
-    // Trim arrays for memory management
-    if (this.rawScores.length > 1000) {
-      this.rawScores = this.rawScores.slice(-500)
-    }
-
-    return this.normalizeScore(score)
+    return Math.min(totalScore / usefulAttributes.length, 1.0)
   }
 
   // Simplified estimation using metrics
   public getEstimatedPeopleWithAttributeLeftInLine(attribute: Keys): number {
     const frequency = this.metrics.frequencies[attribute]
     const peopleLeft = this.estimatedPeopleInLineLeft
-
-    // Use correlation insights for better estimation
-    const correlationInsights = this.metrics.getCorrelationInsights()
-    const conflicts = correlationInsights.conflictPairs.filter(
-      (pair) => pair.attr1 === attribute || pair.attr2 === attribute
-    )
-
-    // Reduce estimate if there are critical conflicts
-    let adjustedEstimate = peopleLeft * frequency
-    conflicts.forEach((conflict) => {
-      if (conflict.bothNeeded) {
-        const reduction = Math.abs(conflict.correlation) * 0.3
-        adjustedEstimate *= 1 - reduction
-      }
-    })
-
-    return Math.max(adjustedEstimate, 1)
+    return peopleLeft * frequency
   }
 
+  // Get current total progress
   public getProgress(): GameProgress<Attributes> {
     const incompleteQuotas = this.metrics
       .getIncompleteConstraints()
@@ -488,9 +400,7 @@ export class Bouncer<
     )
 
     // Enhanced info with metrics insights
-    const metricsAnalysis = this.metrics.getDetailedAnalysis(
-      this.estimatedPeopleInLineLeft
-    )
+    const metricsAnalysis = this.metrics.getDetailedAnalysis()
     const enhancedInfo = {
       ...this.info,
       metrics_efficiency: metricsAnalysis.efficiency.actualEfficiency,
@@ -512,9 +422,7 @@ export class Bouncer<
   }
 
   public getOutput() {
-    const analysis = this.metrics.getDetailedAnalysis(
-      this.estimatedPeopleInLineLeft
-    )
+    const analysis = this.metrics.getDetailedAnalysis()
     return {
       ...this.getProgress(),
       accuracy: Stats.percent(

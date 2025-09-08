@@ -28,7 +28,7 @@ const getTypeThenCast = (keyString: string, value: string | boolean) => {
 /**
  *  Get command line arguments to override configurations.
  */
-export function getCliArgs(baseConfig: GameConfig = BASE_CONFIG) {
+export function getCliArgs(baseConfig: Partial<GameConfig> = {}) {
   /**
    *  Allow overriding specific options via the cli.
    */

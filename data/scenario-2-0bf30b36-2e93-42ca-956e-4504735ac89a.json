@@ -1,0 +1,154 @@
+{
+  "file": "./data/scenario-2-0bf30b36-2e93-42ca-956e-4504735ac89a.json",
+  "game": {
+    "gameId": "0bf30b36-2e93-42ca-956e-4504735ac89a",
+    "constraints": [
+      {
+        "attribute": "techno_lover",
+        "minCount": 650
+      },
+      {
+        "attribute": "well_connected",
+        "minCount": 450
+      },
+      {
+        "attribute": "creative",
+        "minCount": 300
+      },
+      {
+        "attribute": "berlin_local",
+        "minCount": 750
+      }
+    ],
+    "attributeStatistics": {
+      "relativeFrequencies": {
+        "techno_lover": 0.6265000000000001,
+        "well_connected": 0.4700000000000001,
+        "creative": 0.06227,
+        "berlin_local": 0.398
+      },
+      "correlations": {
+        "techno_lover": {
+          "techno_lover": 1,
+          "well_connected": -0.4696169332674324,
+          "creative": 0.09463317039891586,
+          "berlin_local": -0.6549403815606182
+        },
+        "well_connected": {
+          "techno_lover": -0.4696169332674324,
+          "well_connected": 1,
+          "creative": 0.14197259140471485,
+          "berlin_local": 0.5724067808436452
+        },
+        "creative": {
+          "techno_lover": 0.09463317039891586,
+          "well_connected": 0.14197259140471485,
+          "creative": 1,
+          "berlin_local": 0.14446459505650772
+        },
+        "berlin_local": {
+          "techno_lover": -0.6549403815606182,
+          "well_connected": 0.5724067808436452,
+          "creative": 0.14446459505650772,
+          "berlin_local": 1
+        }
+      }
+    }
+  },
+  "status": {
+    "status": "running",
+    "admittedCount": 13,
+    "rejectedCount": 182,
+    "nextPerson": {
+      "personIndex": 195,
+      "attributes": {
+        "techno_lover": false,
+        "well_connected": false,
+        "creative": false,
+        "berlin_local": false
+      }
+    }
+  },
+  "output": {
+    "info": {
+      "target_rate": 0.215,
+      "current_rate": 0.0663,
+      "rate_gap": -0.1487,
+      "threshold": 0.5203,
+      "last_score": 1,
+      "useful_attrs": 4,
+      "avg_score": 0.95,
+      "metrics_summary": {
+        "totalConstraints": 4,
+        "completedConstraints": 0,
+        "totalProgress": 0.02,
+        "allMet": false,
+        "mostNeeded": [
+          "berlin_local",
+          "techno_lover",
+          "well_connected"
+        ],
+        "leastProgress": [
+          "berlin_local",
+          "techno_lover",
+          "well_connected"
+        ],
+        "efficiency": 0.02,
+        "riskScore": 0.68,
+        "isBalanced": false
+      },
+      "metrics_efficiency": 0.02,
+      "metrics_risk": 0.68,
+      "metrics_balance": false,
+      "recommendations": [
+        "Focus on balancing quota progress",
+        "Prioritize berlin_local (1% complete)"
+      ]
+    },
+    "critical": [
+      "⚠️:creative"
+    ],
+    "config": {
+      "BASE_THRESHOLD": 0.55,
+      "MIN_THRESHOLD": 0.35,
+      "MAX_THRESHOLD": 0.8,
+      "THRESHOLD_RAMP": 0.3,
+      "TARGET_RANGE": 3500,
+      "URGENCY_MODIFIER": 2.5,
+      "CORRELATION_BONUS": 0.3,
+      "NEGATIVE_CORRELATION_BONUS": 0.7,
+      "NEGATIVE_CORRELATION_THRESHOLD": -0.5,
+      "MULTI_ATTRIBUTE_BONUS": 0.7,
+      "RARE_PERSON_BONUS": 0.6,
+      "MAX_CAPACITY": 1000,
+      "TOTAL_PEOPLE": 10000,
+      "CRITICAL_REQUIRED_THRESHOLD": 8,
+      "CRITICAL_IN_LINE_RATIO": 0.75,
+      "CRITICAL_CAPACITY_RATIO": 0.75,
+      "MIN_RAW_SCORES": 1,
+      "MESSAGE": "better scoring with staggering",
+      "SCENARIO": "2"
+    },
+    "quotas": [
+      {
+        "attribute": "creative",
+        "needed": 288
+      },
+      {
+        "attribute": "well_connected",
+        "needed": 442
+      },
+      {
+        "attribute": "techno_lover",
+        "needed": 639
+      },
+      {
+        "attribute": "berlin_local",
+        "needed": 744
+      }
+    ],
+    "admissionRate": 0.06666666666666667,
+    "admitted": 13,
+    "rejected": 182
+  }
+}

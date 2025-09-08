@@ -168,6 +168,7 @@ export class Berghain {
         })
         if (this.current.status.status !== 'running') break
         console.log(this.bouncer.getProgress()) // better to console here
+        this.saveGame().catch(() => {})
       }
 
       if (this.current.status.status === 'failed') {
