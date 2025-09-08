@@ -33,11 +33,11 @@ type CriticalAttributes<Attributes extends PersonAttributes> = Partial<
 
 const TUNED_CONFIG: Partial<GameConfig> = {
   // Most impactful
-  BASE_THRESHOLD: 0.45, // Back closer to successful run (0.41)
-  MIN_THRESHOLD: 0.3,
-  MAX_THRESHOLD: 0.9,
-  TARGET_RANGE: 4000,
-  TARGET_RATE: 0.19,
+  BASE_THRESHOLD: 0.45, // Lower from 0.51 - major change needed
+  TARGET_RATE: 0.25, // Raise from 0.19 to match 1000/4000 = 25%
+  TARGET_RANGE: 4000, // Back to 4000 from 3000/3050
+  MIN_THRESHOLD: 0.2, // Lower floor
+  MAX_THRESHOLD: 0.8, // Keep reasonable ceiling
   URGENCY_MODIFIER: 3.0,
   MULTI_ATTRIBUTE_BONUS: 1.2,
 
@@ -303,6 +303,12 @@ export class Bouncer<
     const criticalKeys = Object.keys(this.criticalAttributes) as Keys[]
     const personAttributes = nextPerson.attributes
 
+    const currentRate =
+      this.admittedCount / (this.admittedCount + this.rejectedCount)
+    const targetRate = 0.25
+    const earlyBoost =
+      this.admittedCount < 500 && currentRate < targetRate ? 0.9 : 1.0
+
     // Calculate both regular and endgame scores
     const regularScore = this.calculateAdmissionScore(personAttributes)
     const endgameScore = this.getEndgameScore(personAttributes)
@@ -313,9 +319,7 @@ export class Bouncer<
     const score = rawScore * deflationFactor
 
     const threshold = this.getProgressThreshold()
-    const effectiveThreshold = this.isEndgame()
-      ? Math.min(threshold, 0.3) // Never go below 0.3 even in endgame
-      : threshold
+    const effectiveThreshold = threshold * earlyBoost
 
     const hasEveryAttribute = this.metrics.hasAllAttributes(
       personAttributes as any
@@ -334,7 +338,7 @@ export class Bouncer<
       hasEveryAttribute ||
       hasEveryCriticalAttribute ||
       (this.isEndgame() && endgameScore > 0.5) ||
-      score > effectiveThreshold || // Use effective threshold
+      score > effectiveThreshold || // Use boosted threshold
       (spotsLeft < 20 && hasSomeCriticalAttribute) ||
       this.shouldEmergencyAdmit(personAttributes)
 
@@ -377,15 +381,14 @@ export class Bouncer<
       const needed = this.metrics.getNeeded(attr)
       const progress = this.metrics.getProgress(attr)
 
-      // MUCH more conservative base scoring
-      const urgencyScore = Math.min(needed / 200, 1.0) // Increased divisor from 50 to 200
+      // Less conservative base scoring
+      const urgencyScore = Math.min(needed / 100, 1.5) // Reduced divisor from 200 to 100
 
-      // Critical modifier - track max instead of applying to each
       const criticalInfo = this.criticalAttributes[attr]
       let criticalMultiplier = 1.0
 
       if (criticalInfo) {
-        criticalMultiplier = Math.min(criticalInfo.modifier, 8.0) // Reduced cap from 15 to 8
+        criticalMultiplier = Math.min(criticalInfo.modifier, 10.0) // Raised cap from 8 to 10
         maxCriticalMultiplier = Math.max(
           maxCriticalMultiplier,
           criticalMultiplier
@@ -393,54 +396,63 @@ export class Bouncer<
         hasCriticalAttribute = true
       }
 
-      // MUCH more conservative bonuses
+      // More generous bonuses
       const frequency = this.metrics.frequencies[attr]
-      const rarityBonus = frequency < 0.1 ? 1.8 : frequency < 0.4 ? 1.3 : 1.0 // Reduced from 3.0/1.5
-      const progressUrgency = progress < 0.2 ? 1.8 : progress < 0.5 ? 1.4 : 1.0 // Reduced from 3.0/2.0
+      const rarityBonus = frequency < 0.1 ? 2.2 : frequency < 0.4 ? 1.5 : 1.0 // Increased
+      const progressUrgency = progress < 0.2 ? 2.2 : progress < 0.5 ? 1.6 : 1.0 // Increased
 
-      // Don't apply critical multiplier per attribute - apply once at the end
       const attributeScore = urgencyScore * rarityBonus * progressUrgency
       totalScore += attributeScore
     })
 
-    // Apply critical multiplier once to total, not per attribute
+    // Apply critical multiplier
     if (hasCriticalAttribute) {
-      totalScore *= Math.min(maxCriticalMultiplier, 3.0) // Much lower cap
+      totalScore *= Math.min(maxCriticalMultiplier, 4.0) // Raised cap from 3 to 4
     }
 
-    // More conservative multi-attribute bonus
+    // More generous multi-attribute bonus
     if (usefulAttributes.length > 1) {
-      totalScore *= 1 + (usefulAttributes.length - 1) * 0.2 // Reduced from 0.6
+      totalScore *= 1 + (usefulAttributes.length - 1) * 0.3 // Increased from 0.2
     }
 
-    // MUCH more aggressive normalization
-    const normalizedScore = Math.log(totalScore + 1) / Math.log(50) // Increased denominator from 20 to 50
-    return Math.min(normalizedScore, 1.5) // Reduced cap from 2.0 to 1.5
+    // Less aggressive normalization
+    const normalizedScore = Math.log(totalScore + 1) / Math.log(30) // Reduced from 50 to 30
+    return Math.min(normalizedScore, 2.0) // Raised cap from 1.5 to 2.0
   }
 
   private getScoreDeflationFactor(): number {
     const currentRate =
       this.admittedCount / (this.admittedCount + this.rejectedCount)
-    const targetRate = Bouncer.CONFIG.TARGET_RATE || 0.19 // Use config value
+    const targetRate = 0.25
 
-    if (currentRate > targetRate * 1.4) {
-      // If over 26.6%
-      return 0.5 // Heavy deflation
-    } else if (currentRate > targetRate * 1.2) {
-      // If over 22.8%
-      return 0.7 // Medium deflation
-    } else if (currentRate > targetRate * 1.1) {
-      // If over 20.9%
-      return 0.85 // Light deflation
-    } else if (currentRate < targetRate * 0.7) {
-      // If under 13.3%
-      return 1.3 // Boost scores
-    } else if (currentRate < targetRate * 0.85) {
-      // If under 16.15%
-      return 1.15 // Light boost
+    // For your current 80% rate vs 25% target:
+    const ratio = currentRate / targetRate // 3.2
+
+    // Aggressive response for large deviations
+    let deflationFactor: number
+
+    if (ratio > 2.5) {
+      // Severe over-admission - emergency deflation
+      deflationFactor = 0.15
+    } else if (ratio > 2.0) {
+      // Heavy over-admission - strong deflation
+      deflationFactor = 0.25
+    } else if (ratio > 1.5) {
+      // Moderate over-admission - medium deflation
+      deflationFactor = 0.5
+    } else if (ratio > 1.2) {
+      // Slight over-admission - light deflation
+      deflationFactor = 0.8
+    } else if (ratio < 0.8) {
+      // Under-admission - inflation
+      deflationFactor = Math.min(1.5, 1.25 / ratio)
+    } else {
+      // Target range - minimal adjustment
+      deflationFactor = 1.0
     }
 
-    return 1.0 // Good range (16.15% - 20.9%)
+    // Safety bounds
+    return Stats.clamp(deflationFactor, 0.1, 2.0)
   }
 
   // Simplified estimation using metrics
@@ -507,6 +519,9 @@ export class Bouncer<
     )
 
     const rateAnalysis = this.getAdmissionRateAnalysis()
+    const currentRejections = this.rejectedCount
+    const targetRejections = 3000
+    const rejectionGap = currentRejections - targetRejections
 
     return {
       ...this.info,
@@ -515,6 +530,12 @@ export class Bouncer<
       spots_left: this.totalSpotsLeft,
       people_left: this.estimatedPeopleInLineLeft,
       incomplete_quotas: this.metrics.getIncompleteConstraints().length,
+      rejection_analysis: {
+        current_rejections: currentRejections,
+        target_rejections: targetRejections,
+        rejection_gap: rejectionGap,
+        on_track: Math.abs(rejectionGap) < 200,
+      },
     }
   }
 
