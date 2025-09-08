@@ -1,0 +1,179 @@
+{
+  "file": "./data/scenario-2-07ecddfa-e508-4fd3-b30b-1323f421e466.json",
+  "game": {
+    "gameId": "07ecddfa-e508-4fd3-b30b-1323f421e466",
+    "constraints": [
+      {
+        "attribute": "techno_lover",
+        "minCount": 650
+      },
+      {
+        "attribute": "well_connected",
+        "minCount": 450
+      },
+      {
+        "attribute": "creative",
+        "minCount": 300
+      },
+      {
+        "attribute": "berlin_local",
+        "minCount": 750
+      }
+    ],
+    "attributeStatistics": {
+      "relativeFrequencies": {
+        "techno_lover": 0.6265000000000001,
+        "well_connected": 0.4700000000000001,
+        "creative": 0.06227,
+        "berlin_local": 0.398
+      },
+      "correlations": {
+        "techno_lover": {
+          "techno_lover": 1,
+          "well_connected": -0.4696169332674324,
+          "creative": 0.09463317039891586,
+          "berlin_local": -0.6549403815606182
+        },
+        "well_connected": {
+          "techno_lover": -0.4696169332674324,
+          "well_connected": 1,
+          "creative": 0.14197259140471485,
+          "berlin_local": 0.5724067808436452
+        },
+        "creative": {
+          "techno_lover": 0.09463317039891586,
+          "well_connected": 0.14197259140471485,
+          "creative": 1,
+          "berlin_local": 0.14446459505650772
+        },
+        "berlin_local": {
+          "techno_lover": -0.6549403815606182,
+          "well_connected": 0.5724067808436452,
+          "creative": 0.14446459505650772,
+          "berlin_local": 1
+        }
+      }
+    }
+  },
+  "status": {
+    "status": "running",
+    "admittedCount": 999,
+    "rejectedCount": 2472,
+    "nextPerson": {
+      "personIndex": 3471,
+      "attributes": {
+        "techno_lover": false,
+        "well_connected": true,
+        "creative": false,
+        "berlin_local": true
+      }
+    }
+  },
+  "output": {
+    "info": {
+      "natural_progress": 0.9914,
+      "target_progress": 1,
+      "actual_progress": 0.8805,
+      "progress_gap": 0.1195,
+      "progress_adjustment": 0.1032,
+      "rate_adjustment": 0,
+      "threshold": 0.3,
+      "raw_score": 0.16,
+      "deflation_factor": 1,
+      "last_score": 0.16,
+      "critical_attrs": 3,
+      "has_critical": false,
+      "has_some_critical": true,
+      "emergency_eligible": false,
+      "metrics_efficiency": 0.88,
+      "metrics_risk": 0.68,
+      "metrics_balance": true,
+      "recommendations": [
+        "Prioritize creative (64% complete)"
+      ]
+    },
+    "critical": [
+      "⚠️:techno_lover",
+      "⚠️:creative",
+      "⚠️:berlin_local"
+    ],
+    "config": {
+      "BASE_THRESHOLD": 0.3,
+      "MIN_THRESHOLD": 0.3,
+      "MAX_THRESHOLD": 0.9,
+      "THRESHOLD_RAMP": 0.3,
+      "TARGET_RANGE": 3500,
+      "URGENCY_MODIFIER": 3,
+      "CORRELATION_BONUS": 0.2,
+      "NEGATIVE_CORRELATION_BONUS": 0.5,
+      "NEGATIVE_CORRELATION_THRESHOLD": -0.5,
+      "MULTI_ATTRIBUTE_BONUS": 1.2,
+      "RARE_PERSON_BONUS": 0.4,
+      "MAX_CAPACITY": 1000,
+      "TOTAL_PEOPLE": 10000,
+      "CRITICAL_REQUIRED_THRESHOLD": 20,
+      "CRITICAL_IN_LINE_RATIO": 0.8,
+      "CRITICAL_CAPACITY_RATIO": 0.9,
+      "MIN_RAW_SCORES": 1,
+      "MESSAGE": "Base Configuration - Balanced Strategy",
+      "SCENARIO": "2"
+    },
+    "quotas": [
+      {
+        "attribute": "berlin_local",
+        "needed": 18
+      },
+      {
+        "attribute": "techno_lover",
+        "needed": 58
+      },
+      {
+        "attribute": "creative",
+        "needed": 109
+      }
+    ],
+    "admissionRate": 0.2878133102852204,
+    "admitted": 999,
+    "rejected": 2472,
+    "natural_progress": 0.9914,
+    "target_progress": 1,
+    "actual_progress": 0.8805,
+    "progress_gap": 0.1195,
+    "progress_adjustment": 0.1032,
+    "rate_adjustment": 0,
+    "threshold": 0.3,
+    "raw_score": 0.16,
+    "deflation_factor": 1,
+    "last_score": 0.16,
+    "critical_attrs": 3,
+    "has_critical": false,
+    "has_some_critical": true,
+    "emergency_eligible": false,
+    "critical_progress": [
+      {
+        "attribute": "techno_lover",
+        "needed": 59,
+        "modifier": 10,
+        "frequency": 0.6265000000000001,
+        "estimated_remaining": 4090.4185
+      },
+      {
+        "attribute": "creative",
+        "needed": 109,
+        "modifier": 10,
+        "frequency": 0.06227,
+        "estimated_remaining": 406.56083
+      },
+      {
+        "attribute": "berlin_local",
+        "needed": 18,
+        "modifier": 10,
+        "frequency": 0.398,
+        "estimated_remaining": 2598.542
+      }
+    ],
+    "spots_left": 1,
+    "people_left": 6529,
+    "incomplete_quotas": 3
+  }
+}

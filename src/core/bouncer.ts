@@ -32,22 +32,18 @@ type CriticalAttributes<Attributes extends PersonAttributes> = Partial<
 // fine tune config here...
 
 const TUNED_CONFIG: Partial<GameConfig> = {
-  // Threshold settings - allow wider range for rate control
-  BASE_THRESHOLD: 0.45, // Lower base for more lenient starting point
-  MIN_THRESHOLD: 0.25, // Much lower floor for aggressive recovery
-  MAX_THRESHOLD: 0.95, // Higher ceiling for selectivity
+  // Most impactful
+  BASE_THRESHOLD: 0.45, // Back closer to successful run (0.41)
+  MIN_THRESHOLD: 0.3,
+  MAX_THRESHOLD: 0.9,
+  TARGET_RANGE: 4000,
+  URGENCY_MODIFIER: 3.0,
+  MULTI_ATTRIBUTE_BONUS: 1.2,
 
-  // Game timing - not used in constant rate but keep reasonable
-  TARGET_RANGE: 4000, // Keep existing
-
-  // Scoring modifiers - crucial for constant rate approach
-  URGENCY_MODIFIER: 2.0, // Lower since urgency handled by rate control
-  MULTI_ATTRIBUTE_BONUS: 0.5, // High - people with multiple attributes are very valuable
-
-  // Critical detection - more aggressive
-  CRITICAL_REQUIRED_THRESHOLD: 20, // Higher buffer before panic mode
-  CRITICAL_IN_LINE_RATIO: 0.8, // More aggressive critical detection
-  CRITICAL_CAPACITY_RATIO: 0.9, // More aggressive
+  // Critical attributes
+  CRITICAL_REQUIRED_THRESHOLD: 20,
+  CRITICAL_IN_LINE_RATIO: 0.8,
+  CRITICAL_CAPACITY_RATIO: 0.9,
 
   // Less important with simplified approach
   CORRELATION_BONUS: 0.2,
@@ -149,16 +145,11 @@ export class Bouncer<
     return this.metrics.getNeeded(attribute as Keys)
   }
 
-  // Enhanced critical attributes using metrics insights
   private getCriticalAttributes(): CriticalAttributes<Attributes> {
-    if (this.admittedCount < 50) {
-      return {}
-    }
+    if (this.admittedCount < 50) return {}
 
     const peopleInLineLeft = this.estimatedPeopleInLineLeft
     const totalSpotsLeft = this.totalSpotsLeft
-
-    // Use metrics risk assessment
     const incompleteConstraints = this.metrics.getIncompleteConstraints()
 
     this.criticalAttributes = {}
@@ -167,33 +158,32 @@ export class Bouncer<
       const attr = constraint.attribute
       const needed = constraint.needed
       const frequency = this.metrics.frequencies[attr]
-
       const estimatedRemaining = peopleInLineLeft * frequency
-      const isCritical = this.riskAssessment.criticalAttributes.includes(attr)
 
-      const spotsBuffer = Math.max(0, totalSpotsLeft - needed)
-      const maxBuffer = Math.max(1, totalSpotsLeft * 0.2) // 20% of spots left as max buffer
-      const urgencyRatio = 1 - spotsBuffer / maxBuffer
-      const modifier = 1 + Math.max(0, Math.min(1, urgencyRatio)) * 2 // 1.0 to 3.0 range
+      // MORE AGGRESSIVE CRITICAL DETECTION
+      const urgencyRatio = needed / Math.max(1, totalSpotsLeft)
+      const scarcityRatio = needed / Math.max(1, estimatedRemaining)
 
-      // Enhanced logic using estimated remaining
-      const isRequired =
-        needed >=
-        Math.max(
-          1,
-          totalSpotsLeft - Bouncer.CONFIG.CRITICAL_REQUIRED_THRESHOLD!
+      // Critical if we need more than 15% of remaining spots for this attribute
+      const isCapacityCritical = urgencyRatio > 0.15
+
+      // Critical if we need more than 90% of expected remaining people with this attribute
+      const isScarcityCritical = scarcityRatio > 0.9
+
+      // Risk assessment critical
+      const isRiskCritical =
+        this.riskAssessment.criticalAttributes.includes(attr)
+
+      if (isCapacityCritical || isScarcityCritical || isRiskCritical) {
+        // MUCH MORE AGGRESSIVE MODIFIER
+        const modifier = Math.max(
+          2,
+          Math.min(10, urgencyRatio * 10 + scarcityRatio * 5)
         )
 
-      const isEstimateShort = needed > estimatedRemaining * 0.95 // Need more than 80% of estimated remaining
-
-      // An attribute becomes critical if:
-      // 1. Risk assessment flags it, OR
-      // 2. Venue capacity constraint, OR
-      // 3. Estimated remaining people constraint
-      if (isCritical || isRequired || isEstimateShort) {
         this.criticalAttributes[attr] = {
           needed,
-          required: true,
+          required: isCapacityCritical, // Only require if capacity critical
           modifier,
         }
       }
@@ -214,76 +204,92 @@ export class Bouncer<
 
     // Use metrics to update counts
     this.metrics.updateCounts(attributes)
+    this.riskAssessment = this.metrics.getRiskAssessment(
+      this.estimatedPeopleInLineLeft
+    )
   }
 
-  // normalize score values
-  private normalizeScore(rawScore: number): number {
-    // Simple normalization for the log-based scoring
-    return Math.min(rawScore / 4.0, 1.0) // Divide by ~max expected score
+  private getDynamicThresholdAdjustment(): number {
+    const rateAnalysis = this.getAdmissionRateAnalysis()
+
+    // Small additional adjustment based on rate performance
+    if (rateAnalysis.status === 'too_high') {
+      return 0.02 // Raise threshold slightly
+    } else if (rateAnalysis.status === 'too_low') {
+      return -0.02 // Lower threshold slightly
+    }
+
+    return 0
   }
 
-  // calculate progress threshold
+  /**
+   *
+   *  @progress calculate dynamic progress threshold.
+   *
+   */
   private getProgressThreshold(): number {
-    const totalNeeded = this.constraints.reduce(
-      (total, current) => total + current.minCount,
-      0
-    )
-    const targetAdmissionRate = totalNeeded / (Bouncer.CONFIG.TOTAL_PEOPLE || 1)
-    const currentRate =
-      this.admittedCount / (this.admittedCount + this.rejectedCount)
-
-    this.rateGap = currentRate - targetAdmissionRate
-    const adjustment = this.rateGap * 0.5 // MOVE THE 0.2 HERE, reduce from 0.5
-
-    const threshold = Stats.clamp(
-      Bouncer.CONFIG.BASE_THRESHOLD! + adjustment,
-      Bouncer.CONFIG.MIN_THRESHOLD!,
-      0.95 // RAISE MAX_THRESHOLD from 0.8
-    )
-
-    // Debug logging
-    this.info['target_rate'] = Stats.round(targetAdmissionRate, 10000)
-    this.info['current_rate'] = Stats.round(currentRate, 10000)
-    this.info['rate_gap'] = Stats.round(this.rateGap, 10000)
-    this.info['threshold'] = Stats.round(threshold, 10000)
-
-    return threshold
-  }
-
-  private getProgressThresholdWave(): number {
     const totalProcessed = this.admittedCount + this.rejectedCount
     const naturalProgress = Math.min(
       totalProcessed / Bouncer.CONFIG.TARGET_RANGE!,
       1.0
     )
 
-    // Target being 10% ahead of the natural schedule
-    const targetProgress = Math.min(naturalProgress * 1.05, 1.0)
+    const targetProgress = Math.min(naturalProgress * 1.1, 1.0)
     const actualProgress = this.metrics.totalProgress
-
-    // Now the gap measures against the "10% ahead" target
     const progressGap = targetProgress - actualProgress
 
-    const sigmoid = Math.tanh(progressGap * 4.0)
-    const maxAdjustment = 0.25
-    const adjustment = sigmoid * maxAdjustment
+    const sigmoid = Math.tanh(progressGap * 3.0)
+    const maxAdjustment = 0.3
+    const progressAdjustment = sigmoid * maxAdjustment
+
+    // Add dynamic rate-based adjustment
+    const rateAdjustment = this.getDynamicThresholdAdjustment()
 
     const threshold = Stats.clamp(
-      Bouncer.CONFIG.BASE_THRESHOLD - adjustment,
-      Bouncer.CONFIG.MIN_THRESHOLD,
-      Bouncer.CONFIG.MAX_THRESHOLD
+      Bouncer.CONFIG.BASE_THRESHOLD! - progressAdjustment + rateAdjustment,
+      Bouncer.CONFIG.MIN_THRESHOLD!,
+      Bouncer.CONFIG.MAX_THRESHOLD!
     )
 
-    // Debug logging
+    // Enhanced debug logging
     this.info['natural_progress'] = Stats.round(naturalProgress, 10000)
     this.info['target_progress'] = Stats.round(targetProgress, 10000)
     this.info['actual_progress'] = Stats.round(actualProgress, 10000)
     this.info['progress_gap'] = Stats.round(progressGap, 10000)
+    this.info['progress_adjustment'] = Stats.round(progressAdjustment, 10000)
+    this.info['rate_adjustment'] = Stats.round(rateAdjustment, 10000)
     this.info['threshold'] = Stats.round(threshold, 10000)
 
     return threshold
   }
 
+  private shouldEmergencyAdmit(attributes: Record<string, boolean>): boolean {
+    const spotsLeft = this.totalSpotsLeft
+    const peopleLeft = this.estimatedPeopleInLineLeft
+    const incompleteQuotas = this.metrics.getIncompleteConstraints()
+    const totalNeeded = incompleteQuotas.reduce((sum, q) => sum + q.needed, 0)
+
+    // Emergency if we're running out of people relative to what we need
+    const peoplePerNeed = peopleLeft / Math.max(totalNeeded, 1)
+
+    if (peoplePerNeed < 5 && spotsLeft < 100) {
+      // Less than 5 people per needed quota
+      const usefulAttributes = this.metrics.getUsefulAttributes(
+        attributes as Attributes
+      )
+      return usefulAttributes.length > 0
+    }
+
+    return false
+  }
+
+  /**
+   *  # Admit
+   *
+   *  Determine is we should admit or reject the next person.
+   *
+   *  @note admission goes logic here....
+   */
   admit(status: GameState['status']): boolean {
     this.state.status = status
     const { nextPerson } = status
@@ -300,49 +306,61 @@ export class Bouncer<
     const criticalKeys = Object.keys(this.criticalAttributes) as Keys[]
     const personAttributes = nextPerson.attributes
 
-    // In admit() method, replace the complex critical check with:
-    if (criticalKeys.length > 0) {
-      for (const [key, value] of Object.entries(this.criticalAttributes)) {
-        if (!value || !personAttributes) continue
-        if (value.required && !personAttributes[key as any]) return false
-      }
-    }
+    // Calculate both regular and endgame scores
+    const regularScore = this.calculateAdmissionScore(personAttributes)
+    const endgameScore = this.getEndgameScore(personAttributes)
+    const deflationFactor = this.getScoreDeflationFactor()
 
-    const score = this.calculateAdmissionScore(personAttributes)
+    // Use higher of regular or endgame score
+    const rawScore = Math.max(regularScore, endgameScore)
+    const score = rawScore * deflationFactor
+
     const threshold = this.getProgressThreshold()
 
-    // Use metrics for better person evaluation
     const hasEveryAttribute = this.metrics.hasAllAttributes(
       personAttributes as any
     )
     const hasEveryCriticalAttribute =
       criticalKeys.length > 0 &&
       criticalKeys.every((attr) => personAttributes[attr]!)
+    const hasSomeCriticalAttribute =
+      criticalKeys.length > 0 &&
+      criticalKeys.some((attr) => personAttributes[attr]!)
 
     if (hasEveryAttribute) this.totalUnicorns++
 
+    // Enhanced admission criteria with endgame priority
     const shouldAdmit =
-      score > threshold || hasEveryCriticalAttribute || hasEveryAttribute
+      hasEveryAttribute || // Unicorns always get in
+      hasEveryCriticalAttribute || // Perfect critical matches
+      (this.isEndgame() && endgameScore > 0.5) || // Endgame priority
+      score > threshold || // Standard threshold
+      (spotsLeft < 20 && hasSomeCriticalAttribute) || // Final desperation
+      this.shouldEmergencyAdmit(personAttributes) // Last resort
 
-    // Enhanced logging
     this.totalScores.push(score)
+    this.info['regular_score'] = Stats.round(regularScore)
+    this.info['endgame_score'] = Stats.round(endgameScore)
+    this.info['raw_score'] = Stats.round(rawScore)
+    this.info['deflation_factor'] = Stats.round(deflationFactor)
     this.info['last_score'] = Stats.round(score)
-    this.info['useful_attrs'] = this.metrics.countUsefulAttributes(
-      personAttributes as any
-    )
-    this.info['avg_score'] = Stats.round(
-      Stats.average(this.totalAdmittedScores)
-    )
-
-    // Add metrics summary to info
-    const summary = this.metrics.getSummary()
-    this.info['metrics_summary'] = summary
+    this.info['threshold'] = Stats.round(threshold)
+    this.info['is_endgame'] = this.isEndgame()
+    this.info['critical_attrs'] = criticalKeys.length
+    this.info['has_critical'] = hasEveryCriticalAttribute
+    this.info['has_some_critical'] = hasSomeCriticalAttribute
+    this.info['emergency_eligible'] =
+      this.shouldEmergencyAdmit(personAttributes)
 
     this.updateCounts(personAttributes as any, score, shouldAdmit)
     return shouldAdmit
   }
 
-  // calculate admission scores
+  /**
+   *  Calculate the persons admission score.
+   *  @param attributes
+   *  @returns {number}
+   */
   private calculateAdmissionScore(attributes: Record<string, boolean>): number {
     if (this.allQuotasMet) return 1.0
 
@@ -352,42 +370,81 @@ export class Bouncer<
     if (usefulAttributes.length === 0) return 0.0
 
     let totalScore = 0
-    const allProgresses = this.constraints.map((c) =>
-      this.metrics.getProgress(c.attribute)
-    )
-    const avgProgress = Stats.average(allProgresses)
+    let hasCriticalAttribute = false
+    let maxCriticalMultiplier = 1.0
 
     usefulAttributes.forEach((attr) => {
       const needed = this.metrics.getNeeded(attr)
       const progress = this.metrics.getProgress(attr)
 
-      // Base urgency: 0-1 based on how much we need
-      const urgencyScore = Math.min(needed / 200, 1.0)
+      // MUCH more conservative base scoring
+      const urgencyScore = Math.min(needed / 200, 1.0) // Increased divisor from 50 to 200
 
-      // Proactive priority: boost attributes that are falling behind BEFORE they become critical
-      let priorityMultiplier = 1.0
-      if (progress < avgProgress * 0.8) {
-        priorityMultiplier = 2.0 // 2x boost for lagging quotas
-      } else if (progress > avgProgress * 1.2) {
-        priorityMultiplier = 0.3 // Penalize overfilled quotas
+      // Critical modifier - track max instead of applying to each
+      const criticalInfo = this.criticalAttributes[attr]
+      let criticalMultiplier = 1.0
+
+      if (criticalInfo) {
+        criticalMultiplier = Math.min(criticalInfo.modifier, 8.0) // Reduced cap from 15 to 8
+        maxCriticalMultiplier = Math.max(
+          maxCriticalMultiplier,
+          criticalMultiplier
+        )
+        hasCriticalAttribute = true
       }
 
-      // Early intervention: boost rare attributes early
+      // MUCH more conservative bonuses
       const frequency = this.metrics.frequencies[attr]
-      const rarityBoost = frequency < 0.1 ? 1.5 : 1.0 // 1.5x for very rare attributes
-      const criticalModifier = this.criticalAttributes[attr]?.modifier || 1
+      const rarityBonus = frequency < 0.1 ? 1.8 : frequency < 0.4 ? 1.3 : 1.0 // Reduced from 3.0/1.5
+      const progressUrgency = progress < 0.2 ? 1.8 : progress < 0.5 ? 1.4 : 1.0 // Reduced from 3.0/2.0
 
-      const attributeScore =
-        urgencyScore * priorityMultiplier * rarityBoost * criticalModifier
+      // Don't apply critical multiplier per attribute - apply once at the end
+      const attributeScore = urgencyScore * rarityBonus * progressUrgency
       totalScore += attributeScore
     })
 
-    // Multi-attribute bonus: strong reward for efficiency
-    if (usefulAttributes.length > 1) {
-      totalScore *= 1 + (usefulAttributes.length - 1) * 0.3
+    // Apply critical multiplier once to total, not per attribute
+    if (hasCriticalAttribute) {
+      totalScore *= Math.min(maxCriticalMultiplier, 3.0) // Much lower cap
     }
 
-    return Math.min(totalScore / usefulAttributes.length, 1.0)
+    // More conservative multi-attribute bonus
+    if (usefulAttributes.length > 1) {
+      totalScore *= 1 + (usefulAttributes.length - 1) * 0.2 // Reduced from 0.6
+    }
+
+    // MUCH more aggressive normalization
+    const normalizedScore = Math.log(totalScore + 1) / Math.log(50) // Increased denominator from 20 to 50
+    return Math.min(normalizedScore, 1.5) // Reduced cap from 2.0 to 1.5
+  }
+
+  private getScoreDeflationFactor(): number {
+    const currentRate =
+      this.admittedCount / (this.admittedCount + this.rejectedCount)
+    const targetRate =
+      Bouncer.CONFIG.MAX_CAPACITY! / Bouncer.CONFIG.TARGET_RANGE! // 25%
+
+    // More aggressive deflation - aim for 20% not 25%
+    const adjustedTargetRate = targetRate * 0.8 // Target 20% instead of 25%
+
+    if (currentRate > adjustedTargetRate * 1.4) {
+      // If over 28%
+      return 0.5 // Heavy deflation
+    } else if (currentRate > adjustedTargetRate * 1.2) {
+      // If over 24%
+      return 0.7 // Medium deflation
+    } else if (currentRate > adjustedTargetRate * 1.1) {
+      // If over 22%
+      return 0.85 // Light deflation
+    } else if (currentRate < adjustedTargetRate * 0.7) {
+      // If under 14%
+      return 1.3 // Boost scores
+    } else if (currentRate < adjustedTargetRate * 0.85) {
+      // If under 17%
+      return 1.15 // Light boost
+    }
+
+    return 1.0 // Good range (17% - 22%)
   }
 
   // Simplified estimation using metrics
@@ -395,6 +452,66 @@ export class Bouncer<
     const frequency = this.metrics.frequencies[attribute]
     const peopleLeft = this.estimatedPeopleInLineLeft
     return peopleLeft * frequency
+  }
+
+  private isEndgame(): boolean {
+    const spotsLeft = this.totalSpotsLeft
+    const incompleteQuotas = this.metrics.getIncompleteConstraints()
+    const totalNeeded = incompleteQuotas.reduce((sum, q) => sum + q.needed, 0)
+
+    // Endgame when we have very few spots left OR need very few people
+    return spotsLeft < 50 || totalNeeded < 200
+  }
+
+  private getEndgameScore(attributes: Record<string, boolean>): number {
+    if (!this.isEndgame()) return 0
+
+    const usefulAttributes = this.metrics.getUsefulAttributes(
+      attributes as Attributes
+    )
+    const incompleteQuotas = this.metrics.getIncompleteConstraints()
+
+    // In endgame, score ONLY based on exact needs
+    let endgameScore = 0
+
+    usefulAttributes.forEach((attr) => {
+      const quota = incompleteQuotas.find((q) => q.attribute === attr)
+      if (quota) {
+        // Score based on how desperately we need this attribute
+        const urgency = Math.min(
+          quota.needed / Math.max(this.totalSpotsLeft, 1),
+          5.0
+        )
+        const frequency = this.metrics.frequencies[attr]
+        const scarcity = 1 / Math.max(frequency, 0.01) // Rarer = higher score
+
+        endgameScore += urgency * scarcity
+      }
+    })
+
+    return Math.min(endgameScore, 3.0) // Cap endgame scores
+  }
+
+  getDebugInfo(): any {
+    const criticalProgress = Object.entries(this.criticalAttributes).map(
+      ([attr, info]) => ({
+        attribute: attr,
+        needed: info?.needed || 0,
+        modifier: info?.modifier || 1,
+        frequency: this.metrics.frequencies[attr as keyof Attributes],
+        estimated_remaining:
+          this.estimatedPeopleInLineLeft *
+          (this.metrics.frequencies[attr as keyof Attributes] || 0),
+      })
+    )
+
+    return {
+      ...this.info,
+      critical_progress: criticalProgress,
+      spots_left: this.totalSpotsLeft,
+      people_left: this.estimatedPeopleInLineLeft,
+      incomplete_quotas: this.metrics.getIncompleteConstraints().length,
+    }
   }
 
   // Get current total progress
@@ -429,6 +546,7 @@ export class Bouncer<
         this.admittedCount / (this.admittedCount + this.rejectedCount),
       admitted: this.admittedCount,
       rejected: this.rejectedCount,
+      ...this.getDebugInfo(),
     }
   }
 
@@ -443,6 +561,49 @@ export class Bouncer<
       scores: this.totalScores,
       metrics_analysis: analysis,
       final_summary: this.metrics.getSummary(),
+    }
+  }
+
+  private getAdmissionRateAnalysis(): {
+    currentRate: number
+    targetRate: number
+    deviation: number
+    status: 'too_high' | 'too_low' | 'optimal'
+    recommendation: string
+  } {
+    const currentRate =
+      this.admittedCount / (this.admittedCount + this.rejectedCount)
+    const targetRate =
+      Bouncer.CONFIG.MAX_CAPACITY! / Bouncer.CONFIG.TARGET_RANGE!
+    const deviation = currentRate - targetRate
+
+    let status: 'too_high' | 'too_low' | 'optimal'
+    let recommendation: string
+
+    if (Math.abs(deviation) < 0.02) {
+      // Within 2%
+      status = 'optimal'
+      recommendation = 'Admission rate is well-calibrated'
+    } else if (deviation > 0.05) {
+      // More than 5% over
+      status = 'too_high'
+      recommendation = 'Consider raising thresholds or reducing score bonuses'
+    } else if (deviation < -0.05) {
+      // More than 5% under
+      status = 'too_low'
+      recommendation =
+        'Consider lowering thresholds or increasing score bonuses'
+    } else {
+      status = deviation > 0 ? 'too_high' : 'too_low'
+      recommendation = 'Minor adjustment needed'
+    }
+
+    return {
+      currentRate: Stats.round(currentRate, 10000),
+      targetRate: Stats.round(targetRate, 10000),
+      deviation: Stats.round(deviation, 10000),
+      status,
+      recommendation,
     }
   }
 }

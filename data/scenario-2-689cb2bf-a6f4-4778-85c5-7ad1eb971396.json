@@ -1,0 +1,177 @@
+{
+  "file": "./data/scenario-2-689cb2bf-a6f4-4778-85c5-7ad1eb971396.json",
+  "game": {
+    "gameId": "689cb2bf-a6f4-4778-85c5-7ad1eb971396",
+    "constraints": [
+      {
+        "attribute": "techno_lover",
+        "minCount": 650
+      },
+      {
+        "attribute": "well_connected",
+        "minCount": 450
+      },
+      {
+        "attribute": "creative",
+        "minCount": 300
+      },
+      {
+        "attribute": "berlin_local",
+        "minCount": 750
+      }
+    ],
+    "attributeStatistics": {
+      "relativeFrequencies": {
+        "techno_lover": 0.6265000000000001,
+        "well_connected": 0.4700000000000001,
+        "creative": 0.06227,
+        "berlin_local": 0.398
+      },
+      "correlations": {
+        "techno_lover": {
+          "techno_lover": 1,
+          "well_connected": -0.4696169332674324,
+          "creative": 0.09463317039891586,
+          "berlin_local": -0.6549403815606182
+        },
+        "well_connected": {
+          "techno_lover": -0.4696169332674324,
+          "well_connected": 1,
+          "creative": 0.14197259140471485,
+          "berlin_local": 0.5724067808436452
+        },
+        "creative": {
+          "techno_lover": 0.09463317039891586,
+          "well_connected": 0.14197259140471485,
+          "creative": 1,
+          "berlin_local": 0.14446459505650772
+        },
+        "berlin_local": {
+          "techno_lover": -0.6549403815606182,
+          "well_connected": 0.5724067808436452,
+          "creative": 0.14446459505650772,
+          "berlin_local": 1
+        }
+      }
+    }
+  },
+  "status": {
+    "status": "running",
+    "admittedCount": 96,
+    "rejectedCount": 2339,
+    "nextPerson": {
+      "personIndex": 2435,
+      "attributes": {
+        "techno_lover": false,
+        "well_connected": true,
+        "creative": false,
+        "berlin_local": true
+      }
+    }
+  },
+  "output": {
+    "info": {
+      "target_rate": 0.215,
+      "current_rate": 0.041,
+      "rate_gap": -0.174,
+      "threshold": 0.36,
+      "last_score": 3,
+      "critical_attrs": 4,
+      "has_critical": true,
+      "metrics_efficiency": 0.13,
+      "metrics_risk": 0.68,
+      "metrics_balance": true,
+      "recommendations": [
+        "Prioritize berlin_local (9% complete)"
+      ]
+    },
+    "critical": [
+      "⚠️:techno_lover",
+      "⚠️:well_connected",
+      "⚠️:creative",
+      "⚠️:berlin_local"
+    ],
+    "config": {
+      "BASE_THRESHOLD": 0.45,
+      "MIN_THRESHOLD": 0.25,
+      "MAX_THRESHOLD": 0.95,
+      "THRESHOLD_RAMP": 0.3,
+      "TARGET_RANGE": 4000,
+      "URGENCY_MODIFIER": 2,
+      "CORRELATION_BONUS": 0.2,
+      "NEGATIVE_CORRELATION_BONUS": 0.5,
+      "NEGATIVE_CORRELATION_THRESHOLD": -0.5,
+      "MULTI_ATTRIBUTE_BONUS": 0.5,
+      "RARE_PERSON_BONUS": 0.4,
+      "MAX_CAPACITY": 1000,
+      "TOTAL_PEOPLE": 10000,
+      "CRITICAL_REQUIRED_THRESHOLD": 20,
+      "CRITICAL_IN_LINE_RATIO": 0.8,
+      "CRITICAL_CAPACITY_RATIO": 0.9,
+      "MIN_RAW_SCORES": 1,
+      "MESSAGE": "Base Configuration - Balanced Strategy",
+      "SCENARIO": "2"
+    },
+    "quotas": [
+      {
+        "attribute": "creative",
+        "needed": 252
+      },
+      {
+        "attribute": "well_connected",
+        "needed": 378
+      },
+      {
+        "attribute": "techno_lover",
+        "needed": 569
+      },
+      {
+        "attribute": "berlin_local",
+        "needed": 685
+      }
+    ],
+    "admissionRate": 0.03942505133470226,
+    "admitted": 96,
+    "rejected": 2339,
+    "target_rate": 0.215,
+    "current_rate": 0.041,
+    "rate_gap": -0.174,
+    "threshold": 0.36,
+    "last_score": 3,
+    "critical_attrs": 4,
+    "has_critical": true,
+    "critical_progress": [
+      {
+        "attribute": "techno_lover",
+        "needed": 569,
+        "modifier": 6.894446222284664,
+        "frequency": 0.6265000000000001,
+        "estimated_remaining": 4739.472500000001
+      },
+      {
+        "attribute": "well_connected",
+        "needed": 378,
+        "modifier": 4.712909002920785,
+        "frequency": 0.4700000000000001,
+        "estimated_remaining": 3555.5500000000006
+      },
+      {
+        "attribute": "creative",
+        "needed": 252,
+        "modifier": 5.462004331230768,
+        "frequency": 0.06227,
+        "estimated_remaining": 471.07255
+      },
+      {
+        "attribute": "berlin_local",
+        "needed": 685,
+        "modifier": 8.714828240820692,
+        "frequency": 0.398,
+        "estimated_remaining": 3010.8700000000003
+      }
+    ],
+    "spots_left": 904,
+    "people_left": 7565,
+    "incomplete_quotas": 4
+  }
+}
