@@ -1,4 +1,4 @@
-import { Bouncer, CONFIG } from './src/bouncer'
+import { Bouncer, CONFIG } from './src/bouncer2'
 import { Berghain, type ListenLabsConfig } from './src/berghain'
 
 /**
@@ -11,6 +11,7 @@ const settings: ListenLabsConfig = {
 }
 
 const config = {
+  message: '',
   ...CONFIG,
 }
 
@@ -38,6 +39,12 @@ Bun.argv.slice(2).forEach((current, index, array) => {
       config.BASE_THRESHOLD = Number(nextItem)
       break
     }
+
+    case '--message':
+    case '-m': {
+      // useful for tracking different expiraments
+      config.message = String(nextItem)
+    }
   }
 })
 
@@ -58,3 +65,6 @@ await Berghain.initialize({ scenario: settings.scenario })
   )
   .startNewGame()
   .catch(console.warn)
+  .finally(() => {
+    console.log(config.message)
+  })

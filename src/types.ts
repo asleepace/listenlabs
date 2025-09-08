@@ -18,19 +18,23 @@ export type Game = {
   }
 }
 
-export type PersonAttributesScenario1 = {
+export interface PersonAttributes {
+  [key: string]: boolean
+}
+
+export interface PersonAttributesScenario1 extends PersonAttributes {
   well_dressed: true
   young: true
 }
 
-export type PersonAttributesScenario2 = {
+export interface PersonAttributesScenario2 extends PersonAttributes {
   techno_lover: boolean
   well_connected: boolean
   creative: boolean
   berlin_local: boolean
 }
 
-export type PersonAttributesScenario3 = {
+export interface PersonAttributesScenario3 extends PersonAttributes {
   underground_veteran: boolean
   international: boolean
   fashion_forward: boolean
@@ -39,7 +43,9 @@ export type PersonAttributesScenario3 = {
   german_speaker: boolean
 }
 
-export type Person<T = PersonAttributesScenario3> = {
+export interface Person<
+  T extends PersonAttributes = PersonAttributesScenario3
+> {
   personIndex: number
   attributes: T
 }

@@ -1,6 +1,7 @@
 import type { Keys, GameState, Person } from './types'
 import type { BergainBouncer } from './berghain'
 import { Stats } from './stats'
+import { Metrics } from './metrics'
 
 interface Constraint {
   attribute: string
@@ -231,7 +232,7 @@ export const CONFIG = {
   MIN_RAW_SCORES: 5,
 }
 
-type BouncerConfig = typeof CONFIG
+export type BouncerConfig = typeof CONFIG
 
 /**
  *  ## Nightclub Bouncer
@@ -421,8 +422,6 @@ export class Bouncer implements BergainBouncer {
     const criticalCapacityThreshold =
       totalSpotsLeft * CONFIG.CRITICAL_CAPACITY_RATIO
 
-    const totalQuotas = this.gameData.constraints.length
-
     this.criticalAttributes = this.gameData.constraints.reduce(
       (output, current) => {
         const peopleNeeded = this.getPeopleNeeded(current.attribute)
@@ -439,9 +438,7 @@ export class Bouncer implements BergainBouncer {
           peopleNeeded >= criticalCapacityThreshold
 
         if (isCriticalLineThreshold || isCriticalCapacityThreshold) {
-          // add some padding early on in game and reduce as quotas are me
-          const stagePadding = Math.round(totalQuotas / this.totalQuotasMet)
-          const isRequired = peopleNeeded + stagePadding >= totalSpotsLeft
+          const isRequired = peopleNeeded >= totalSpotsLeft
 
           return {
             ...output,
@@ -606,8 +603,8 @@ export class Bouncer implements BergainBouncer {
       )
     )
 
-    this.info['progress_expected'] = Stats.round(expectedProgress, 10_000)
-    this.info['progress_total'] = Stats.round(totalProgress, 10_000)
+    this.info['expected_progress'] = Stats.round(expectedProgress, 10_000)
+    this.info['total_progress'] = Stats.round(totalProgress, 10_000)
     this.info['threshold'] = Stats.round(threshold, 10_000)
     return threshold
   }
