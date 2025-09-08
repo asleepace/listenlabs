@@ -498,6 +498,12 @@ export class Bouncer<
       const frequency = this.metrics.frequencies[attr]
       const attrDifficulty = difficulty.get(attr)!
 
+      const quotaRate = constraint.minCount / CONFIG.MAX_CAPACITY
+
+      // If this attribute is much more common than its quota rate AND we're early game
+      const isOverabundant = frequency > quotaRate * 2.0
+      const isEarlyGame = totalProcessed < CONFIG.TARGET_RANGE * 0.5
+
       // Base scoring factors
       const targetProgress = Math.min(totalProcessed / CONFIG.TARGET_RANGE, 1.0)
       const actualProgress = this.metrics.getProgress(attr)
@@ -522,6 +528,11 @@ export class Bouncer<
         componentScore *= 1.5
       } else if (critical) {
         componentScore *= 0.5
+      }
+
+      if (isOverabundant && isEarlyGame) {
+        // Reduce importance of overabundant attributes early
+        componentScore *= 0.7
       }
 
       // Correlation bonuses using insights
