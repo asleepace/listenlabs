@@ -128,7 +128,7 @@ export const CONFIG = {
    * @range 0.2 to 0.7
    * @default 0.7
    */
-  BASE_THRESHOLD: 0.65,
+  BASE_THRESHOLD: 0.53,
   MIN_THRESHOLD: 0.45,
   MAX_THRESHOLD: 0.95,
   /**
