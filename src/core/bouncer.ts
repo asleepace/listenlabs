@@ -460,7 +460,7 @@ export class Bouncer<
     const totalNeeded = incompleteQuotas.reduce((sum, q) => sum + q.needed, 0)
 
     // Endgame when we have very few spots left OR need very few people
-    return spotsLeft < 50 || totalNeeded < 200
+    return totalNeeded < spotsLeft
   }
 
   private getEndgameScore(attributes: Record<string, boolean>): number {
