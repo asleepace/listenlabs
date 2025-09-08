@@ -422,10 +422,28 @@ export class Bouncer<
     const personAttributes = nextPerson.attributes
 
     // Enhanced critical attribute check
+    // In admit(), modify the critical attribute check
     if (criticalKeys.length > 0) {
-      for (const [key, value] of Object.entries(this.criticalAttributes)) {
-        if (!value || !personAttributes) continue
-        if (value.required && !personAttributes[key as any]) return false
+      const requiredAttributes = Object.entries(this.criticalAttributes)
+        .filter(([_, value]) => value?.required)
+        .map(([key, _]) => key)
+
+      // If multiple attributes are required AND we're very close to completion
+      const isEndgame = this.metrics.totalProgress > 0.95
+      const hasMultipleRequired = requiredAttributes.length > 1
+
+      if (isEndgame && hasMultipleRequired) {
+        // In endgame, only require the person has ANY critical attribute, not ALL
+        const hasAnyCritical = requiredAttributes.some(
+          (attr) => personAttributes[attr as any]
+        )
+        if (!hasAnyCritical) return false
+      } else {
+        // Normal critical logic: must have ALL required attributes
+        for (const [key, value] of Object.entries(this.criticalAttributes)) {
+          if (!value || !personAttributes) continue
+          if (value.required && !personAttributes[key as any]) return false
+        }
       }
     }
 
