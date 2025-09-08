@@ -256,11 +256,15 @@ export class Bouncer<
   public totalUnicorns = 0
 
   public criticalAttributes: CriticalAttributes<Attributes> = {}
+  public riskAssessment: ReturnType<(typeof this.metrics)['getRiskAssessment']>
 
   constructor(initialData: GameState) {
     this.metrics = new Metrics(initialData.game)
     this.state = initialData
     this.progress = this.getProgress()
+    this.riskAssessment = this.metrics.getRiskAssessment(
+      this.estimatedPeopleInLineLeft
+    )
   }
 
   // Simplified getters using metrics
@@ -313,7 +317,6 @@ export class Bouncer<
     const totalSpotsLeft = this.totalSpotsLeft
 
     // Use metrics risk assessment
-    const riskAssessment = this.metrics.getRiskAssessment(peopleInLineLeft)
     const incompleteConstraints = this.metrics.getIncompleteConstraints()
 
     this.criticalAttributes = {}
@@ -324,7 +327,7 @@ export class Bouncer<
       const frequency = this.metrics.frequencies[attr]
 
       const estimatedRemaining = peopleInLineLeft * frequency
-      const isCritical = riskAssessment.criticalAttributes.includes(attr)
+      const isCritical = this.riskAssessment.criticalAttributes.includes(attr)
       const isRequired =
         needed >= totalSpotsLeft - CONFIG.CRITICAL_REQUIRED_THRESHOLD
 
@@ -370,13 +373,17 @@ export class Bouncer<
 
     // Use metrics efficiency analysis
     const efficiency = this.metrics.getEfficiencyMetrics()
-    const riskAssessment = this.metrics.getRiskAssessment(
+    this.riskAssessment = this.metrics.getRiskAssessment(
       this.estimatedPeopleInLineLeft
     )
 
     // Adjust sensitivity based on risk
     const baseSensitivity = 1.0 // lower=less sensitive
-    const riskMultiplier = Stats.clamp(riskAssessment.riskScore / 5.0, 0.5, 2.0)
+    const riskMultiplier = Stats.clamp(
+      this.riskAssessment.riskScore / 5.0,
+      0.5,
+      2.0
+    )
     const sensitivity = baseSensitivity * riskMultiplier
 
     const delta = (expectedProgress - totalProgress) * 0.5
@@ -392,7 +399,7 @@ export class Bouncer<
     this.info['expected_progress'] = Stats.round(expectedProgress, 10_000)
     this.info['total_progress'] = Stats.round(totalProgress, 10_000)
     this.info['efficiency'] = efficiency.actualEfficiency
-    this.info['risk_score'] = riskAssessment.riskScore
+    this.info['risk_score'] = this.riskAssessment.riskScore
     this.info['threshold'] = Stats.round(threshold, 10_000)
 
     return threshold
@@ -459,7 +466,7 @@ export class Bouncer<
     )
 
     // Add metrics summary to info
-    const summary = this.metrics.getSummary(this.estimatedPeopleInLineLeft)
+    const summary = this.metrics.getSummary()
     this.info['metrics_summary'] = summary
 
     this.updateCounts(personAttributes as any, score, shouldAdmit)
@@ -634,7 +641,7 @@ export class Bouncer<
       ),
       scores: this.totalScores,
       metrics_analysis: analysis,
-      final_summary: this.metrics.getSummary(this.estimatedPeopleInLineLeft),
+      final_summary: this.metrics.getSummary(),
     }
   }
 }

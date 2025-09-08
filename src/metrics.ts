@@ -38,6 +38,13 @@ type AttributeStats<Attributes extends PersonAttributes> = {
   readonly overdemanded: boolean
 }
 
+type AttributeRisk<Attributes extends PersonAttributes> = {
+  criticalAttributes: (keyof Attributes)[]
+  riskScore: number
+  timeRemaining: number
+  feasibilityScore: number
+}
+
 export class Metrics<
   Attributes extends PersonAttributes = PersonAttributesScenario3
 > {
@@ -45,6 +52,7 @@ export class Metrics<
   private _frequencies: Frequencies<Attributes>
   private _correlations: Correlations<Attributes>
   private _attributeStats: Map<keyof Attributes, AttributeStats<Attributes>>
+  private _riskAssessment: AttributeRisk<Attributes>
 
   constructor(public readonly gameData: GameState['game']) {
     this._constraints = gameData.constraints.map(
@@ -60,6 +68,7 @@ export class Metrics<
     this._correlations = gameData.attributeStatistics
       .correlations as Correlations<Attributes>
     this._attributeStats = this.preCalculateAttributeStats()
+    this._riskAssessment = this.getRiskAssessment(10_000)
   }
 
   // Getters
@@ -428,12 +437,7 @@ export class Metrics<
     }
   }
 
-  getRiskAssessment(peopleRemaining: number): {
-    criticalAttributes: (keyof Attributes)[]
-    riskScore: number
-    timeRemaining: number
-    feasibilityScore: number
-  } {
+  getRiskAssessment(peopleRemaining: number): AttributeRisk<Attributes> {
     const incomplete = this.getIncompleteConstraints()
 
     // Sort by difficulty/rarity to process hardest first
@@ -540,7 +544,7 @@ export class Metrics<
   }
 
   // Enhanced debug/info methods
-  getSummary(peopleInLineLeft: number): {
+  getSummary(): {
     totalConstraints: number
     completedConstraints: number
     totalProgress: number
@@ -552,7 +556,7 @@ export class Metrics<
     isBalanced: boolean
   } {
     const efficiency = this.getEfficiencyMetrics()
-    const risk = this.getRiskAssessment(peopleInLineLeft)
+    const risk = this._riskAssessment
     const variability = this.getProgressVariability()
 
     return {
@@ -574,7 +578,7 @@ export class Metrics<
       variability: this.getProgressVariability(),
       difficulty: this.getQuotaDifficulty(),
       efficiency: this.getEfficiencyMetrics(),
-      risk: this.getRiskAssessment(peopleInLineLeft),
+      risk: this._riskAssessment,
       correlations: this.getCorrelationInsights(),
     } as const
   }
