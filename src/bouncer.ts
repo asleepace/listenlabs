@@ -614,7 +614,7 @@ export class Bouncer<
       }))
 
     const criticalAttributes = Object.entries(this.criticalAttributes).map(
-      ([key, value]) => (value?.required ? `${key}!` : key)
+      ([key, value]) => (value?.required ? `⚠️:${key}` : key)
     )
 
     // Enhanced info with metrics insights

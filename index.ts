@@ -66,5 +66,7 @@ await Berghain.initialize({ scenario: settings.scenario })
   .startNewGame()
   .catch(console.warn)
   .finally(() => {
-    console.log(config.message)
+    console.log('====================== ✉️ ======================')
+    console.log(`[game] message: "${config.message}"`)
+    console.log('====================== - ======================')
   })
