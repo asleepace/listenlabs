@@ -37,6 +37,7 @@ const TUNED_CONFIG: Partial<GameConfig> = {
   MIN_THRESHOLD: 0.3,
   MAX_THRESHOLD: 0.9,
   TARGET_RANGE: 4000,
+  TARGET_RATE: 0.19,
   URGENCY_MODIFIER: 3.0,
   MULTI_ATTRIBUTE_BONUS: 1.2,
 
@@ -97,11 +98,6 @@ export class Bouncer<
     this.riskAssessment = this.metrics.getRiskAssessment(
       this.estimatedPeopleInLineLeft
     )
-  }
-
-  // Simplified getters using metrics
-  private get constraints() {
-    return this.metrics.constraints
   }
 
   private get totalSpotsLeft(): number {
@@ -234,9 +230,10 @@ export class Bouncer<
       1.0
     )
 
-    const targetProgress = Math.min(naturalProgress * 1.1, 1.0)
-    const actualProgress = this.metrics.totalProgress
-    const progressGap = targetProgress - actualProgress
+    // Use actual quota progress for target, not admission rate
+    const targetQuotaProgress = Math.min(naturalProgress * 1.1, 1.0)
+    const actualQuotaProgress = this.metrics.totalProgress
+    const progressGap = targetQuotaProgress - actualQuotaProgress
 
     const sigmoid = Math.tanh(progressGap * 3.0)
     const maxAdjustment = 0.3
@@ -253,8 +250,8 @@ export class Bouncer<
 
     // Enhanced debug logging
     this.info['natural_progress'] = Stats.round(naturalProgress, 10000)
-    this.info['target_progress'] = Stats.round(targetProgress, 10000)
-    this.info['actual_progress'] = Stats.round(actualProgress, 10000)
+    this.info['target_quota_progress'] = Stats.round(targetQuotaProgress, 10000)
+    this.info['actual_quota_progress'] = Stats.round(actualQuotaProgress, 10000)
     this.info['progress_gap'] = Stats.round(progressGap, 10000)
     this.info['progress_adjustment'] = Stats.round(progressAdjustment, 10000)
     this.info['rate_adjustment'] = Stats.round(rateAdjustment, 10000)
@@ -316,6 +313,9 @@ export class Bouncer<
     const score = rawScore * deflationFactor
 
     const threshold = this.getProgressThreshold()
+    const effectiveThreshold = this.isEndgame()
+      ? Math.min(threshold, 0.3) // Never go below 0.3 even in endgame
+      : threshold
 
     const hasEveryAttribute = this.metrics.hasAllAttributes(
       personAttributes as any
@@ -331,12 +331,12 @@ export class Bouncer<
 
     // Enhanced admission criteria with endgame priority
     const shouldAdmit =
-      hasEveryAttribute || // Unicorns always get in
-      hasEveryCriticalAttribute || // Perfect critical matches
-      (this.isEndgame() && endgameScore > 0.5) || // Endgame priority
-      score > threshold || // Standard threshold
-      (spotsLeft < 20 && hasSomeCriticalAttribute) || // Final desperation
-      this.shouldEmergencyAdmit(personAttributes) // Last resort
+      hasEveryAttribute ||
+      hasEveryCriticalAttribute ||
+      (this.isEndgame() && endgameScore > 0.5) ||
+      score > effectiveThreshold || // Use effective threshold
+      (spotsLeft < 20 && hasSomeCriticalAttribute) ||
+      this.shouldEmergencyAdmit(personAttributes)
 
     this.totalScores.push(score)
     this.info['regular_score'] = Stats.round(regularScore)
@@ -421,30 +421,26 @@ export class Bouncer<
   private getScoreDeflationFactor(): number {
     const currentRate =
       this.admittedCount / (this.admittedCount + this.rejectedCount)
-    const targetRate =
-      Bouncer.CONFIG.MAX_CAPACITY! / Bouncer.CONFIG.TARGET_RANGE! // 25%
+    const targetRate = Bouncer.CONFIG.TARGET_RATE || 0.19 // Use config value
 
-    // More aggressive deflation - aim for 20% not 25%
-    const adjustedTargetRate = targetRate * 0.8 // Target 20% instead of 25%
-
-    if (currentRate > adjustedTargetRate * 1.4) {
-      // If over 28%
+    if (currentRate > targetRate * 1.4) {
+      // If over 26.6%
       return 0.5 // Heavy deflation
-    } else if (currentRate > adjustedTargetRate * 1.2) {
-      // If over 24%
+    } else if (currentRate > targetRate * 1.2) {
+      // If over 22.8%
       return 0.7 // Medium deflation
-    } else if (currentRate > adjustedTargetRate * 1.1) {
-      // If over 22%
+    } else if (currentRate > targetRate * 1.1) {
+      // If over 20.9%
       return 0.85 // Light deflation
-    } else if (currentRate < adjustedTargetRate * 0.7) {
-      // If under 14%
+    } else if (currentRate < targetRate * 0.7) {
+      // If under 13.3%
       return 1.3 // Boost scores
-    } else if (currentRate < adjustedTargetRate * 0.85) {
-      // If under 17%
+    } else if (currentRate < targetRate * 0.85) {
+      // If under 16.15%
       return 1.15 // Light boost
     }
 
-    return 1.0 // Good range (17% - 22%)
+    return 1.0 // Good range (16.15% - 20.9%)
   }
 
   // Simplified estimation using metrics
@@ -458,9 +454,7 @@ export class Bouncer<
     const spotsLeft = this.totalSpotsLeft
     const incompleteQuotas = this.metrics.getIncompleteConstraints()
     const totalNeeded = incompleteQuotas.reduce((sum, q) => sum + q.needed, 0)
-
-    // Endgame when we have very few spots left OR need very few people
-    return totalNeeded < spotsLeft
+    return spotsLeft <= 50 && totalNeeded >= spotsLeft && spotsLeft > 0
   }
 
   private getEndgameScore(attributes: Record<string, boolean>): number {
@@ -505,8 +499,11 @@ export class Bouncer<
       })
     )
 
+    const rateAnalysis = this.getAdmissionRateAnalysis()
+
     return {
       ...this.info,
+      rate_analysis: rateAnalysis,
       critical_progress: criticalProgress,
       spots_left: this.totalSpotsLeft,
       people_left: this.estimatedPeopleInLineLeft,
@@ -573,8 +570,7 @@ export class Bouncer<
   } {
     const currentRate =
       this.admittedCount / (this.admittedCount + this.rejectedCount)
-    const targetRate =
-      Bouncer.CONFIG.MAX_CAPACITY! / Bouncer.CONFIG.TARGET_RANGE!
+    const targetRate = Bouncer.CONFIG.TARGET_RATE || 0.19 // Use config value consistently
     const deviation = currentRate - targetRate
 
     let status: 'too_high' | 'too_low' | 'optimal'

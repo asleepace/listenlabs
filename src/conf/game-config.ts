@@ -55,6 +55,13 @@ export interface GameConfig {
   TARGET_RANGE: NumberOfPeople
 
   /**
+   * Target admission rate of people to let inside the venue.
+   * @range 0.1 - 0.4
+   * @default 0.20
+   */
+  TARGET_RATE: Percentage
+
+  /**
    * Multiplier for how much being behind schedule affects scoring.
    * Lower = relaxed timing, Higher = panic when behind
    * @range 1.0 - 6.0
@@ -171,6 +178,7 @@ export const BASE_CONFIG: GameConfig = {
   MIN_THRESHOLD: 0.35,
   MAX_THRESHOLD: 0.8,
   THRESHOLD_RAMP: 0.3,
+  TARGET_RATE: 0.19,
 
   // Game timing - front-load quota completion
   TARGET_RANGE: 3500,
