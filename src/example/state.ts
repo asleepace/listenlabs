@@ -1,0 +1,47 @@
+export const exmaple = {
+  game: {
+    gameId: '54e4bb9b-00b4-4a8b-bde7-02b17668aae5',
+    constraints: [
+      {
+        attribute: 'young',
+        minCount: 600,
+      },
+      {
+        attribute: 'well_dressed',
+        minCount: 600,
+      },
+    ],
+    attributeStatistics: {
+      relativeFrequencies: {
+        well_dressed: 0.3225,
+        young: 0.3225,
+      },
+      correlations: {
+        well_dressed: {
+          well_dressed: 1,
+          young: 0.18304299322062992,
+        },
+        young: {
+          well_dressed: 0.18304299322062992,
+          young: 1,
+        },
+      },
+    },
+  },
+  status: {
+    status: 'running',
+    admittedCount: 999,
+    rejectedCount: 880,
+    nextPerson: {
+      personIndex: 1879,
+      attributes: {
+        well_dressed: false,
+        young: true,
+      },
+    },
+  },
+  metrics: {
+    totalWellDressed: 608,
+    totalYoung: 601,
+  },
+}

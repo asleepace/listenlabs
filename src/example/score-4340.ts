@@ -1,7 +1,7 @@
 /**
  * This config was used to get score 4340 on Scenario 3.
  */
-export const config = {
+export const config4340 = {
   MIN_THRESHOLD: 0.75,
   THRESHOLD_RAMP: 0.3,
   TARGET_RANGE: 5000,
