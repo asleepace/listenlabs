@@ -1,5 +1,6 @@
-import { Bouncer, CONFIG } from './src/bouncer'
+import { Bouncer, CONFIG, type BouncerConfig } from './src/bouncer'
 import { Berghain, type ListenLabsConfig } from './src/berghain'
+import { STRATEGY_WAVE } from './src/config/strategy-wave'
 
 /**
  *  Configure listen labs default settings.
@@ -10,9 +11,13 @@ const settings: ListenLabsConfig = {
   scenario: '3',
 }
 
-const config = {
-  message: '',
+/**
+ *  Combine base config, current strategy, and overrides.
+ */
+const config: BouncerConfig = {
   ...CONFIG,
+  ...STRATEGY_WAVE,
+  MESSAGE: '',
 }
 
 /**
@@ -43,7 +48,7 @@ Bun.argv.slice(2).forEach((current, index, array) => {
     case '--message':
     case '-m': {
       // useful for tracking different expiraments
-      config.message = String(nextItem)
+      config.MESSAGE = String(nextItem)
     }
   }
 })
@@ -67,6 +72,6 @@ await Berghain.initialize({ scenario: settings.scenario })
   .catch(console.warn)
   .finally(() => {
     console.log('====================== ✉️ ======================')
-    console.log(`[game] message: "${config.message}"`)
+    console.log(`[game] message: "${config.MESSAGE}"`)
     console.log('====================== - ======================')
   })

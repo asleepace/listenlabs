@@ -128,9 +128,9 @@ export const CONFIG = {
    * @range 0.2 to 0.7
    * @default 0.7
    */
-  BASE_THRESHOLD: 0.53,
-  MIN_THRESHOLD: 0.45,
-  MAX_THRESHOLD: 0.95,
+  BASE_THRESHOLD: 0.48,
+  MIN_THRESHOLD: 0.36,
+  MAX_THRESHOLD: 0.91,
   /**
    * How quickly threshold decreases as we fill up, lesser for gradual tightening.
    * Lower = consistent threshold throughout
@@ -221,6 +221,11 @@ export const CONFIG = {
    * Number of scores needed for calculations.
    */
   MIN_RAW_SCORES: 5,
+
+  /**
+   * Print stategy info at end.
+   */
+  MESSAGE: '',
 }
 
 export type BouncerConfig = typeof CONFIG
@@ -328,13 +333,20 @@ export class Bouncer<
 
       const estimatedRemaining = peopleInLineLeft * frequency
       const isCritical = this.riskAssessment.criticalAttributes.includes(attr)
+
+      // Enhanced logic using estimated remaining
       const isRequired =
         needed >= totalSpotsLeft - CONFIG.CRITICAL_REQUIRED_THRESHOLD
+      const isEstimateShort = needed > estimatedRemaining * 0.8 // Need more than 80% of estimated remaining
 
-      if (isCritical || isRequired) {
+      // An attribute becomes critical if:
+      // 1. Risk assessment flags it, OR
+      // 2. Venue capacity constraint, OR
+      // 3. Estimated remaining people constraint
+      if (isCritical || isRequired || isEstimateShort) {
         this.criticalAttributes[attr] = {
           needed,
-          required: isRequired,
+          required: isRequired || isEstimateShort, // Either capacity or estimate constraint makes it required
         }
       }
     })
@@ -366,41 +378,71 @@ export class Bouncer<
   }
 
   // Improved threshold calculation using metrics
+  // private getProgressThresholdOld(): number {
+  //   const totalProcessed = this.admittedCount + this.rejectedCount
+  //   const expectedProgress = Math.min(totalProcessed / CONFIG.TARGET_RANGE, 1.0)
+  //   const totalProgress = this.metrics.totalProgress
+
+  //   // Use metrics efficiency analysis
+  //   const efficiency = this.metrics.getEfficiencyMetrics()
+  //   this.riskAssessment = this.metrics.getRiskAssessment(
+  //     this.estimatedPeopleInLineLeft
+  //   )
+
+  //   // Adjust sensitivity based on risk
+  //   const baseSensitivity = 1.0 // lower=less sensitive
+  //   const riskMultiplier = Stats.clamp(
+  //     this.riskAssessment.riskScore / 5.0,
+  //     0.5,
+  //     2.0
+  //   )
+  //   const sensitivity = baseSensitivity * riskMultiplier
+
+  //   const delta = (expectedProgress - totalProgress) * 0.5
+  //   const threshold = Math.max(
+  //     CONFIG.MIN_THRESHOLD,
+  //     Math.min(
+  //       CONFIG.MAX_THRESHOLD,
+  //       CONFIG.BASE_THRESHOLD - delta * sensitivity
+  //     )
+  //   )
+
+  //   // Enhanced logging with metrics insights
+  //   this.info['expected_progress'] = Stats.round(expectedProgress, 10_000)
+  //   this.info['total_progress'] = Stats.round(totalProgress, 10_000)
+  //   this.info['efficiency'] = efficiency.actualEfficiency
+  //   this.info['risk_score'] = this.riskAssessment.riskScore
+  //   this.info['threshold'] = Stats.round(threshold, 10_000)
+
+  //   return threshold
+  // }
+
   private getProgressThreshold(): number {
     const totalProcessed = this.admittedCount + this.rejectedCount
     const expectedProgress = Math.min(totalProcessed / CONFIG.TARGET_RANGE, 1.0)
     const totalProgress = this.metrics.totalProgress
 
-    // Use metrics efficiency analysis
-    const efficiency = this.metrics.getEfficiencyMetrics()
-    this.riskAssessment = this.metrics.getRiskAssessment(
-      this.estimatedPeopleInLineLeft
-    )
+    // Calculate how far off we are from expected
+    const progressGap = expectedProgress - totalProgress
 
-    // Adjust sensitivity based on risk
-    const baseSensitivity = 1.0 // lower=less sensitive
-    const riskMultiplier = Stats.clamp(
-      this.riskAssessment.riskScore / 5.0,
-      0.5,
-      2.0
-    )
-    const sensitivity = baseSensitivity * riskMultiplier
+    // Use a sigmoid function to create smooth, aggressive adjustments
+    const sigmoid = Math.tanh(progressGap * 3.0) // 3.0 controls steepness
 
-    const delta = (expectedProgress - totalProgress) * 0.5
-    const threshold = Math.max(
+    // Base adjustment range - when behind, go much lower; when ahead, go higher
+    const maxAdjustment = 0.15 // Can swing threshold by ±15%
+    const adjustment = sigmoid * maxAdjustment
+
+    const threshold = Stats.clamp(
+      CONFIG.BASE_THRESHOLD - adjustment, // Subtract because behind = lower threshold
       CONFIG.MIN_THRESHOLD,
-      Math.min(
-        CONFIG.MAX_THRESHOLD,
-        CONFIG.BASE_THRESHOLD - delta * sensitivity
-      )
+      CONFIG.MAX_THRESHOLD
     )
 
-    // Enhanced logging with metrics insights
-    this.info['expected_progress'] = Stats.round(expectedProgress, 10_000)
-    this.info['total_progress'] = Stats.round(totalProgress, 10_000)
-    this.info['efficiency'] = efficiency.actualEfficiency
-    this.info['risk_score'] = this.riskAssessment.riskScore
-    this.info['threshold'] = Stats.round(threshold, 10_000)
+    // Enhanced logging
+    this.info['progress_gap'] = Stats.round(progressGap, 10000)
+    this.info['sigmoid_adj'] = Stats.round(sigmoid, 100)
+    this.info['threshold_adj'] = Stats.round(adjustment, 100)
+    this.info['threshold'] = Stats.round(threshold, 10000)
 
     return threshold
   }
