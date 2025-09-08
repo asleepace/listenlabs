@@ -53,6 +53,7 @@ export class Metrics<
   private _correlations: Correlations<Attributes>
   private _attributeStats: Map<keyof Attributes, AttributeStats<Attributes>>
   private _riskAssessment: AttributeRisk<Attributes>
+  private _correlationCache = new Map()
 
   constructor(public readonly gameData: GameState['game']) {
     this._constraints = gameData.constraints.map(
@@ -120,17 +121,21 @@ export class Metrics<
   > {
     const stats = new Map<keyof Attributes, AttributeStats<Attributes>>()
 
+    // Make capacity configurable instead of hardcoded 1000
+    const totalCapacity =
+      this.gameData.constraints.reduce((sum, c) => sum + c.minCount, 0) || 1000
+
     for (const constraint of this._constraints) {
       const attr = constraint.attribute
       const frequency = this._frequencies[attr] || 0
-      const quotaRate = constraint.minCount / 1000 // Assuming 1000 capacity
+      const quotaRate = constraint.minCount / totalCapacity
 
       stats.set(attr, {
         attribute: attr,
         frequency,
-        rarity: 1 / Math.max(frequency, 0.01), // Higher = rarer
+        rarity: 1 / Math.max(frequency, 0.01),
         quotaRate,
-        overdemanded: quotaRate > frequency * 1.5, // Needs more than natural rate
+        overdemanded: quotaRate > frequency * 1.5,
       })
     }
 
@@ -216,20 +221,60 @@ export class Metrics<
       .map(([attr, _]) => attr)
   }
 
-  // Correlation analysis
+  // 5. Add validation method
+  validateData(): { isValid: boolean; errors: string[] } {
+    const errors: string[] = []
+
+    // Check constraints
+    if (this._constraints.length === 0) {
+      errors.push('No constraints defined')
+    }
+
+    // Check frequencies sum (should be reasonable)
+    const totalFreq = Object.values(this._frequencies).reduce(
+      (sum, freq) => sum + freq,
+      0
+    )
+    if (totalFreq > 5) {
+      // Arbitrary reasonable limit
+      errors.push(`Total frequency sum seems high: ${totalFreq}`)
+    }
+
+    // Check for missing frequency data
+    this._constraints.forEach((constraint) => {
+      if (!this._frequencies[constraint.attribute]) {
+        errors.push(
+          `Missing frequency data for ${String(constraint.attribute)}`
+        )
+      }
+    })
+
+    return {
+      isValid: errors.length === 0,
+      errors,
+    }
+  }
+
   getPositivelyCorrelated(
     attribute: keyof Attributes,
     threshold: number = 0.3
   ): (keyof Attributes)[] {
+    const cacheKey = `${String(attribute)}_pos_${threshold}`
+
+    if (this._correlationCache.has(cacheKey)) {
+      return this._correlationCache.get(cacheKey)!
+    }
+
     const correlations = this._correlations[attribute]
     if (!correlations) return []
 
-    type C = (typeof correlations)[keyof Attributes]
-
-    return Object.entries(correlations)
+    const result = Object.entries(correlations)
       .filter(([_, correlation]) => (correlation as number) > threshold)
       .map(([attr, _]) => attr as keyof Attributes)
       .filter((attr) => attr !== attribute)
+
+    this._correlationCache.set(cacheKey, result)
+    return result
   }
 
   getNegativelyCorrelated(
@@ -440,25 +485,40 @@ export class Metrics<
   getRiskAssessment(peopleRemaining: number): AttributeRisk<Attributes> {
     const incomplete = this.getIncompleteConstraints()
 
-    // Sort by difficulty/rarity to process hardest first
+    // Add early return for edge case
+    if (incomplete.length === 0) {
+      return {
+        criticalAttributes: [],
+        riskScore: 0,
+        timeRemaining: 1 - this.totalProgress,
+        feasibilityScore: 1,
+      }
+    }
+
     const sortedIncomplete = incomplete.sort((a, b) => {
-      const freqA = this._attributeStats.get(a.attribute)!.frequency
-      const freqB = this._attributeStats.get(b.attribute)!.frequency
-      return freqA - freqB // Rarest first
+      const statsA = this._attributeStats.get(a.attribute)
+      const statsB = this._attributeStats.get(b.attribute)
+
+      // Add null checks
+      if (!statsA || !statsB) return 0
+
+      return statsA.frequency - statsB.frequency
     })
 
     let availablePeople = peopleRemaining
 
     const riskFactors = sortedIncomplete.map((constraint) => {
-      const stats = this._attributeStats.get(constraint.attribute)!
+      const stats = this._attributeStats.get(constraint.attribute)
+
+      // Add null check
+      if (!stats) return 0
+
       const needed = constraint.needed
       const frequency = stats.frequency
 
       const expectedWithAttribute = availablePeople * frequency
       const riskRatio = needed / Math.max(expectedWithAttribute, 1)
-      // const scaledRisk = Stats.clamp(riskRatio * 3, 0, 10) // Define before logging
 
-      // More conservative subtraction for rarer attributes
       const peopleUsed = Math.min(needed, expectedWithAttribute * 0.8)
       availablePeople = Math.max(0, availablePeople - peopleUsed)
 
@@ -467,9 +527,12 @@ export class Metrics<
 
     const riskScore = riskFactors.length > 0 ? Stats.average(riskFactors) : 0
     const criticalAttributes = incomplete
-      .filter(
-        (_, index) => riskFactors[index]! > Stats.percentile(riskFactors, 0.75)
-      )
+      .filter((_, index) => {
+        const factor = riskFactors[index]
+        return (
+          factor !== undefined && factor > Stats.percentile(riskFactors, 0.75)
+        )
+      })
       .map((c) => c.attribute)
 
     return {
@@ -478,6 +541,11 @@ export class Metrics<
       timeRemaining: 1 - this.totalProgress,
       feasibilityScore: Stats.round(Math.max(0, 1 - riskScore / 10), 100),
     }
+  }
+
+  // 3. Add method to update risk assessment when needed
+  updateRiskAssessment(peopleRemaining: number): void {
+    this._riskAssessment = this.getRiskAssessment(peopleRemaining)
   }
 
   getCorrelationInsights(): {
@@ -575,5 +643,28 @@ export class Metrics<
       risk: this._riskAssessment,
       correlations: this.getCorrelationInsights(),
     } as const
+  }
+
+  getPerformanceMetrics(): {
+    constraintCount: number
+    attributeCount: number
+    correlationMatrixSize: number
+    memoryEstimate: string
+  } {
+    const constraintCount = this._constraints.length
+    const attributeCount = Object.keys(this._frequencies).length
+    const correlationMatrixSize = attributeCount * attributeCount
+
+    // Rough memory estimation
+    const memoryEstimate = `~${Math.round(
+      (correlationMatrixSize * 8 + constraintCount * 32) / 1024
+    )}KB`
+
+    return {
+      constraintCount,
+      attributeCount,
+      correlationMatrixSize,
+      memoryEstimate,
+    }
   }
 }

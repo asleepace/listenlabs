@@ -28,20 +28,21 @@ const getTypeThenCast = (keyString: string, value: string | boolean) => {
 /**
  *  Get command line arguments to override configurations.
  */
-export function getCliArgs(
-  baseConfig: Partial<GameConfig> = {}
-): Partial<GameConfig> {
+export function getCliArgs(): Partial<GameConfig> {
   /**
    *  Allow overriding specific options via the cli.
    */
-  const options = Object.entries(baseConfig).reduce((params, [name, value]) => {
-    return {
-      ...params,
-      [name.toLowerCase()]: {
-        type: typeof value === 'boolean' ? 'boolean' : 'string',
-      },
-    }
-  }, {})
+  const options = Object.entries(BASE_CONFIG).reduce(
+    (params, [name, value]) => {
+      return {
+        ...params,
+        [name.toLowerCase()]: {
+          type: typeof value === 'boolean' ? 'boolean' : 'string',
+        },
+      }
+    },
+    {}
+  )
 
   const { values } = parseArgs({
     args: Bun.argv,

@@ -1,7 +1,7 @@
 {
-  "file": "./data/scenario-2-d6827c77-80ea-4e4f-af04-3b7d4502f543.json",
+  "file": "./data/scenario-2-e129b9d4-13da-43a2-9574-1fdeba0d8a75.json",
   "game": {
-    "gameId": "d6827c77-80ea-4e4f-af04-3b7d4502f543",
+    "gameId": "e129b9d4-13da-43a2-9574-1fdeba0d8a75",
     "constraints": [
       {
         "attribute": "techno_lover",
@@ -57,14 +57,14 @@
   },
   "status": {
     "status": "running",
-    "admittedCount": 986,
-    "rejectedCount": 5529,
+    "admittedCount": 999,
+    "rejectedCount": 6633,
     "nextPerson": {
-      "personIndex": 6515,
+      "personIndex": 7632,
       "attributes": {
-        "techno_lover": true,
+        "techno_lover": false,
         "well_connected": true,
-        "creative": true,
+        "creative": false,
         "berlin_local": true
       }
     }
@@ -72,16 +72,16 @@
   "output": {
     "info": {
       "target_rate": 0.215,
-      "current_rate": 0.1514,
-      "rate_gap": -0.0636,
-      "threshold": 0.5753,
-      "last_score": 0.26,
-      "useful_attrs": 1,
+      "current_rate": 0.1286,
+      "rate_gap": -0.0864,
+      "threshold": 0.4068,
+      "last_score": 0.01,
+      "useful_attrs": 2,
       "avg_score": 0.93,
       "metrics_summary": {
         "totalConstraints": 4,
         "completedConstraints": 2,
-        "totalProgress": 0.96,
+        "totalProgress": 1,
         "allMet": false,
         "mostNeeded": [
           "techno_lover",
@@ -91,54 +91,43 @@
           "techno_lover",
           "berlin_local"
         ],
-        "efficiency": 0.96,
+        "efficiency": 1,
         "riskScore": 0.68,
         "isBalanced": true
       },
-      "metrics_efficiency": 0.96,
+      "metrics_efficiency": 1,
       "metrics_risk": 0.68,
       "metrics_balance": true,
-      "recommendations": [
-        "Prioritize techno_lover (92% complete)"
-      ]
+      "recommendations": []
     },
     "critical": [
       "⚠️:techno_lover",
-      "berlin_local"
+      "⚠️:berlin_local"
     ],
     "config": {
-      "BASE_THRESHOLD": 0.588,
+      "BASE_THRESHOLD": 0.45,
       "MIN_THRESHOLD": 0.25,
       "MAX_THRESHOLD": 0.95,
       "THRESHOLD_RAMP": 0.3,
       "TARGET_RANGE": 4000,
-      "URGENCY_MODIFIER": 2.5,
+      "URGENCY_MODIFIER": 2,
       "CORRELATION_BONUS": 0.2,
       "NEGATIVE_CORRELATION_BONUS": 0.5,
       "NEGATIVE_CORRELATION_THRESHOLD": -0.5,
-      "MULTI_ATTRIBUTE_BONUS": 0.9,
+      "MULTI_ATTRIBUTE_BONUS": 0.5,
       "RARE_PERSON_BONUS": 0.4,
       "MAX_CAPACITY": 1000,
       "TOTAL_PEOPLE": 10000,
-      "CRITICAL_REQUIRED_THRESHOLD": 50,
-      "CRITICAL_IN_LINE_RATIO": 0.75,
-      "CRITICAL_CAPACITY_RATIO": 0.8,
+      "CRITICAL_REQUIRED_THRESHOLD": 20,
+      "CRITICAL_IN_LINE_RATIO": 0.8,
+      "CRITICAL_CAPACITY_RATIO": 0.9,
       "MIN_RAW_SCORES": 1,
       "MESSAGE": "Base Configuration - Balanced Strategy",
       "SCENARIO": "2"
     },
-    "quotas": [
-      {
-        "attribute": "techno_lover",
-        "needed": 52
-      },
-      {
-        "attribute": "berlin_local",
-        "needed": 52
-      }
-    ],
-    "admissionRate": 0.1513430544896393,
-    "admitted": 986,
-    "rejected": 5529
+    "quotas": [],
+    "admissionRate": 0.13089622641509435,
+    "admitted": 999,
+    "rejected": 6633
   }
 }

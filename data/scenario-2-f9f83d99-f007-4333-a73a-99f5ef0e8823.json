@@ -57,10 +57,10 @@
   },
   "status": {
     "status": "running",
-    "admittedCount": 105,
-    "rejectedCount": 147,
+    "admittedCount": 319,
+    "rejectedCount": 3523,
     "nextPerson": {
-      "personIndex": 252,
+      "personIndex": 3842,
       "attributes": {
         "techno_lover": false,
         "well_connected": false,
@@ -72,16 +72,16 @@
   "output": {
     "info": {
       "target_rate": 0.215,
-      "current_rate": 0.4333,
-      "rate_gap": 0.2183,
-      "threshold": 0.6317,
+      "current_rate": 0.0832,
+      "rate_gap": -0.1318,
+      "threshold": 0.5616,
       "last_score": 1,
-      "useful_attrs": 4,
-      "avg_score": 0.96,
+      "useful_attrs": 3,
+      "avg_score": 0.98,
       "metrics_summary": {
         "totalConstraints": 4,
         "completedConstraints": 0,
-        "totalProgress": 0.09,
+        "totalProgress": 0.47,
         "allMet": false,
         "mostNeeded": [
           "berlin_local",
@@ -89,20 +89,20 @@
           "well_connected"
         ],
         "leastProgress": [
-          "creative",
           "berlin_local",
-          "techno_lover"
+          "techno_lover",
+          "well_connected"
         ],
-        "efficiency": 0.09,
+        "efficiency": 0.47,
         "riskScore": 0.68,
         "isBalanced": false
       },
-      "metrics_efficiency": 0.09,
+      "metrics_efficiency": 0.47,
       "metrics_risk": 0.68,
       "metrics_balance": false,
       "recommendations": [
         "Focus on balancing quota progress",
-        "Prioritize creative (5% complete)"
+        "Prioritize berlin_local (27% complete)"
       ]
     },
     "critical": [
@@ -132,23 +132,23 @@
     "quotas": [
       {
         "attribute": "creative",
-        "needed": 284
+        "needed": 70
       },
       {
         "attribute": "well_connected",
-        "needed": 394
+        "needed": 234
       },
       {
         "attribute": "techno_lover",
-        "needed": 584
+        "needed": 415
       },
       {
         "attribute": "berlin_local",
-        "needed": 693
+        "needed": 550
       }
     ],
-    "admissionRate": 0.4166666666666667,
-    "admitted": 105,
-    "rejected": 147
+    "admissionRate": 0.08302967204580948,
+    "admitted": 319,
+    "rejected": 3523
   }
 }

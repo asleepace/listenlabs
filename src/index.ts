@@ -1,8 +1,6 @@
 import { Bouncer } from './core/bouncer'
 import { Berghain, type ListenLabsConfig } from './core/berghain'
 import { getCliArgs } from './cli/get-cli-args'
-import { WAVE_CONFIG } from './conf/wave'
-import { AGGRESSIVE_CONFIG, CONSERVATIVE_CONFIG } from './conf/game-config'
 
 /**
  *  Configure listen labs default settings.
@@ -17,7 +15,7 @@ const settings: ListenLabsConfig = {
  *  Set game configuration and allow overriding via the command line,
  *
  */
-const configuration = getCliArgs({})
+const configuration = getCliArgs()
 
 console.log('[game] settings:', configuration)
 
@@ -26,7 +24,9 @@ console.log('[game] settings:', configuration)
  *  in the bouncer you would like to use. Then either create a
  *  new game or load one from disk.
  */
-await Berghain.initialize({ scenario: configuration.SCENARIO })
+await Berghain.initialize({
+  scenario: configuration.SCENARIO || settings.scenario,
+})
   .withBouncer(Bouncer.intialize(configuration))
   .startNewGame()
   .catch(console.warn)

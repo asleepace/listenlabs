@@ -19,15 +19,21 @@ interface GameProgress<Attributes extends PersonAttributes> {
   info: any
 }
 
+type Critical = {
+  needed: number
+  required: boolean
+  modifier: number
+}
+
 type CriticalAttributes<Attributes extends PersonAttributes> = Partial<
-  Record<keyof Attributes, { needed: number; required: boolean }>
+  Record<keyof Attributes, Critical>
 >
 
 // fine tune config here...
 
 const TUNED_CONFIG: Partial<GameConfig> = {
   // Threshold settings - allow wider range for rate control
-  BASE_THRESHOLD: 0.588, // Lower base for more lenient starting point
+  BASE_THRESHOLD: 0.45, // Lower base for more lenient starting point
   MIN_THRESHOLD: 0.25, // Much lower floor for aggressive recovery
   MAX_THRESHOLD: 0.95, // Higher ceiling for selectivity
 
@@ -35,13 +41,13 @@ const TUNED_CONFIG: Partial<GameConfig> = {
   TARGET_RANGE: 4000, // Keep existing
 
   // Scoring modifiers - crucial for constant rate approach
-  URGENCY_MODIFIER: 2.5, // Lower since urgency handled by rate control
-  MULTI_ATTRIBUTE_BONUS: 0.9, // High - people with multiple attributes are very valuable
+  URGENCY_MODIFIER: 2.0, // Lower since urgency handled by rate control
+  MULTI_ATTRIBUTE_BONUS: 0.5, // High - people with multiple attributes are very valuable
 
   // Critical detection - more aggressive
-  CRITICAL_REQUIRED_THRESHOLD: 50, // Higher buffer before panic mode
-  CRITICAL_IN_LINE_RATIO: 0.75, // More aggressive critical detection
-  CRITICAL_CAPACITY_RATIO: 0.8, // More aggressive
+  CRITICAL_REQUIRED_THRESHOLD: 20, // Higher buffer before panic mode
+  CRITICAL_IN_LINE_RATIO: 0.8, // More aggressive critical detection
+  CRITICAL_CAPACITY_RATIO: 0.9, // More aggressive
 
   // Less important with simplified approach
   CORRELATION_BONUS: 0.2,
@@ -145,7 +151,7 @@ export class Bouncer<
 
   // Enhanced critical attributes using metrics insights
   private getCriticalAttributes(): CriticalAttributes<Attributes> {
-    if (this.admittedCount < 100) {
+    if (this.admittedCount < 50) {
       return {}
     }
 
@@ -165,6 +171,11 @@ export class Bouncer<
       const estimatedRemaining = peopleInLineLeft * frequency
       const isCritical = this.riskAssessment.criticalAttributes.includes(attr)
 
+      const spotsBuffer = Math.max(0, totalSpotsLeft - needed)
+      const maxBuffer = Math.max(1, totalSpotsLeft * 0.2) // 20% of spots left as max buffer
+      const urgencyRatio = 1 - spotsBuffer / maxBuffer
+      const modifier = 1 + Math.max(0, Math.min(1, urgencyRatio)) * 2 // 1.0 to 3.0 range
+
       // Enhanced logic using estimated remaining
       const isRequired =
         needed >=
@@ -173,7 +184,7 @@ export class Bouncer<
           totalSpotsLeft - Bouncer.CONFIG.CRITICAL_REQUIRED_THRESHOLD!
         )
 
-      const isEstimateShort = needed > estimatedRemaining * 0.8 // Need more than 80% of estimated remaining
+      const isEstimateShort = needed > estimatedRemaining * 0.95 // Need more than 80% of estimated remaining
 
       // An attribute becomes critical if:
       // 1. Risk assessment flags it, OR
@@ -182,21 +193,11 @@ export class Bouncer<
       if (isCritical || isRequired || isEstimateShort) {
         this.criticalAttributes[attr] = {
           needed,
-          required: false, // Don't set required yet
+          required: true,
+          modifier,
         }
       }
     })
-
-    // only make ONE attribute required at a time
-    const criticalAttrs = Object.entries(this.criticalAttributes)
-    if (criticalAttrs.length > 0) {
-      // Sort by most urgent and only make the top one required
-      const mostUrgent = criticalAttrs.sort(
-        ([_, a], [__, b]) => b!.needed - a!.needed
-      )[0]
-
-      this.criticalAttributes[mostUrgent![0]]!.required = true
-    }
 
     return this.criticalAttributes
   }
@@ -232,7 +233,7 @@ export class Bouncer<
       this.admittedCount / (this.admittedCount + this.rejectedCount)
 
     this.rateGap = currentRate - targetAdmissionRate
-    const adjustment = this.rateGap * 0.2 // MOVE THE 0.2 HERE, reduce from 0.5
+    const adjustment = this.rateGap * 0.5 // MOVE THE 0.2 HERE, reduce from 0.5
 
     const threshold = Stats.clamp(
       Bouncer.CONFIG.BASE_THRESHOLD! + adjustment,
@@ -257,7 +258,7 @@ export class Bouncer<
     )
 
     // Target being 10% ahead of the natural schedule
-    const targetProgress = Math.min(naturalProgress * 1.1, 1.0)
+    const targetProgress = Math.min(naturalProgress * 1.05, 1.0)
     const actualProgress = this.metrics.totalProgress
 
     // Now the gap measures against the "10% ahead" target
@@ -374,8 +375,10 @@ export class Bouncer<
       // Early intervention: boost rare attributes early
       const frequency = this.metrics.frequencies[attr]
       const rarityBoost = frequency < 0.1 ? 1.5 : 1.0 // 1.5x for very rare attributes
+      const criticalModifier = this.criticalAttributes[attr]?.modifier || 1
 
-      const attributeScore = urgencyScore * priorityMultiplier * rarityBoost
+      const attributeScore =
+        urgencyScore * priorityMultiplier * rarityBoost * criticalModifier
       totalScore += attributeScore
     })
 
