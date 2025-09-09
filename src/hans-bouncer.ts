@@ -361,9 +361,6 @@ export class HansBouncer<T> implements BergainBouncer {
 
   // Core decision logic
   private makeDecision(person: Person<T>): boolean {
-    // Emergency mode: accept anyone if we're running out of rejections
-    if (this.remainingRejections < 100) return true
-
     // Calculate person's value
     const personValue = this.calculatePersonValue(person)
     const requiredThreshold = this.getRequiredThreshold()
@@ -382,6 +379,7 @@ export class HansBouncer<T> implements BergainBouncer {
   private calculatePersonValue(person: Person<T>): number {
     let value = 0.1 // Base value for everyone (never 0)
     let attributeCount = 0
+    let hasRareAttribute = false
 
     // Debug: log what we're checking
     console.log(`Calculating value for person:`, person)
@@ -391,54 +389,69 @@ export class HansBouncer<T> implements BergainBouncer {
       const hasAttribute = person[constraint.attribute]
       console.log(`  Checking ${String(constraint.attribute)}: ${hasAttribute}`)
 
-      if (hasAttribute) {
-        const stats = constraint.getStats(this.remainingSlots)
-        console.log(
-          `    Stats: urgency=${
-            stats.urgency
-          }, satisfied=${constraint.isSatisfied()}`
-        )
+      if (!hasAttribute) return // skip for this attribute
+      if (constraint.isSatisfied()) return // skip for already filled attributes
 
-        if (!constraint.isSatisfied()) {
-          // Use learned parameter for urgency scaling
-          const learnedMultiplier = this.thresholdParams[constraint.attribute]
-          const attributeValue = 1 + stats.urgency * learnedMultiplier
-          console.log(
-            `    Adding value: ${attributeValue} (urgency=${stats.urgency} * learned=${learnedMultiplier})`
-          )
-          value += attributeValue
-        } else {
-          console.log(`    Adding satisfied value: 0.5`)
-          value += 0.5
-        }
-        attributeCount++
+      const stats = constraint.getStats(this.remainingSlots)
+
+      // This creates a smooth curve where:
+      // urgency < 0.5: multiplier = 1 (no bonus)
+      // urgency = 1.0: multiplier = 1.5
+      // urgency = 2.0: multiplier = 2.5
+      // urgency > 2.5: multiplier = 3 (capped)
+      // const urgencyMultiplier = 1 + Math.min(2, Math.max(0, stats.urgency - 0.5))
+      const urgencyMultiplier = Math.max(0.5, 1 + stats.urgency) // more aggresive
+
+      // if the person has an attribute that appears < 10% of the time,
+      // set this flag to true.
+      if (constraint.frequency < 0.1) {
+        hasRareAttribute = true
       }
+
+      // Use learned parameter for urgency scaling
+      const learnedMultiplier = this.thresholdParams[constraint.attribute]
+
+      const attributeValue =
+        1 + stats.urgency * learnedMultiplier * urgencyMultiplier
+      // const attributeValue = (1 + learnedMultiplier) * urgencyMultiplier
+
+      // debug component
+      console.log({
+        ...stats,
+        learnedMultiplier,
+        attributeValue,
+        urgencyMultiplier,
+      })
+
+      // add score to overall value
+      value += attributeValue
+
+      // incrament attribute count
+      attributeCount++
     })
 
-    // Significant bonus for people with multiple attributes
-    if (attributeCount >= 2) {
-      console.log(`  Multi-attribute bonus: +1`)
-      value += 1
-    }
-    if (attributeCount >= 3) {
-      console.log(`  Triple-attribute bonus: +1.5`)
-      value += 1.5
+    // heavily reward rare attributes
+    if (hasRareAttribute) {
+      value += 10
     }
 
-    // Extra bonus for creative people (since they're so rare)
-    if (person['creative' as keyof T]) {
-      console.log(`  Creative bonus: +2`)
-      value += 2 // Big bonus for creative attribute
-    }
+    const totalExpectedPeople = this.getConstraints()
+      .filter((c) => !c.isSatisfied())
+      .reduce(
+        (sum, c) => sum + c.getStats(this.remainingSlots).expectedPeople,
+        0
+      )
 
-    // If person has no useful attributes, still give small chance early in game
-    if (attributeCount === 0 && this.totalAdmitted < 50) {
-      console.log(`  Early game bonus for no attributes: 0.3`)
-      value = 0.3 // Small chance early on
-    }
+    const scarcityRatio = totalExpectedPeople / Math.max(1, this.remainingSlots)
+    const globalScarcityMultiplier = Math.min(5, Math.max(1, scarcityRatio))
 
-    console.log(`  Final calculated value: ${value}`)
-    return value
+    const finalValue =
+      value * Math.max(1, attributeCount) * globalScarcityMultiplier
+
+    console.log(
+      `Final value: ${finalValue} (base: ${value}, scarcity: ${globalScarcityMultiplier})`
+    )
+    return finalValue
   }
 
   private getRequiredThreshold(): number {
