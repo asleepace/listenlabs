@@ -377,7 +377,7 @@ export class HansBouncer<T> implements BergainBouncer {
   }
 
   private calculatePersonValue(person: Person<T>): number {
-    let value = 0.1 // Base value for everyone (never 0)
+    let value = 0.01 // Base value for everyone (never 0)
     let attributeCount = 0
     let hasRareAttribute = false
 
@@ -463,33 +463,59 @@ export class HansBouncer<T> implements BergainBouncer {
     return finalValue
   }
 
+  /**
+   *  Quadratic progress scaling: Threshold goes from 0.15 to 3.15+ (much steeper)
+   *  Constraint pressure factor: Multiplies threshold when math becomes impossible
+   *  Emergency modes: Dramatic threshold cuts when urgency > 1.0
+   *  End-game acceleration: Cubic scaling in final 20% of capacity
+   */
   private getRequiredThreshold(): number {
     const progressRatio = this.totalAdmitted / this.config.MAX_CAPACITY
     const constraints = this.getConstraints()
 
+    // Calculate constraint pressure - how impossible the math is getting
+    const totalExpectedPeople = constraints
+      .filter((c) => !c.isSatisfied())
+      .reduce(
+        (sum, c) => sum + c.getStats(this.remainingSlots).expectedPeople,
+        0
+      )
+
+    const constraintPressure = Math.min(
+      5,
+      totalExpectedPeople / Math.max(1, this.remainingSlots)
+    )
+
     // Use learned parameters to adjust base threshold
     const thresholdParamValues = Object.values(this.thresholdParams) as number[]
-    const thresholdParamSum = thresholdParamValues.reduce(
-      (total, current) => total + current,
-      0
-    )
     const avgLearningParam =
-      thresholdParamSum / (thresholdParamValues.length || 1)
+      thresholdParamValues.reduce((sum, val) => sum + val, 0) /
+      thresholdParamValues.length
 
-    // Scale base threshold by learned aggressiveness
-    let baseThreshold = 0.25 * (2 - avgLearningParam) // Higher learned params = lower threshold
+    // More aggressive base threshold that escalates faster
+    let baseThreshold = 0.15 + progressRatio * progressRatio * 3.0 // Quadratic scaling: 0.15 → 3.15
 
-    // Rest of urgency logic...
+    // Adjust by learning - conservative learning means higher threshold
+    baseThreshold *= 2.5 - avgLearningParam // Range roughly 0.5x to 2.4x
+
+    // Constraint pressure multiplier - gets very aggressive when math becomes impossible
+    baseThreshold *= Math.max(0.8, constraintPressure)
+
+    // Urgency adjustments - now additive rather than multiplicative
     const mostUrgent = constraints.reduce((max, constraint) => {
       const stats = constraint.getStats(this.remainingSlots)
       return stats.urgency > max ? stats.urgency : max
     }, 0)
 
-    if (mostUrgent > 0.7) baseThreshold *= 0.6 // 60% of base when urgent
-    else if (mostUrgent > 0.5) baseThreshold *= 0.8 // 80% of base when moderately urgent
+    // Emergency escalation when urgency is extreme
+    if (mostUrgent > 2.0) baseThreshold *= 0.3 // Desperate mode
+    else if (mostUrgent > 1.0) baseThreshold *= 0.6 // Urgent mode
+    else if (mostUrgent > 0.7) baseThreshold *= 0.8 // Moderately urgent
 
-    const capacityFactor = Math.min(1.0, progressRatio * 1.5)
-    return baseThreshold + capacityFactor * 0.2
+    // Final capacity pressure - accelerates near the end
+    const endGamePressure = progressRatio > 0.8 ? Math.pow(progressRatio, 3) : 0
+
+    return Math.max(0.1, baseThreshold + endGamePressure * 2.0)
   }
 
   // Helper methods
