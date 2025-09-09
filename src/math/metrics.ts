@@ -288,10 +288,26 @@ export class Metrics {
   }
 
   // Utility methods for person evaluation
-  getUsefulAttributes(personAttributes: Partial<ScenarioAttributes>): Keys[] {
+  getUsefulAttributes(
+    personAttributes: Partial<ScenarioAttributes>
+  ): (keyof ScenarioAttributes)[] {
     return Object.entries(personAttributes)
-      .filter(([attr, hasAttr]) => hasAttr && !this.isCompleted(attr as Keys))
-      .map(([attr, _]) => attr as Keys)
+      .filter(([attr, hasAttr]) => {
+        if (!hasAttr) return false
+        if (this.isCompleted(attr)) return false
+
+        const progress = this.getProgress(attr)
+        const frequency = this.frequencies[attr] || 0
+        // Dynamic overfill threshold based on rarity
+        // const overfillThreshold = Math.min(0.95, 0.85 + frequency * 0.2)
+        // More aggressive separation
+        const overfillThreshold = Math.max(
+          0.88,
+          Math.min(0.96, 0.82 + frequency * 0.3)
+        )
+        return progress < overfillThreshold
+      })
+      .map(([attr, _]) => attr as keyof ScenarioAttributes)
   }
 
   countUsefulAttributes(personAttributes: Partial<ScenarioAttributes>): number {

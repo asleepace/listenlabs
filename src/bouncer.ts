@@ -32,7 +32,7 @@ type CriticalAttributes = Partial<Record<keyof ScenarioAttributes, Critical>>
 
 const TUNED_CONFIG: Partial<GameConfig> = {
   // Most impactful
-  BASE_THRESHOLD: 0.45, // Lower from 0.51 - major change needed
+  BASE_THRESHOLD: 0.42, // Lower = More lenient
   TARGET_RATE: 0.25, // Raise from 0.19 to match 1000/4000 = 25%
   TARGET_RANGE: 4000, // Back to 4000 from 3000/3050
   MIN_THRESHOLD: 0.2, // Lower floor

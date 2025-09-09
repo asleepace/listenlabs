@@ -168,7 +168,7 @@ export function getScoreDeflationFactorCombined(
     deflationFactor = 0.25
   } else if (ratio > 1.5) {
     deflationFactor = 0.5
-  } else if (ratio > 1.3) {
+  } else if (ratio > 1.35) {
     // Add this threshold
     deflationFactor = 0.65 // More aggressive for your 1.31 ratio
   } else if (ratio > 1.15) {
