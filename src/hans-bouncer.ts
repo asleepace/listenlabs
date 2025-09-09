@@ -443,7 +443,16 @@ export class HansBouncer<T> implements BergainBouncer {
       )
 
     const scarcityRatio = totalExpectedPeople / Math.max(1, this.remainingSlots)
-    const globalScarcityMultiplier = Math.min(5, Math.max(1, scarcityRatio))
+    // const globalScarcityMultiplier = Math.min(5, Math.max(1, scarcityRatio))
+
+    // more aggresive:
+    // Early game (ratio 10): multiplier = 3.16
+    // Mid game (ratio 20): multiplier = 3 (capped)
+    // Late game (ratio 50+): multiplier = 3 (capped)
+    const globalScarcityMultiplier = Math.min(
+      3,
+      Math.max(1, Math.sqrt(scarcityRatio))
+    )
 
     const finalValue =
       value * Math.max(1, attributeCount) * globalScarcityMultiplier
