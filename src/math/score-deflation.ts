@@ -158,33 +158,27 @@ export function getScoreDeflationFactorCombined(
   const currentRate =
     params.admittedCount / (params.admittedCount + params.rejectedCount)
   const targetRate = params.targetRate
+  const ratio = currentRate / targetRate
 
-  // For your current 80% rate vs 25% target:
-  const ratio = currentRate / targetRate // 3.2
-
-  // Aggressive response for large deviations
   let deflationFactor: number
 
   if (ratio > 2.5) {
-    // Severe over-admission - emergency deflation
     deflationFactor = 0.15
   } else if (ratio > 2.0) {
-    // Heavy over-admission - strong deflation
     deflationFactor = 0.25
   } else if (ratio > 1.5) {
-    // Moderate over-admission - medium deflation
     deflationFactor = 0.5
-  } else if (ratio > 1.2) {
-    // Slight over-admission - light deflation
+  } else if (ratio > 1.3) {
+    // Add this threshold
+    deflationFactor = 0.65 // More aggressive for your 1.31 ratio
+  } else if (ratio > 1.15) {
+    // Tighten this threshold
     deflationFactor = 0.8
   } else if (ratio < 0.8) {
-    // Under-admission - inflation
     deflationFactor = Math.min(1.5, 1.25 / ratio)
   } else {
-    // Target range - minimal adjustment
     deflationFactor = 1.0
   }
 
-  // Safety bounds
   return Stats.clamp(deflationFactor, 0.1, 2.0)
 }

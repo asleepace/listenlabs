@@ -8,10 +8,14 @@ export namespace Score {
   // calculating score deflation factor (all of these do the same thing)
   export const getScoreDeflationFactorCombined =
     Defaltion.getScoreDeflationFactorCombined
+
   export const getAdaptiveDeflationFactor = Defaltion.getAdaptiveDeflationFactor
+
   export const getExponentialDeflationFactor =
     Defaltion.getExponentialDeflationFactor
+
   export const getPowerLawDeflationFactor = Defaltion.getPowerLawDeflationFactor
+
   export const getScoreDeflationFactor = Defaltion.getScoreDeflationFactor
 
   // calculating admission scores

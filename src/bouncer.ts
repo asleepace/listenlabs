@@ -299,28 +299,39 @@ export class Bouncer<
     const criticalKeys = Object.keys(this.criticalAttributes) as Keys[]
     const personAttributes = nextPerson.attributes
 
-    const currentRate =
-      this.admittedCount / (this.admittedCount + this.rejectedCount)
-    const targetRate = 0.25
-    const earlyBoost =
-      this.admittedCount < 500 && currentRate < targetRate ? 0.9 : 1.0
+    // const currentRate =
+    //   this.admittedCount / (this.admittedCount + this.rejectedCount)
+    const targetRate = Bouncer.CONFIG.TARGET_RATE ?? 0.25
+    // const earlyBoost =
+    //   this.admittedCount < 500 && currentRate < targetRate ? 0.9 : 1.0
 
     // Calculate both regular and endgame scores
-    const regularScore = Score.calculateAdmissionScore({
-      allQuotasMet: this.allQuotasMet,
-      attributes: personAttributes,
-      criticalAttributes: this.criticalAttributes,
-      metrics: this.metrics,
-    })
+    let regularScore = Score.calculateAdmissionScore(
+      {
+        allQuotasMet: this.allQuotasMet,
+        attributes: personAttributes,
+        criticalAttributes: this.criticalAttributes,
+        metrics: this.metrics,
+      },
+      Score.PRESETS.CONSERVATIVE
+    )
 
-    const endgameScore = Score.calculateEndgameScore({
-      allQuotasMet: this.allQuotasMet,
-      totalSpotsLeft: this.totalSpotsLeft,
-      attributes: personAttributes,
-      criticalAttributes: this.criticalAttributes,
-      metrics: this.metrics,
-      isEndgame: this.isEndgame(),
-    })
+    const endgameScore =
+      regularScore < 0.3
+        ? Score.calculateEndgameScore(
+            {
+              allQuotasMet: this.allQuotasMet,
+              totalSpotsLeft: this.totalSpotsLeft,
+              attributes: personAttributes,
+              criticalAttributes: this.criticalAttributes,
+              metrics: this.metrics,
+              isEndgame: this.isEndgame(),
+            },
+            {
+              maxEndgameScore: 1.5,
+            }
+          )
+        : 0
 
     // Calculate score default factor (see file for more implementations)
     const deflationFactor = Score.getScoreDeflationFactorCombined({
@@ -334,7 +345,7 @@ export class Bouncer<
     const score = rawScore * deflationFactor
 
     const threshold = this.getProgressThreshold()
-    const effectiveThreshold = threshold * earlyBoost
+    const effectiveThreshold = threshold
 
     const hasEveryAttribute = this.metrics.hasAllAttributes(
       personAttributes as any
@@ -388,14 +399,7 @@ export class Bouncer<
     const spotsLeft = this.totalSpotsLeft
     const incompleteQuotas = this.metrics.getIncompleteConstraints()
     const totalNeeded = incompleteQuotas.reduce((sum, q) => sum + q.needed, 0)
-
-    // Trigger endgame when either:
-    // 1. Very few spots left (≤50), OR
-    // 2. Quotas becoming tight (need >60% of remaining spots)
-    return (
-      spotsLeft > 0 &&
-      (spotsLeft <= 50 || (totalNeeded >= spotsLeft * 0.6 && spotsLeft <= 200))
-    )
+    return spotsLeft > 0 && spotsLeft <= 20 && totalNeeded <= spotsLeft * 2
   }
 
   getDebugInfo(): any {
