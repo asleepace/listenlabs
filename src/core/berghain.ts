@@ -1,4 +1,10 @@
-import type { GameStatus, Game, GameState, GameStatusRunning } from '../types'
+import type {
+  GameStatus,
+  Game,
+  GameState,
+  GameStatusRunning,
+  ScenarioAttributes,
+} from '../types'
 
 export type ListenLabsConfig = {
   uniqueId: string
@@ -7,7 +13,7 @@ export type ListenLabsConfig = {
 }
 
 export interface BergainBouncer {
-  admit(next: GameStatusRunning): boolean
+  admit(next: GameStatusRunning<ScenarioAttributes>): boolean
   getProgress(): any
   getOutput(): any
 }

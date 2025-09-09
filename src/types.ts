@@ -43,18 +43,21 @@ export interface PersonAttributesScenario3 extends PersonAttributes {
   german_speaker: boolean
 }
 
-export interface Person<
-  T extends PersonAttributes = PersonAttributesScenario3
-> {
+export interface Person<T extends PersonAttributes> {
   personIndex: number
   attributes: T
 }
 
-export type GameStatusRunning = {
+export type GameStatusRunning<
+  T extends
+    | PersonAttributesScenario1
+    | PersonAttributesScenario2
+    | PersonAttributesScenario3
+> = {
   status: 'running'
   admittedCount: number
   rejectedCount: number
-  nextPerson: Person
+  nextPerson: Person<T>
 }
 
 export type GameStatusCompleted = {
@@ -70,7 +73,7 @@ export type GameStatusFailed = {
 }
 
 export type GameStatus =
-  | GameStatusRunning
+  | GameStatusRunning<ScenarioAttributes>
   | GameStatusCompleted
   | GameStatusFailed
 
@@ -81,4 +84,9 @@ export type GameState = {
   output?: any
 }
 
-export type Keys = keyof Person['attributes']
+export type ScenarioAttributes =
+  | PersonAttributesScenario1
+  | PersonAttributesScenario2
+  | PersonAttributesScenario3
+
+export type Keys = keyof ScenarioAttributes

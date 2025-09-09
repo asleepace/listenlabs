@@ -1,94 +1,89 @@
 import type {
   GameState,
-  GameStatus,
   PersonAttributes,
-  PersonAttributesScenario3,
+  ScenarioAttributes,
+  Keys,
 } from '../types'
-import { Stats } from './stats'
+import { Stats } from './statistics'
 
-export type Frequencies<Attributes extends PersonAttributes> = {
-  readonly [K in keyof Attributes]: number
+export type Frequencies = {
+  readonly [K in keyof ScenarioAttributes]: number
 }
 
-export type Correlations<Attributes extends PersonAttributes> = {
-  readonly [K in keyof Attributes]: {
-    readonly [J in keyof Attributes]: number
+export type Correlations = {
+  readonly [K in keyof ScenarioAttributes]: {
+    readonly [J in keyof ScenarioAttributes]: number
   }
 }
 
-export type Constraint<Attributes extends PersonAttributes> = {
-  readonly attribute: keyof Attributes
+export type Constraint = {
+  readonly attribute: Keys
   readonly minCount: number
   count: number
 }
 
-export type ConstraintProgress<Attributes extends PersonAttributes> = {
-  readonly attribute: keyof Attributes
+export type ConstraintProgress = {
+  readonly attribute: keyof ScenarioAttributes
   readonly current: number
   readonly needed: number
   readonly progress: number
   readonly completed: boolean
 }
 
-export type AttributeStats<Attributes extends PersonAttributes> = {
-  readonly attribute: keyof Attributes
+export type AttributeStats = {
+  readonly attribute: keyof ScenarioAttributes
   readonly frequency: number
   readonly rarity: number
   readonly quotaRate: number
   readonly overdemanded: boolean
 }
 
-export type AttributeRisk<Attributes extends PersonAttributes> = {
-  criticalAttributes: (keyof Attributes)[]
+export type AttributeRisk = {
+  criticalAttributes: (keyof ScenarioAttributes)[]
   riskScore: number
   timeRemaining: number
   feasibilityScore: number
 }
 
-export class Metrics<
-  Attributes extends PersonAttributes = PersonAttributesScenario3
-> {
-  private _constraints: Constraint<Attributes>[]
-  private _frequencies: Frequencies<Attributes>
-  private _correlations: Correlations<Attributes>
-  private _attributeStats: Map<keyof Attributes, AttributeStats<Attributes>>
-  private _riskAssessment: AttributeRisk<Attributes>
+export class Metrics {
+  private _constraints: Constraint[]
+  private _frequencies: Frequencies
+  private _correlations: Correlations
+  private _attributeStats: Map<Keys, AttributeStats>
+  private _riskAssessment: AttributeRisk
   private _correlationCache = new Map()
 
   constructor(public readonly gameData: GameState['game']) {
     this._constraints = gameData.constraints.map(
-      (constraint): Constraint<Attributes> => ({
-        attribute: constraint.attribute as keyof Attributes,
+      (constraint): Constraint => ({
+        attribute: constraint.attribute,
         minCount: constraint.minCount,
         count: 0,
       })
     )
 
     this._frequencies = gameData.attributeStatistics
-      .relativeFrequencies as Frequencies<Attributes>
+      .relativeFrequencies as Frequencies
     this._correlations = gameData.attributeStatistics
-      .correlations as Correlations<Attributes>
+      .correlations as Correlations
     this._attributeStats = this.preCalculateAttributeStats()
     this._riskAssessment = this.getRiskAssessment(10_000)
   }
 
   // Getters
-  get constraints(): readonly Constraint<Attributes>[] {
+  get constraints(): readonly Constraint[] {
     return this._constraints
   }
 
-  get frequencies(): Frequencies<Attributes> {
+  get frequencies(): Frequencies {
     return this._frequencies
   }
 
-  get correlations(): Correlations<Attributes> {
+  get correlations(): Correlations {
     return this._correlations
   }
 
-  get attributeStats(): ReadonlyMap<
-    keyof Attributes,
-    AttributeStats<Attributes>
-  > {
+  get attributeStats(): ReadonlyMap<Keys, AttributeStats> {
     return this._attributeStats
   }
 
@@ -115,11 +110,8 @@ export class Metrics<
   }
 
   // Pre-calculate useful statistics
-  private preCalculateAttributeStats(): Map<
-    keyof Attributes,
-    AttributeStats<Attributes>
-  > {
-    const stats = new Map<keyof Attributes, AttributeStats<Attributes>>()
+  private preCalculateAttributeStats(): Map<Keys, AttributeStats> {
+    const stats = new Map<Keys, AttributeStats>()
 
     // Make capacity configurable instead of hardcoded 1000
     const totalCapacity =
@@ -130,7 +122,7 @@ export class Metrics<
       const frequency = this._frequencies[attr] || 0
       const quotaRate = constraint.minCount / totalCapacity
 
-      stats.set(attr, {
+      stats.set(attr as Keys, {
         attribute: attr,
         frequency,
         rarity: 1 / Math.max(frequency, 0.01),
@@ -143,44 +135,44 @@ export class Metrics<
   }
 
   // Counting methods
-  updateCount(attribute: keyof Attributes, increment: number = 1): void {
+  updateCount(attribute: Keys, increment: number = 1): void {
     const constraint = this._constraints.find((c) => c.attribute === attribute)
     if (constraint) {
       constraint.count += increment
     }
   }
 
-  updateCounts(attributes: Partial<Attributes>): void {
+  updateCounts(attributes: Partial<ScenarioAttributes>): void {
     Object.entries(attributes).forEach(([attr, hasAttribute]) => {
       if (hasAttribute) {
-        this.updateCount(attr as keyof Attributes)
+        this.updateCount(attr as Keys)
       }
     })
   }
 
-  getCount(attribute: keyof Attributes): number {
+  getCount(attribute: Keys): number {
     const constraint = this._constraints.find((c) => c.attribute === attribute)
     return constraint?.count ?? 0
   }
 
-  getNeeded(attribute: keyof Attributes): number {
+  getNeeded(attribute: Keys): number {
     const constraint = this._constraints.find((c) => c.attribute === attribute)
     if (!constraint) return 0
     return Math.max(0, constraint.minCount - constraint.count)
   }
 
-  getProgress(attribute: keyof Attributes): number {
+  getProgress(attribute: Keys): number {
     const constraint = this._constraints.find((c) => c.attribute === attribute)
     if (!constraint) return 0
     return Math.min(constraint.count / constraint.minCount, 1)
   }
 
-  isCompleted(attribute: keyof Attributes): boolean {
+  isCompleted(attribute: Keys): boolean {
     return this.getNeeded(attribute) === 0
   }
 
   // Analysis methods
-  getConstraintProgress(): ConstraintProgress<Attributes>[] {
+  getConstraintProgress(): ConstraintProgress[] {
     return this._constraints.map((constraint) => ({
       attribute: constraint.attribute,
       current: constraint.count,
@@ -190,31 +182,32 @@ export class Metrics<
     }))
   }
 
-  getIncompleteConstraints(): ConstraintProgress<Attributes>[] {
+  getIncompleteConstraints(): ConstraintProgress[] {
     return this.getConstraintProgress().filter((cp) => !cp.completed)
   }
 
-  getMostNeededAttributes(): (keyof Attributes)[] {
+  getMostNeededAttributes(): Keys[] {
     return this.getIncompleteConstraints()
       .sort((a, b) => b.needed - a.needed)
-      .map((cp) => cp.attribute)
+      .map((cp) => cp.attribute as Keys)
   }
 
-  getLeastProgressAttributes(): (keyof Attributes)[] {
+  getLeastProgressAttributes(): Keys[] {
     return this.getIncompleteConstraints()
       .sort((a, b) => a.progress - b.progress)
-      .map((cp) => cp.attribute)
+      .map((cp) => cp.attribute as Keys)
   }
 
-  getOverdemandedAttributes(): (keyof Attributes)[] {
+  getOverdemandedAttributes(): Keys[] {
     return Array.from(this._attributeStats.entries())
       .filter(
-        ([_, stats]) => stats.overdemanded && !this.isCompleted(stats.attribute)
+        ([_, stats]) =>
+          stats.overdemanded && !this.isCompleted(stats.attribute as Keys)
       )
       .map(([attr, _]) => attr)
   }
 
-  getRarestAttributes(): (keyof Attributes)[] {
+  getRarestAttributes(): Keys[] {
     return Array.from(this._attributeStats.entries())
       .filter(([attr, _]) => !this.isCompleted(attr))
       .sort(([_, a], [__, b]) => b.rarity - a.rarity)
@@ -256,9 +249,9 @@ export class Metrics<
   }
 
   getPositivelyCorrelated(
-    attribute: keyof Attributes,
+    attribute: keyof ScenarioAttributes,
     threshold: number = 0.3
-  ): (keyof Attributes)[] {
+  ): (keyof ScenarioAttributes)[] {
     const cacheKey = `${String(attribute)}_pos_${threshold}`
 
     if (this._correlationCache.has(cacheKey)) {
@@ -270,7 +263,7 @@ export class Metrics<
 
     const result = Object.entries(correlations)
       .filter(([_, correlation]) => (correlation as number) > threshold)
-      .map(([attr, _]) => attr as keyof Attributes)
+      .map(([attr, _]) => attr)
       .filter((attr) => attr !== attribute)
 
     this._correlationCache.set(cacheKey, result)
@@ -278,55 +271,52 @@ export class Metrics<
   }
 
   getNegativelyCorrelated(
-    attribute: keyof Attributes,
+    attribute: keyof ScenarioAttributes,
     threshold: number = -0.3
-  ): (keyof Attributes)[] {
+  ): Keys[] {
     const correlations = this._correlations[attribute]
     if (!correlations) return []
 
     return Object.entries(correlations)
       .filter(([_, correlation]) => (correlation as number) < threshold)
-      .map(([attr, _]) => attr as keyof Attributes)
+      .map(([attr, _]) => attr as Keys)
       .filter((attr) => attr !== attribute)
   }
 
-  getCorrelation(attr1: keyof Attributes, attr2: keyof Attributes): number {
+  getCorrelation(attr1: Keys, attr2: Keys): number {
     return this._correlations[attr1]?.[attr2] ?? 0
   }
 
   // Utility methods for person evaluation
-  getUsefulAttributes(
-    personAttributes: Partial<Attributes>
-  ): (keyof Attributes)[] {
+  getUsefulAttributes(personAttributes: Partial<ScenarioAttributes>): Keys[] {
     return Object.entries(personAttributes)
-      .filter(
-        ([attr, hasAttr]) =>
-          hasAttr && !this.isCompleted(attr as keyof Attributes)
-      )
-      .map(([attr, _]) => attr as keyof Attributes)
+      .filter(([attr, hasAttr]) => hasAttr && !this.isCompleted(attr as Keys))
+      .map(([attr, _]) => attr as Keys)
   }
 
-  countUsefulAttributes(personAttributes: Partial<Attributes>): number {
+  countUsefulAttributes(personAttributes: Partial<ScenarioAttributes>): number {
     return this.getUsefulAttributes(personAttributes).length
   }
 
   hasAttribute(
-    personAttributes: Partial<Attributes>,
-    attribute: keyof Attributes
+    personAttributes: Partial<ScenarioAttributes>,
+    attribute: Keys
   ): boolean {
     return Boolean(personAttributes[attribute])
   }
 
-  hasAllAttributes(personAttributes: Partial<Attributes>): boolean {
+  hasAllAttributes(personAttributes: Partial<ScenarioAttributes>): boolean {
     return this._constraints.every((constraint) =>
       Boolean(personAttributes[constraint.attribute])
     )
   }
 
-  hasAnyNeededAttribute(personAttributes: Partial<Attributes>): boolean {
+  hasAnyNeededAttribute(
+    personAttributes: Partial<ScenarioAttributes>
+  ): boolean {
     return this._constraints.some(
       (constraint) =>
-        !this.isCompleted(constraint.attribute) &&
+        !this.isCompleted(constraint.attribute as Keys) &&
         Boolean(personAttributes[constraint.attribute])
     )
   }
@@ -348,7 +338,7 @@ export class Metrics<
     quartiles: [number, number, number]
   } {
     const progressValues = this._constraints.map((c) =>
-      this.getProgress(c.attribute)
+      this.getProgress(c.attribute as Keys)
     )
     return {
       mean: Stats.average(progressValues),
@@ -363,10 +353,10 @@ export class Metrics<
   getProgressVariability(): {
     isBalanced: boolean
     coefficient: number
-    outliers: (keyof Attributes)[]
+    outliers: Keys[]
   } {
     const progressValues = this._constraints.map((c) =>
-      this.getProgress(c.attribute)
+      this.getProgress(c.attribute as Keys)
     )
     const mean = Stats.average(progressValues)
     const stdDev = Stats.stdDev(progressValues)
@@ -375,11 +365,11 @@ export class Metrics<
     // Find outliers (progress > 2 std devs from mean)
     const outliers = this._constraints
       .filter((c) => {
-        const progress = this.getProgress(c.attribute)
+        const progress = this.getProgress(c.attribute as Keys)
         const zScore = Stats.zScore(progress, progressValues)
         return Math.abs(zScore) > 2
       })
-      .map((c) => c.attribute)
+      .map((c) => c.attribute as Keys)
 
     return {
       isBalanced: coefficient < 0.3, // Low coefficient of variation
@@ -389,7 +379,7 @@ export class Metrics<
   }
 
   getQuotaDifficulty(): Map<
-    keyof Attributes,
+    Keys,
     {
       difficulty: number
       rank: number
@@ -404,7 +394,7 @@ export class Metrics<
 
     this._constraints.forEach((constraint) => {
       const attr = constraint.attribute
-      const stats = this._attributeStats.get(attr)!
+      const stats = this._attributeStats.get(attr as Keys)!
       const correlatedAttrs = this.getPositivelyCorrelated(attr, 0.2)
 
       // Calculate difficulty factors
@@ -440,7 +430,7 @@ export class Metrics<
     recommendations: string[]
   } {
     const progressValues = this._constraints.map((c) =>
-      this.getProgress(c.attribute)
+      this.getProgress(c.attribute as Keys)
     )
     const targetEfficiency = Stats.average(progressValues)
 
@@ -482,7 +472,7 @@ export class Metrics<
     }
   }
 
-  getRiskAssessment(peopleRemaining: number): AttributeRisk<Attributes> {
+  getRiskAssessment(peopleRemaining: number): AttributeRisk {
     const incomplete = this.getIncompleteConstraints()
 
     // Add early return for edge case
@@ -496,8 +486,8 @@ export class Metrics<
     }
 
     const sortedIncomplete = incomplete.sort((a, b) => {
-      const statsA = this._attributeStats.get(a.attribute)
-      const statsB = this._attributeStats.get(b.attribute)
+      const statsA = this._attributeStats.get(a.attribute as Keys)
+      const statsB = this._attributeStats.get(b.attribute as Keys)
 
       // Add null checks
       if (!statsA || !statsB) return 0
@@ -508,7 +498,7 @@ export class Metrics<
     let availablePeople = peopleRemaining
 
     const riskFactors = sortedIncomplete.map((constraint) => {
-      const stats = this._attributeStats.get(constraint.attribute)
+      const stats = this._attributeStats.get(constraint.attribute as Keys)
 
       // Add null check
       if (!stats) return 0
@@ -550,14 +540,14 @@ export class Metrics<
 
   getCorrelationInsights(): {
     strongPairs: Array<{
-      attr1: keyof Attributes
-      attr2: keyof Attributes
+      attr1: Keys
+      attr2: Keys
       correlation: number
       bothNeeded: boolean
     }>
     conflictPairs: Array<{
-      attr1: keyof Attributes
-      attr2: keyof Attributes
+      attr1: Keys
+      attr2: Keys
       correlation: number
       bothNeeded: boolean
     }>
@@ -572,12 +562,12 @@ export class Metrics<
         if (constraint1.attribute >= constraint2.attribute) return
 
         const correlation = this.getCorrelation(
-          constraint1.attribute,
-          constraint2.attribute
+          constraint1.attribute as Keys,
+          constraint2.attribute as Keys
         )
         const bothNeeded =
-          !this.isCompleted(constraint1.attribute) &&
-          !this.isCompleted(constraint2.attribute)
+          !this.isCompleted(constraint1.attribute as Keys) &&
+          !this.isCompleted(constraint2.attribute as Keys)
 
         if (correlation > 0.4) {
           strongPairs.push({
@@ -611,8 +601,8 @@ export class Metrics<
     completedConstraints: number
     totalProgress: number
     allMet: boolean
-    mostNeeded: (keyof Attributes)[]
-    leastProgress: (keyof Attributes)[]
+    mostNeeded: Keys[]
+    leastProgress: Keys[]
     efficiency: number
     riskScore: number
     isBalanced: boolean

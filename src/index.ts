@@ -1,4 +1,4 @@
-import { Bouncer } from './core/bouncer'
+import { Bouncer } from './bouncer'
 import { Berghain, type ListenLabsConfig } from './core/berghain'
 import { getCliArgs } from './cli/get-cli-args'
 
