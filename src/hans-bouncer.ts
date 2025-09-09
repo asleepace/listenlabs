@@ -105,10 +105,10 @@ class ThompsonSampler<T> {
     const successThreshold = Math.min(bestScore * 1.2, 5000) // 20% worse than best, max 5000
 
     console.log(
-      `Initializing Thompson Sampling from ${previousGames.length} games`
+      `[thompson-sampling] initializing Thompson Sampling from ${previousGames.length} games`
     )
     console.log(
-      `Best previous score: ${bestScore}, success threshold: ${successThreshold}`
+      `[thompson-sampling] best previous score: ${bestScore}, success threshold: ${successThreshold}`
     )
 
     let successCount = 0
@@ -138,9 +138,9 @@ class ThompsonSampler<T> {
     })
 
     console.log(
-      `Thompson Sampling initialized: ${successCount}/${totalCount} successful games`
+      `[thompson-sampling] initialized: ${successCount}/${totalCount} successful games`
     )
-    console.log('Updated priors:', {
+    console.log('[thompson-sampling] updated priors:', {
       alphas: Object.fromEntries(Object.entries(this.alphas)),
       betas: Object.fromEntries(Object.entries(this.betas)),
     })
@@ -173,7 +173,7 @@ class ThompsonSampler<T> {
     const mean = alpha / (alpha + beta)
     const variance = (alpha * beta) / ((alpha + beta) ** 2 * (alpha + beta + 1))
     const noise = (Math.random() - 0.5) * Math.sqrt(variance) * 2
-    return Math.max(0.1, Math.min(2.0, mean + noise))
+    return Math.max(0.1, Math.min(3.0, mean + noise)) // Increased max from 2.0 to 3.0
   }
 
   getStats() {
@@ -399,15 +399,17 @@ export class HansBouncer<T> implements BergainBouncer {
           }, satisfied=${constraint.isSatisfied()}`
         )
 
-        // Much higher value for unsatisfied constraints
         if (!constraint.isSatisfied()) {
-          // Scale value by urgency - more urgent = much higher value
-          const attributeValue = 1 + stats.urgency * 3
-          console.log(`    Adding value: ${attributeValue}`)
+          // Use learned parameter for urgency scaling
+          const learnedMultiplier = this.thresholdParams[constraint.attribute]
+          const attributeValue = 1 + stats.urgency * learnedMultiplier
+          console.log(
+            `    Adding value: ${attributeValue} (urgency=${stats.urgency} * learned=${learnedMultiplier})`
+          )
           value += attributeValue
         } else {
           console.log(`    Adding satisfied value: 0.5`)
-          value += 0.5 // Lower value for already satisfied constraints
+          value += 0.5
         }
         attributeCount++
       }
@@ -443,25 +445,28 @@ export class HansBouncer<T> implements BergainBouncer {
     const progressRatio = this.totalAdmitted / this.config.MAX_CAPACITY
     const constraints = this.getConstraints()
 
-    // Get most urgent constraint
+    // Use learned parameters to adjust base threshold
+    const thresholdParamValues = Object.values(this.thresholdParams) as number[]
+    const thresholdParamSum = thresholdParamValues.reduce(
+      (total, current) => total + current,
+      0
+    )
+    const avgLearningParam =
+      thresholdParamSum / (thresholdParamValues.length || 1)
+
+    // Scale base threshold by learned aggressiveness
+    let baseThreshold = 0.25 * (2 - avgLearningParam) // Higher learned params = lower threshold
+
+    // Rest of urgency logic...
     const mostUrgent = constraints.reduce((max, constraint) => {
       const stats = constraint.getStats(this.remainingSlots)
       return stats.urgency > max ? stats.urgency : max
     }, 0)
 
-    // Start VERY low threshold early in the game
-    let baseThreshold = 0.25 // Even more permissive
+    if (mostUrgent > 0.7) baseThreshold *= 0.6 // 60% of base when urgent
+    else if (mostUrgent > 0.5) baseThreshold *= 0.8 // 80% of base when moderately urgent
 
-    // If any constraint is very urgent (>0.7), be extremely permissive
-    if (mostUrgent > 0.7) {
-      baseThreshold = 0.15 // Super permissive
-    } else if (mostUrgent > 0.5) {
-      baseThreshold = 0.2 // Very permissive
-    }
-
-    // As venue fills up, become more selective
     const capacityFactor = Math.min(1.0, progressRatio * 1.5)
-
     return baseThreshold + capacityFactor * 0.2
   }
 
