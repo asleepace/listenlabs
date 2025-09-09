@@ -1,5 +1,5 @@
 import type { GameState, PersonAttributes, ScenarioAttributes } from './types'
-import type { BergainBouncer } from './core/berghain'
+import type { BergainBouncer } from './berghain'
 import { BASE_CONFIG, type GameConfig } from './conf/game-config'
 import { Stats } from './math/statistics'
 import { Metrics, type AttributeRisk } from './math/metrics'
@@ -71,13 +71,19 @@ export class Bouncer<
 > implements BergainBouncer
 {
   static CONFIG = { ...BASE_CONFIG, ...TUNED_CONFIG }
-  static intialize(overrides: Partial<GameConfig>) {
-    Object.entries(overrides).forEach(([key, value]) => {
-      // @ts-ignore
-      Bouncer.CONFIG[key as keyof GameConfig] = value
-    })
 
-    return (gameState: GameState) => new Bouncer(gameState)
+  /**
+   * Creates a new instance of this class with the initial state and
+   * any override configurations.
+   * @param initialState
+   * @param overrideConfig
+   * @returns {Bouncer}
+   */
+  static createWithConfig(
+    initialState: GameState,
+    overrideConfig: Partial<GameConfig>
+  ) {
+    return new Bouncer(initialState, overrideConfig)
   }
 
   private metrics: Metrics
@@ -95,8 +101,13 @@ export class Bouncer<
   public criticalAttributes: CriticalAttributes = {}
   public riskAssessment: AttributeRisk
   public deflationController: DeflationPIDController
+  public config: GameConfig
 
-  constructor(initialData: GameState) {
+  constructor(
+    public initialData: GameState,
+    public overrideConfig: Partial<GameConfig>
+  ) {
+    this.config = { ...BASE_CONFIG, ...TUNED_CONFIG, ...overrideConfig } // set the config
     this.deflationController = new DeflationPIDController(
       PID_PRESETS.RESPONSIVE
     )
@@ -110,13 +121,11 @@ export class Bouncer<
   }
 
   private get totalSpotsLeft(): number {
-    return Bouncer.CONFIG.MAX_CAPACITY! - this.admittedCount
+    return this.config.MAX_CAPACITY - this.admittedCount
   }
 
   private get estimatedPeopleInLineLeft(): number {
-    return (
-      Bouncer.CONFIG.TOTAL_PEOPLE! - this.admittedCount - this.rejectedCount
-    )
+    return this.config.TOTAL_PEOPLE - this.admittedCount - this.rejectedCount
   }
 
   private get allQuotasMet(): boolean {
@@ -125,7 +134,7 @@ export class Bouncer<
 
   get admittedCount() {
     if (this.state.status.status !== 'running') throw this.state.status
-    return this.state.status.admittedCount
+    return this.state.status.admittedCount ?? 0
   }
 
   get rejectedCount() {
@@ -138,8 +147,8 @@ export class Bouncer<
    */
   get targetRate() {
     return (
-      Bouncer.CONFIG.TARGET_RATE ??
-      Bouncer.CONFIG.TARGET_RANGE / Bouncer.CONFIG.TOTAL_PEOPLE
+      this.config.TARGET_RATE ??
+      this.config.TARGET_RANGE / this.config.TOTAL_PEOPLE
     )
   }
 
@@ -325,6 +334,8 @@ export class Bouncer<
    *  @note admission goes logic here....
    */
   admit(status: GameState['status']): boolean {
+    if (status.status !== 'running') return false
+
     this.state.status = status
     const { nextPerson } = status
 

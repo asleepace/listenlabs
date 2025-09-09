@@ -1,16 +1,15 @@
 import https from 'https'
 import http from 'http'
 
-import { PortfolioBouncer } from '../example/smart-bouncer'
-
 import type {
   GameStatus,
   Game,
   GameState,
   GameStatusRunning,
   ScenarioAttributes,
-} from '../types'
+} from './types'
 import axios from 'axios'
+import { ParameterOptimizer } from './example/optimizer'
 
 export type ListenLabsConfig = {
   uniqueId: string
@@ -20,6 +19,8 @@ export type ListenLabsConfig = {
 
 export interface BergainBouncer {
   admit(next: GameStatusRunning<ScenarioAttributes>): boolean
+  save?: () => Promise<void>
+  load?: () => Promise<void>
   getProgress(): any
   getOutput(): any
 }
@@ -188,24 +189,31 @@ export class Berghain {
     this.bouncer = await this.createBouncer(this.current)
 
     // reset the max retries on each run
-    this.maxRetries = 10
+    this.maxRetries = 1
 
     try {
-      const status = this.current.status.status
-
-      while (status === 'running') {
+      while (this.current.status.status === 'running') {
+        // check if we should accept or reject
         const admit = this.bouncer.admit(this.current.status)
+
+        // then check the next person.
         this.current.status = await this.acceptOrRejectThenGetNext({
           index: this.nextIndex,
           accept: admit,
         })
         if (this.current.status.status !== 'running') break
         console.log(this.bouncer.getProgress()) // better to console here
-        this.saveGame().catch(() => {})
+        // this.saveGame().catch(() => {})
+      }
+
+      if (this.bouncer instanceof ParameterOptimizer) {
+        const output = await this.bouncer.getOutput()
+        prettyPrint(output)
       }
 
       if (this.current.status.status === 'failed') {
         console.warn('====================== ❌ ======================')
+        prettyPrint(this.bouncer.getProgress())
         prettyPrint(this.bouncer.getOutput())
         prettyPrint(this.current.status)
         return this
@@ -213,6 +221,7 @@ export class Berghain {
 
       if (this.current.status.status === 'completed') {
         console.warn('====================== ✅ ======================')
+        prettyPrint(this.bouncer.getProgress())
         prettyPrint(this.bouncer.getOutput())
         prettyPrint(this.current.status)
         // game data is saved in getOutput()
@@ -257,6 +266,8 @@ export class Berghain {
    */
   private async fetch<T>(url: URL): Promise<T> {
     const resp = await axios.get(url.href, {
+      httpsAgent,
+      httpAgent,
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',

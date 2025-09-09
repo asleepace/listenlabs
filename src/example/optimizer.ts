@@ -1,5 +1,5 @@
 import type { GameState, ScenarioAttributes } from '../types'
-import type { BergainBouncer } from './berghain'
+import type { BergainBouncer } from '../berghain'
 import { Bouncer } from '../bouncer' // Your original working algorithm
 
 interface ParameterSet {
@@ -51,7 +51,15 @@ interface LearningData {
   }
 }
 
+async function sleep(time: number) {
+  const sleeper = Promise.withResolvers<void>()
+  setTimeout(sleeper.resolve, time)
+  return sleeper.promise
+}
+
 export class ParameterOptimizer implements BergainBouncer {
+  static filePath = './learning-data/parameter-optimizer.json'
+
   private gameState: GameState
   private learningData: LearningData
   private currentParameterSet!: ParameterSet
@@ -98,7 +106,7 @@ export class ParameterOptimizer implements BergainBouncer {
       id: 'balanced',
       name: 'Balanced Approach',
       config: {
-        BASE_THRESHOLD: 0.38,
+        BASE_THRESHOLD: 0.41,
         TARGET_RATE: 0.22,
         URGENCY_MODIFIER: 3.5,
         MULTI_ATTRIBUTE_BONUS: 1.4,
@@ -167,6 +175,7 @@ export class ParameterOptimizer implements BergainBouncer {
       }
     } catch (error) {
       console.warn('Failed to background load parameter learning data:', error)
+      // await this.initializeLearning()
     }
   }
 
@@ -189,6 +198,7 @@ export class ParameterOptimizer implements BergainBouncer {
             lastUpdate: Date.now(),
           },
         }
+        await learningFile.write(JSON.stringify(this.learningData, null, 2))
       }
     } catch (error) {
       console.warn('Failed to load parameter learning data:', error)
@@ -202,6 +212,8 @@ export class ParameterOptimizer implements BergainBouncer {
         },
       }
     }
+    // allow user to see this data quickly
+    await sleep(5_000)
   }
 
   selectParameterSet() {

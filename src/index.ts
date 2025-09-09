@@ -1,8 +1,9 @@
 import { Bouncer } from './bouncer'
-import { Berghain, type ListenLabsConfig } from './core/berghain'
+import { Berghain, type ListenLabsConfig } from './berghain'
 import { getCliArgs } from './cli/get-cli-args'
-import { OptimizedBouncer } from './example/bouncer-optmized'
-import { ParameterOptimizer } from './core/optimizer'
+import { LearningDataManager } from './example/learning-data-manager'
+import { ParameterOptimizer } from './parameter-optimizer'
+import { HansBouncer } from './hans-bouncer'
 
 /**
  *  Configure listen labs default settings.
@@ -21,21 +22,30 @@ const configuration = getCliArgs()
 
 console.log('[game] settings:', configuration)
 
+const scenario = configuration.SCENARIO
+
+if (!scenario) {
+  throw new Error(`Missing scenario: "${scenario}"`)
+}
+
 /**
  *  Initialize the game with the desired scenario and then pass
  *  in the bouncer you would like to use. Then either create a
  *  new game or load one from disk.
  */
 await Berghain.initialize({
-  scenario: configuration.SCENARIO || settings.scenario,
+  scenario,
 })
-  // .withBouncer(Bouncer.intialize(configuration))
-  .withBouncer(async (initialState) => {
-    return new ParameterOptimizer(initialState)
+  .withBouncer((initialState) => {
+    return new HansBouncer(initialState, {
+      MAX_CAPACITY: 1000,
+      TOTAL_PEOPLE: 10_000,
+      TARGET_RANGE: 0,
+    })
   })
   .startNewGame()
   .catch(console.warn)
-  .finally(() => {
+  .finally(async () => {
     console.log('===============================================')
     console.log(`>>  ${configuration.MESSAGE || 'finished!'}`)
     console.log('===============================================')
