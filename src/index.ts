@@ -39,6 +39,7 @@ await Berghain.initialize({
   .withBouncer(async (gameState) => {
     const bouncer = new BanditBouncer(gameState, {
       MAX_CAPACITY: 1_000,
+      TARGET_RANGE: 4_000,
       TOTAL_PEOPLE: 10_000,
     })
     await bouncer.initializeLearningData()

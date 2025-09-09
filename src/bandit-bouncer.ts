@@ -24,17 +24,20 @@ interface DecisionRecord {
 }
 
 interface Context {
-  // Current state features
   admittedCount: number
   remainingSlots: number
-  progressRatios: number[] // progress toward each constraint [0,1]
-  urgencyScores: number[] // how urgent each constraint is
-  personAttributes: boolean[] // which attributes this person has
-  scarcityScore: number // how scarce good candidates are becoming
+  progressRatios: number[]
+  urgencyScores: number[]
+  personAttributes: boolean[]
+  scarcityScore: number
+  capacityUtilization: number
+  worstConstraintProgress: number
+  hasRareAttribute: boolean
 }
 
 interface Config {
   TOTAL_PEOPLE: number
+  TARGET_RANGE: number
   MAX_CAPACITY: number
 }
 
@@ -63,35 +66,50 @@ class Constraint<T> {
   }
 
   getProgress(): number {
-    return this.admitted / this.minRequired
+    return Math.min(1.0, this.admitted / this.minRequired)
   }
 
   getUrgency(remainingSlots: number): number {
-    const needed = Math.max(0, this.minRequired - this.admitted)
-    return remainingSlots > 0 ? needed / remainingSlots : 1.0
+    if (this.isSatisfied()) return 0
+    const needed = this.minRequired - this.admitted
+    return remainingSlots > 0 ? needed / remainingSlots : 1000
   }
 
   isSatisfied(): boolean {
     return this.admitted >= this.minRequired
   }
+
+  isRare(): boolean {
+    return this.frequency <= 0.1
+  }
 }
 
 /**
- * Linear Contextual Bandit using UCB (Upper Confidence Bound)
- * Each action (admit/reject) has a linear model predicting reward
+ * Linear Contextual Bandit using epsilon-greedy with UCB exploration
  */
 class ContextualBandit {
   private admitWeights: number[]
   private rejectWeights: number[]
-  private admitCovMatrix: number[][]
-  private rejectCovMatrix: number[][]
-  private alpha: number = 1.0 // exploration parameter
+  private admitA: number[][]
+  private rejectA: number[][]
+  private admitB: number[]
+  private rejectB: number[]
+  private epsilon: number = 0.1 // exploration rate
   private contextDim: number
+  private decisionCount: number = 0
 
   constructor(contextDimension: number, previousData: DecisionRecord[] = []) {
     this.contextDim = contextDimension
 
-    // Initialize with small random weights
+    // Initialize A matrices with small regularization
+    this.admitA = this.createRegularizedIdentity(contextDimension, 0.1)
+    this.rejectA = this.createRegularizedIdentity(contextDimension, 0.1)
+
+    // Initialize b vectors
+    this.admitB = Array(contextDimension).fill(0)
+    this.rejectB = Array(contextDimension).fill(0)
+
+    // Initialize weights with small random values
     this.admitWeights = Array(contextDimension)
       .fill(0)
       .map(() => (Math.random() - 0.5) * 0.01)
@@ -99,122 +117,141 @@ class ContextualBandit {
       .fill(0)
       .map(() => (Math.random() - 0.5) * 0.01)
 
-    // Initialize covariance matrices (A^-1 in LinUCB)
-    this.admitCovMatrix = this.createIdentityMatrix(contextDimension)
-    this.rejectCovMatrix = this.createIdentityMatrix(contextDimension)
-
-    // Learn from previous data if available
+    // Learn from previous data
     this.initializeFromHistory(previousData)
   }
 
-  private createIdentityMatrix(size: number): number[][] {
+  private createRegularizedIdentity(size: number, lambda: number): number[][] {
     return Array(size)
       .fill(0)
       .map((_, i) =>
         Array(size)
           .fill(0)
-          .map((_, j) => (i === j ? 1 : 0))
+          .map((_, j) => (i === j ? lambda : 0))
       )
   }
 
   private initializeFromHistory(decisions: DecisionRecord[]) {
-    // Replay historical decisions to warm-start the model
+    console.log(
+      `Initializing bandit with ${decisions.length} historical decisions`
+    )
     decisions.forEach((decision) => {
       const context = this.contextToVector(decision.context)
       this.updateModel(context, decision.action, decision.reward)
     })
+
+    if (decisions.length > 0) {
+      this.updateWeights()
+    }
   }
 
-  public contextToVector(context: Context): number[] {
-    // Convert context to feature vector
+  contextToVector(context: Context): number[] {
     return [
-      context.admittedCount / 1000, // normalized admitted count
-      context.remainingSlots / 1000, // normalized remaining slots
-      ...context.progressRatios, // constraint progress [0,1]
-      ...context.urgencyScores, // constraint urgencies
-      ...context.personAttributes.map((x) => (x ? 1 : 0)), // person features
-      context.scarcityScore, // scarcity metric
-      // Add interaction features
-      Math.min(...context.urgencyScores), // most urgent constraint
-      Math.max(...context.progressRatios), // best constraint progress
+      // Basic state (4 features)
+      context.admittedCount / 1000,
+      context.remainingSlots / 1000,
+      context.capacityUtilization,
+      Math.min(context.scarcityScore / 1000, 3),
+
+      // Constraint progress (dynamic size)
+      ...context.progressRatios,
+
+      // Constraint urgencies (dynamic size, capped)
+      ...context.urgencyScores.map((u) => Math.min(u / 100, 10)),
+
+      // Person attributes (dynamic size)
+      ...context.personAttributes.map((x) => (x ? 1 : 0)),
+
+      // Derived features (4 features)
+      context.worstConstraintProgress,
+      context.hasRareAttribute ? 1 : 0,
+      context.remainingSlots < 50 ? 1 : 0, // emergency mode
+      context.progressRatios.filter((p) => p < 0.5).length /
+        Math.max(1, context.progressRatios.length),
     ]
   }
 
   selectAction(context: Context): 'admit' | 'reject' {
-    const contextVec = this.contextToVector(context)
+    this.decisionCount++
 
-    // Calculate UCB scores for both actions
-    const admitScore = this.calculateUCB(
-      contextVec,
-      this.admitWeights,
-      this.admitCovMatrix
-    )
-    const rejectScore = this.calculateUCB(
-      contextVec,
-      this.rejectWeights,
-      this.rejectCovMatrix
-    )
+    // Decay epsilon over time
+    const currentEpsilon = this.epsilon * Math.exp(-this.decisionCount / 1000)
+
+    // Epsilon-greedy exploration
+    if (Math.random() < currentEpsilon) {
+      return Math.random() < 0.5 ? 'admit' : 'reject'
+    }
+
+    // Exploit: choose action with highest predicted reward
+    const contextVec = this.contextToVector(context)
+    this.updateWeights() // Ensure weights are current
+
+    const admitScore = this.predictReward(contextVec, this.admitWeights)
+    const rejectScore = this.predictReward(contextVec, this.rejectWeights)
 
     return admitScore > rejectScore ? 'admit' : 'reject'
   }
 
-  private calculateUCB(
-    context: number[],
-    weights: number[],
-    covMatrix: number[][]
-  ): number {
-    // Calculate predicted reward: θ^T * x
-    const predicted = this.dotProduct(weights, context)
-
-    // Calculate confidence radius: α * sqrt(x^T * A^-1 * x)
-    const confidence =
-      this.alpha * Math.sqrt(this.quadraticForm(context, covMatrix))
-
-    return predicted + confidence
+  private predictReward(context: number[], weights: number[]): number {
+    return this.dotProduct(context, weights)
   }
 
-  private dotProduct(a: number[], b: number[]): number {
-    return a.reduce((sum, val, i) => sum + val * b[i]!, 0)
+  private updateWeights() {
+    this.admitWeights = this.solveLinearSystem(this.admitA, this.admitB)
+    this.rejectWeights = this.solveLinearSystem(this.rejectA, this.rejectB)
   }
 
-  private quadraticForm(x: number[], matrix: number[][]): number {
-    // Calculate x^T * A^-1 * x
-    let result = 0
-    for (let i = 0; i < x.length; i++) {
-      for (let j = 0; j < x.length; j++) {
-        result += x[i]! * matrix[i]![j]! * x[j]!
+  private solveLinearSystem(A: number[][], b: number[]): number[] {
+    const n = b.length
+    const weights = Array(n).fill(0)
+
+    // Use diagonal approximation with regularization
+    for (let i = 0; i < n; i++) {
+      const diag = A[i]![i]!
+      if (Math.abs(diag) > 1e-8) {
+        weights[i] = b[i]! / diag
+
+        // Clip weights to prevent explosion
+        weights[i] = Math.max(-10, Math.min(10, weights[i]))
       }
     }
-    return Math.max(0, result) // ensure non-negative
+
+    return weights
   }
 
   updateModel(context: number[], action: 'admit' | 'reject', reward: number) {
-    const weights = action === 'admit' ? this.admitWeights : this.rejectWeights
-    const covMatrix =
-      action === 'admit' ? this.admitCovMatrix : this.rejectCovMatrix
+    const A = action === 'admit' ? this.admitA : this.rejectA
+    const b = action === 'admit' ? this.admitB : this.rejectB
 
-    // Update A = A + x * x^T (covariance matrix)
+    // Update A = A + x * x^T
     for (let i = 0; i < context.length; i++) {
       for (let j = 0; j < context.length; j++) {
-        covMatrix[i]![j] += context[i]! * context[j]!
+        A[i]![j] += context[i]! * context[j]!
       }
     }
 
-    // Update b = b + r * x (reward-weighted context sum)
-    for (let i = 0; i < weights.length; i++) {
-      weights[i] += reward * context[i]!
+    // Update b = b + r * x
+    for (let i = 0; i < context.length; i++) {
+      b[i] += reward * context[i]!
     }
+  }
 
-    // In practice, you'd solve A * θ = b for θ (weights)
-    // For simplicity, we're doing incremental updates
-    // In production, use proper matrix inversion or online learning
+  private dotProduct(a: number[], b: number[]): number {
+    let sum = 0
+    const len = Math.min(a.length, b.length)
+    for (let i = 0; i < len; i++) {
+      sum += a[i]! * b[i]!
+    }
+    return sum
   }
 
   getStats() {
     return {
       admitWeights: [...this.admitWeights],
       rejectWeights: [...this.rejectWeights],
-      alpha: this.alpha,
+      epsilon: this.epsilon,
+      contextDim: this.contextDim,
+      decisionCount: this.decisionCount,
     }
   }
 }
@@ -246,20 +283,24 @@ export class BanditBouncer<T> implements BergainBouncer {
   async initializeLearningData() {
     console.log('Initializing Contextual Bandit...')
 
-    // Load previous game data
     const previousGames = await this.getPreviousGameResults()
     const allDecisions = previousGames.flatMap((game) => game.decisions || [])
 
-    // Calculate context dimension
+    // Calculate exact context dimension
     const numConstraints = this.constraints.size
-    const contextDim = 2 + numConstraints * 2 + numConstraints + 1 + 2 // see contextToVector
+    const contextDim =
+      4 + // basic state features
+      numConstraints + // progress ratios
+      numConstraints + // urgency scores
+      numConstraints + // person attributes
+      4 // derived features
 
     this.bandit = new ContextualBandit(contextDim, allDecisions)
 
     console.log(
-      `Bandit initialized with ${allDecisions.length} historical decisions`
+      `Bandit initialized: ${allDecisions.length} decisions, ${contextDim}D context`
     )
-    console.log('Bandit stats:', this.bandit.getStats())
+    console.log('Initial stats:', this.bandit.getStats())
   }
 
   get statistics(): Statistics<T> {
@@ -278,19 +319,15 @@ export class BanditBouncer<T> implements BergainBouncer {
     if (this.remainingSlots <= 0) return false
 
     const person = nextPerson.attributes as Person<T>
-
-    // Build context
     const context = this.buildContext(person)
-
-    // Get bandit decision
     const action = this.bandit.selectAction(context)
     const shouldAdmit = action === 'admit'
 
-    // Calculate immediate reward
+    // Calculate reward after seeing the outcome
     const reward = this.calculateReward(person, shouldAdmit, context)
 
-    // Update bandit model
-    const contextVec = this.bandit['contextToVector'](context) // access private method
+    // Update bandit
+    const contextVec = this.bandit.contextToVector(context)
     this.bandit.updateModel(contextVec, action, reward)
 
     // Record decision
@@ -302,7 +339,7 @@ export class BanditBouncer<T> implements BergainBouncer {
       constraintsSatisfied: this.getConstraints().map((c) => c.isSatisfied()),
     })
 
-    // Update constraint states
+    // Update constraints
     this.constraints.forEach((constraint) => {
       constraint.update(person, shouldAdmit)
     })
@@ -313,25 +350,38 @@ export class BanditBouncer<T> implements BergainBouncer {
       this.totalRejected++
     }
 
-    console.log(
-      `Person: ${JSON.stringify(
-        person
-      )}, Action: ${action}, Reward: ${reward.toFixed(3)}`
-    )
+    // Log important decisions
+    if (this.remainingSlots < 100 || reward < -10) {
+      console.log(
+        `[${this.remainingSlots} slots] ${JSON.stringify(
+          person
+        )} -> ${action} (reward: ${reward.toFixed(2)})`
+      )
+    }
 
     return shouldAdmit
   }
 
   private buildContext(person: Person<T>): Context {
     const constraints = this.getConstraints()
+    const progressRatios = constraints.map((c) => c.getProgress())
+    const urgencyScores = constraints.map((c) =>
+      c.getUrgency(this.remainingSlots)
+    )
+    const personAttributes = constraints.map((c) => !!person[c.attribute])
 
     return {
       admittedCount: this.totalAdmitted,
       remainingSlots: this.remainingSlots,
-      progressRatios: constraints.map((c) => c.getProgress()),
-      urgencyScores: constraints.map((c) => c.getUrgency(this.remainingSlots)),
-      personAttributes: constraints.map((c) => !!person[c.attribute]),
+      progressRatios,
+      urgencyScores,
+      personAttributes,
       scarcityScore: this.calculateScarcityScore(),
+      capacityUtilization: this.totalAdmitted / this.config.MAX_CAPACITY,
+      worstConstraintProgress: Math.min(...progressRatios),
+      hasRareAttribute: constraints.some(
+        (c) => person[c.attribute] && c.isRare()
+      ),
     }
   }
 
@@ -343,30 +393,78 @@ export class BanditBouncer<T> implements BergainBouncer {
     let reward = 0
 
     if (admitted) {
-      // Positive reward for progress toward unsatisfied constraints
+      // Calculate value of this person for unsatisfied constraints
+      let personValue = 0
+      let hasUsefulAttribute = false
+
       this.constraints.forEach((constraint, attr) => {
-        if (person[attr] && !constraint.isSatisfied()) {
-          const urgency = constraint.getUrgency(this.remainingSlots)
-          reward += urgency * 2 // base reward for needed attribute
+        if (person[attr]) {
+          if (!constraint.isSatisfied()) {
+            hasUsefulAttribute = true
+            const progress = constraint.getProgress()
+            const urgency = constraint.getUrgency(this.remainingSlots)
+
+            // Reward based on how much this constraint needs progress
+            const progressValue = (1 - progress) * 15 // 0-15 points
+            const urgencyValue = Math.min(urgency * 2, 20) // 0-20 points
+
+            personValue += progressValue + urgencyValue
+
+            // Bonus for rare attributes
+            if (constraint.isRare()) {
+              personValue += 10
+            }
+          } else {
+            // Small penalty for over-satisfying constraints
+            personValue -= 2
+          }
         }
       })
 
-      // Penalty for admitting when nearly full and constraints satisfied
-      const allSatisfied = this.getConstraints().every((c) => c.isSatisfied())
-      if (allSatisfied && this.remainingSlots < 100) {
-        reward -= 0.5 // small penalty for unnecessary admissions
+      reward = personValue
+
+      // Heavy penalty for admitting useless people, especially when capacity is low
+      if (!hasUsefulAttribute) {
+        const wastefulness = Math.max(1, (1000 - this.remainingSlots) / 100)
+        reward -= wastefulness * 8
+
+        // Catastrophic penalty in endgame
+        if (this.remainingSlots < 50) {
+          reward -= 50
+        }
+      }
+
+      // Penalty for impossible situations (admitting when we can't satisfy constraints)
+      if (this.remainingSlots < 100) {
+        const unsatisfiedConstraints = this.getConstraints().filter(
+          (c) => !c.isSatisfied()
+        )
+        const totalNeeded = unsatisfiedConstraints.reduce((sum, c) => {
+          const needed = c.minRequired - c.admitted
+          return sum + needed / c.frequency
+        }, 0)
+
+        if (totalNeeded > this.remainingSlots * 3 && !hasUsefulAttribute) {
+          reward -= 25 // major penalty for making impossible situation worse
+        }
       }
     } else {
-      // Small positive reward for rejecting when no useful attributes
+      // Rejecting someone
       const hasUsefulAttribute = Array.from(this.constraints.entries()).some(
         ([attr, constraint]) => person[attr] && !constraint.isSatisfied()
       )
 
       if (!hasUsefulAttribute) {
-        reward += 0.1 // small reward for good rejection
+        reward += 2 // good rejection
       } else {
         // Penalty for rejecting useful people
-        reward -= Math.max(...context.urgencyScores) // penalty proportional to max urgency
+        const maxUrgency = Math.max(...context.urgencyScores, 0)
+        reward -= Math.min(maxUrgency * 0.5, 15)
+
+        // Larger penalty if we're running out of chances
+        if (this.remainingSlots < 200) {
+          reward -= 5
+        }
       }
     }
 
@@ -375,14 +473,14 @@ export class BanditBouncer<T> implements BergainBouncer {
 
   private calculateScarcityScore(): number {
     const constraints = this.getConstraints()
-    const totalExpectedPeople = constraints
+    const totalExpected = constraints
       .filter((c) => !c.isSatisfied())
       .reduce((sum, c) => {
         const needed = c.minRequired - c.admitted
         return sum + needed / c.frequency
       }, 0)
 
-    return totalExpectedPeople / Math.max(1, this.remainingSlots)
+    return totalExpected / Math.max(1, this.remainingSlots)
   }
 
   getProgress() {
@@ -393,6 +491,7 @@ export class BanditBouncer<T> implements BergainBouncer {
         required: constraint.minRequired,
         satisfied: constraint.isSatisfied(),
         progress: constraint.getProgress(),
+        urgency: constraint.getUrgency(this.remainingSlots),
       })),
       totalAdmitted: this.totalAdmitted,
       totalRejected: this.totalRejected,
@@ -412,6 +511,12 @@ export class BanditBouncer<T> implements BergainBouncer {
         finished: true,
         finalScore,
         decisions: this.decisions,
+        finalConstraintStatus: this.getConstraints().map((c) => ({
+          attribute: c.attribute,
+          satisfied: c.isSatisfied(),
+          progress: c.getProgress(),
+          shortfall: Math.max(0, c.minRequired - c.admitted),
+        })),
       },
     }
 
@@ -434,13 +539,15 @@ export class BanditBouncer<T> implements BergainBouncer {
   private async getPreviousGameResults(): Promise<GameResult[]> {
     try {
       const savedGameData = await Disk.getJsonDataFromFiles<GameState<any>>()
-      return savedGameData.map((game) => ({
-        gameId: game.game.gameId,
-        finalScore: game.output?.finalScore || 20000,
-        timestamp: new Date(game.timestamp || 0),
-        constraints: game.game?.constraints || [],
-        decisions: game.output?.decisions || [],
-      }))
+      return savedGameData
+        .filter((game) => game.output?.decisions) // only games with decision data
+        .map((game) => ({
+          gameId: game.game.gameId,
+          finalScore: game.output?.finalScore || 20000,
+          timestamp: new Date(game.timestamp || 0),
+          constraints: game.game?.constraints || [],
+          decisions: game.output?.decisions || [],
+        }))
     } catch (e) {
       console.warn('Failed to load previous games:', e)
       return []
