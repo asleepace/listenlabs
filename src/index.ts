@@ -1,3 +1,4 @@
+import { BanditBouncer } from './bandit-bouncer'
 import { Berghain, type ListenLabsConfig } from './berghain'
 import { getCliArgs } from './cli/get-cli-args'
 import { HansBouncer } from './hans-bouncer'
@@ -35,11 +36,10 @@ if (!scenario) {
 await Berghain.initialize({
   scenario,
 })
-  .withBouncer(async (initialState) => {
-    const bouncer = new HansBouncer(initialState, {
-      MAX_CAPACITY: 1000,
+  .withBouncer(async (gameState) => {
+    const bouncer = new BanditBouncer(gameState, {
+      MAX_CAPACITY: 1_000,
       TOTAL_PEOPLE: 10_000,
-      TARGET_RANGE: 0,
     })
     await bouncer.initializeLearningData()
     return bouncer

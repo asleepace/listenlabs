@@ -32,6 +32,7 @@ async function getPreviousGameResults(): Promise<GameResult[]> {
     .map((previous): GameResult | undefined => {
       if (!previous || !previous.output || !previous.output?.finished)
         return undefined
+      if (previous.status.status !== 'completed') return undefined
       return {
         gameId: previous.game.gameId,
         finalScore: previous.output.finalScore || 20000,
@@ -82,6 +83,8 @@ class ThompsonSampler<T> {
   private alphas: Record<keyof T, number> = {} as any
   private betas: Record<keyof T, number> = {} as any
 
+  private previousGames: GameResult[] = []
+
   constructor(attributes: (keyof T)[], previousGames: GameResult[] = []) {
     // Initialize with prior knowledge
     attributes.forEach((attr) => {
@@ -98,6 +101,8 @@ class ThompsonSampler<T> {
       console.log('No previous games found, starting with uniform priors')
       return
     }
+    // set previous games on the class
+    this.previousGames = previousGames
 
     // Find best score to use as success threshold
     const scores = previousGames.map((g) => g.finalScore)
@@ -155,15 +160,24 @@ class ThompsonSampler<T> {
     return params
   }
 
+  get previousScores(): number[] {
+    return this.previousGames.map((game) => game.finalScore)
+  }
+
   update(params: ThresholdParams<T>, finalScore: number): void {
-    const success = finalScore < 5000 // Adjust based on your target
+    // Use relative performance instead of absolute threshold
+    const scores = this.previousScores // track all historical scores
+    const percentile =
+      scores.filter((s) => s > finalScore).length / scores.length
+    const success = percentile > 0.7 // top 30% of performances
 
     Object.entries(params).forEach(([attr, value]) => {
       const key = attr as keyof T
+      const val = value as number
       if (success) {
-        this.alphas[key] += value as number
+        this.alphas[key] += val
       } else {
-        this.betas[key] += 2 - (value as number)
+        this.betas[key] += 1 - val // beta gets opposite weight
       }
     })
   }
@@ -220,6 +234,39 @@ class Constraint<T> {
 
   public isSatisfied(): boolean {
     return this.admitted >= this.minRequired
+  }
+
+  public isRare(): boolean {
+    return this.frequency <= 0.1
+  }
+
+  public getOverageMultiplier(): number {
+    if (!this.isSatisfied()) return 1.0 // No penalty if not satisfied
+
+    const overage = this.admitted - this.minRequired
+    const overageRatio = overage / this.minRequired
+
+    // Exponential penalty for overages
+    // 10% overage = 0.9x multiplier
+    // 50% overage = 0.5x multiplier
+    // 100% overage = 0.25x multiplier
+    return Math.max(0.1, 1 / (1 + overageRatio * 2))
+  }
+
+  public getAttributeValue(
+    stats: ConstraintStats,
+    learnedMultiplier: number
+  ): number {
+    const urgencyMultiplier = Math.max(0.5, 1 + stats.urgency)
+
+    if (this.isSatisfied()) {
+      // For satisfied constraints, apply overage penalty
+      const baseValue = 0.5 // Base value for satisfied constraint
+      return baseValue * this.getOverageMultiplier()
+    } else {
+      // For unsatisfied constraints, normal calculation
+      return (1 + stats.urgency * learnedMultiplier) * urgencyMultiplier
+    }
   }
 }
 
@@ -390,41 +437,20 @@ export class HansBouncer<T> implements BergainBouncer {
       console.log(`  Checking ${String(constraint.attribute)}: ${hasAttribute}`)
 
       if (!hasAttribute) return // skip for this attribute
-      if (constraint.isSatisfied()) return // skip for already filled attributes
 
       const stats = constraint.getStats(this.remainingSlots)
 
-      // This creates a smooth curve where:
-      // urgency < 0.5: multiplier = 1 (no bonus)
-      // urgency = 1.0: multiplier = 1.5
-      // urgency = 2.0: multiplier = 2.5
-      // urgency > 2.5: multiplier = 3 (capped)
-      // const urgencyMultiplier = 1 + Math.min(2, Math.max(0, stats.urgency - 0.5))
-      const urgencyMultiplier = Math.max(0.5, 1 + stats.urgency) // more aggresive
-
       // if the person has an attribute that appears < 10% of the time,
       // set this flag to true.
-      if (constraint.frequency < 0.1) {
+      if (constraint.isRare()) {
         hasRareAttribute = true
       }
 
       // Use learned parameter for urgency scaling
       const learnedMultiplier = this.thresholdParams[constraint.attribute]
 
-      const attributeValue =
-        1 + stats.urgency * learnedMultiplier * urgencyMultiplier
-      // const attributeValue = (1 + learnedMultiplier) * urgencyMultiplier
-
-      // debug component
-      console.log({
-        ...stats,
-        learnedMultiplier,
-        attributeValue,
-        urgencyMultiplier,
-      })
-
       // add score to overall value
-      value += attributeValue
+      value += constraint.getAttributeValue(stats, learnedMultiplier)
 
       // incrament attribute count
       attributeCount++
@@ -464,58 +490,55 @@ export class HansBouncer<T> implements BergainBouncer {
   }
 
   /**
-   *  Quadratic progress scaling: Threshold goes from 0.15 to 3.15+ (much steeper)
-   *  Constraint pressure factor: Multiplies threshold when math becomes impossible
-   *  Emergency modes: Dramatic threshold cuts when urgency > 1.0
-   *  End-game acceleration: Cubic scaling in final 20% of capacity
+   *  Scales the threshold by the bottlekecks found.
    */
   private getRequiredThreshold(): number {
     const progressRatio = this.totalAdmitted / this.config.MAX_CAPACITY
     const constraints = this.getConstraints()
 
-    // Calculate constraint pressure - how impossible the math is getting
-    const totalExpectedPeople = constraints
+    // Find the bottleneck constraint - the one requiring the most people
+    const bottleneckConstraint = constraints
       .filter((c) => !c.isSatisfied())
       .reduce(
-        (sum, c) => sum + c.getStats(this.remainingSlots).expectedPeople,
-        0
+        (worst, constraint) => {
+          const stats = constraint.getStats(this.remainingSlots)
+          return stats.expectedPeople > worst.expectedPeople ? stats : worst
+        },
+        { expectedPeople: 0, urgency: 0 }
       )
 
-    const constraintPressure = Math.min(
-      5,
-      totalExpectedPeople / Math.max(1, this.remainingSlots)
+    // Calculate how impossible the bottleneck is
+    const impossibilityRatio =
+      bottleneckConstraint.expectedPeople / Math.max(1, this.remainingSlots)
+
+    // Base threshold scales with impossibility
+    let baseThreshold = 0.1 + Math.min(5, impossibilityRatio * 0.5) // 0.1 to 5.6 range
+
+    // If we're ahead of pace on constraints, ease up
+    const constraintProgress = constraints.map((c) => {
+      if (c.isSatisfied()) return 1.0
+      const stats = c.getStats(this.remainingSlots)
+      const expectedAtThisPoint = c.minRequired * progressRatio
+      return c.admitted / Math.max(1, expectedAtThisPoint)
+    })
+
+    const avgProgress =
+      constraintProgress.reduce((sum, p) => sum + p, 0) /
+      constraintProgress.length
+
+    // Ease threshold if we're ahead of schedule
+    if (avgProgress > 1.2) baseThreshold *= 0.7 // 30% easier if 20% ahead
+    else if (avgProgress > 1.1) baseThreshold *= 0.85 // 15% easier if 10% ahead
+    else if (avgProgress < 0.8) baseThreshold *= 1.5 // 50% harder if 20% behind
+
+    // Emergency mode for desperate constraints
+    const maxUrgency = Math.max(
+      ...constraints.map((c) => c.getStats(this.remainingSlots).urgency)
     )
+    if (maxUrgency > 2.0) baseThreshold *= 0.2 // Panic mode
+    else if (maxUrgency > 1.5) baseThreshold *= 0.5 // Urgent mode
 
-    // Use learned parameters to adjust base threshold
-    const thresholdParamValues = Object.values(this.thresholdParams) as number[]
-    const avgLearningParam =
-      thresholdParamValues.reduce((sum, val) => sum + val, 0) /
-      thresholdParamValues.length
-
-    // More aggressive base threshold that escalates faster
-    let baseThreshold = 0.15 + progressRatio * progressRatio * 3.0 // Quadratic scaling: 0.15 → 3.15
-
-    // Adjust by learning - conservative learning means higher threshold
-    baseThreshold *= 2.5 - avgLearningParam // Range roughly 0.5x to 2.4x
-
-    // Constraint pressure multiplier - gets very aggressive when math becomes impossible
-    baseThreshold *= Math.max(0.8, constraintPressure)
-
-    // Urgency adjustments - now additive rather than multiplicative
-    const mostUrgent = constraints.reduce((max, constraint) => {
-      const stats = constraint.getStats(this.remainingSlots)
-      return stats.urgency > max ? stats.urgency : max
-    }, 0)
-
-    // Emergency escalation when urgency is extreme
-    if (mostUrgent > 2.0) baseThreshold *= 0.3 // Desperate mode
-    else if (mostUrgent > 1.0) baseThreshold *= 0.6 // Urgent mode
-    else if (mostUrgent > 0.7) baseThreshold *= 0.8 // Moderately urgent
-
-    // Final capacity pressure - accelerates near the end
-    const endGamePressure = progressRatio > 0.8 ? Math.pow(progressRatio, 3) : 0
-
-    return Math.max(0.1, baseThreshold + endGamePressure * 2.0)
+    return Math.max(0.05, baseThreshold)
   }
 
   // Helper methods
