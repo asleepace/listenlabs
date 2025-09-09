@@ -181,6 +181,7 @@ export class Berghain {
         console.warn('====================== ❌ ======================')
         prettyPrint(this.bouncer.getProgress())
         prettyPrint(this.current.status)
+        return this
       }
 
       if (this.current.status.status === 'completed') {
@@ -188,6 +189,7 @@ export class Berghain {
         prettyPrint(this.bouncer.getProgress())
         prettyPrint(this.current.status)
         await this.saveGame()
+        return this
       }
     } catch (e) {
       console.warn('====================== ⚠️ ======================')

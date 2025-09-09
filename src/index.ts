@@ -32,6 +32,6 @@ await Berghain.initialize({
   .catch(console.warn)
   .finally(() => {
     console.log('===============================================')
-    console.log(`>>  ${configuration.MESSAGE}`)
+    console.log(`>>  ${configuration.MESSAGE || 'finished!'}`)
     console.log('===============================================')
   })
