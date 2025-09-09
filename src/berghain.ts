@@ -9,7 +9,6 @@ import type {
   ScenarioAttributes,
 } from './types'
 import axios from 'axios'
-import { ParameterOptimizer } from './example/optimizer'
 
 export type ListenLabsConfig = {
   uniqueId: string
@@ -19,10 +18,8 @@ export type ListenLabsConfig = {
 
 export interface BergainBouncer {
   admit(next: GameStatusRunning<ScenarioAttributes>): boolean
-  save?: () => Promise<void>
-  load?: () => Promise<void>
   getProgress(): any
-  getOutput(): any
+  getOutput(): any | Promise<any>
 }
 
 class MissingCurrentState extends Error {
@@ -145,10 +142,10 @@ export class Berghain {
     endpoint.searchParams.set('scenario', this.config.scenario)
     const game = await this.fetch<Game>(endpoint)
 
-    // @ts-ignore
     this.current = {
+      scenario: this.config.scenario,
       game,
-    }
+    } as GameState
 
     console.log('[game] created new game:')
     prettyPrint(game)
@@ -165,6 +162,7 @@ export class Berghain {
     // create initial game state
     const initialState: GameState = {
       file: `./data/scenario-${this.config.scenario}-${game.gameId}.json`,
+      scenario: this.config.scenario,
       game,
       status,
       output: {},
@@ -173,14 +171,6 @@ export class Berghain {
     prettyPrint(initialState)
     this.current = initialState
     return this.runGameLoop()
-  }
-
-  async saveGame() {
-    if (!this.current || !this.bouncer) return
-    await saveGameFile({
-      ...this.current,
-      output: this.bouncer.getProgress(),
-    })
   }
 
   async runGameLoop(): Promise<this> {
@@ -203,12 +193,6 @@ export class Berghain {
         })
         if (this.current.status.status !== 'running') break
         console.log(this.bouncer.getProgress()) // better to console here
-        // this.saveGame().catch(() => {})
-      }
-
-      if (this.bouncer instanceof ParameterOptimizer) {
-        const output = await this.bouncer.getOutput()
-        prettyPrint(output)
       }
 
       if (this.current.status.status === 'failed') {
@@ -224,8 +208,6 @@ export class Berghain {
         prettyPrint(this.bouncer.getProgress())
         prettyPrint(this.bouncer.getOutput())
         prettyPrint(this.current.status)
-        // game data is saved in getOutput()
-        // await this.saveGame()
         return this
       }
     } catch (e) {

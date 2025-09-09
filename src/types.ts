@@ -77,11 +77,13 @@ export type GameStatus =
   | GameStatusCompleted
   | GameStatusFailed
 
-export type GameState = {
+export type GameState<T = any> = {
   file: string
   game: Game
   status: GameStatus
-  output?: any
+  scenario: '1' | '2' | '3'
+  output?: T
+  timestamp?: string
 }
 
 export type ScenarioAttributes =

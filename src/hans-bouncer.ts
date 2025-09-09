@@ -1,90 +1,46 @@
 import type { BergainBouncer } from './berghain'
-import type { GameState, GameStatusRunning, ScenarioAttributes } from './types'
+import type {
+  GameConstraints,
+  GameState,
+  GameStatusRunning,
+  ScenarioAttributes,
+} from './types'
+import { Disk } from './utils/disk'
 
-namespace LearningData {
-  export async function saveData(state: GameState) {
-    const file = Bun.file(state.file)
-    const json = JSON.stringify(state, null, 2)
-    await file.write(json)
-  }
+interface GameResult {
+  gameId: string
+  finalScore: number
+  thresholdParams: any
+  timestamp: Date
+  constraints: any[]
+}
 
-  export async function getSavedData(filePath: string): Promise<GameState> {
-    const file = Bun.file(filePath)
-    const data: GameState = await file.json()
-    if (!data) throw new Error(`Failed to load game file: ${filePath}`)
-    return data
-  }
+async function getPreviousGameResults(): Promise<GameResult[]> {
+  const savedGameData = await Disk.getJsonDataFromFiles<
+    GameState<{
+      finished: boolean
+      finalScore: number
+      thresholdParams: ThresholdParams<any>
+      timestamp: string
+      constraints: GameConstraints
+    }>
+  >()
 
-  export interface GameResult {
-    gameId: string
-    finalScore: number
-    thresholdParams: any
-    timestamp: Date
-    constraints: any[]
-  }
+  console.log({ savedGameData })
 
-  export async function getPreviousGameData(): Promise<GameResult[]> {
-    try {
-      const dataDir = './data/'
-      const dirExists = await Bun.file(dataDir).exists()
-
-      if (!dirExists) {
-        console.log('No data directory found, starting fresh')
-        return []
+  return savedGameData
+    .map((previous): GameResult | undefined => {
+      if (!previous || !previous.output || !previous.output?.finished)
+        return undefined
+      return {
+        gameId: previous.game.gameId,
+        finalScore: previous.output.finalScore || 20000,
+        thresholdParams: previous.output.thresholdParams || {},
+        timestamp: new Date(previous.timestamp || 0),
+        constraints: previous.game?.constraints || [],
       }
-
-      // Get all JSON files in the data directory
-      const files = await Array.fromAsync(
-        new Bun.Glob('*.json').scan({ cwd: dataDir })
-      )
-
-      const previousGames: GameResult[] = []
-
-      for (const filename of files) {
-        try {
-          const filePath = `${dataDir}${filename}`
-          const gameData = await getSavedData(filePath)
-
-          // Extract game results if the game is finished
-          if (gameData.output?.finished) {
-            previousGames.push({
-              gameId: gameData.game?.gameId || filename,
-              finalScore: gameData.output.finalScore || 20000,
-              thresholdParams: gameData.output.thresholdParams || {},
-              timestamp: new Date(gameData.output || 0),
-              constraints: gameData.game?.constraints || [],
-            })
-          }
-        } catch (error) {
-          console.warn(`Failed to load game data from ${filename}:`, error)
-        }
-      }
-
-      // Sort by timestamp (newest first)
-      previousGames.sort(
-        (a, b) => b.timestamp.getTime() - a.timestamp.getTime()
-      )
-
-      console.log(
-        `Loaded ${previousGames.length} previous games for Thompson Sampling`
-      )
-      return previousGames
-    } catch (error) {
-      console.warn('Error loading previous game data:', error)
-      return []
-    }
-  }
-
-  export async function saveGameResult(state: GameState, bouncerOutput: any) {
-    // Enhanced save that includes bouncer results for Thompson Sampling
-    const enhancedState = {
-      ...state,
-      bouncer: bouncerOutput,
-      timestamp: new Date().toISOString(),
-    }
-
-    await saveData(enhancedState)
-  }
+    })
+    .filter((data): data is GameResult => data !== undefined)
 }
 
 /**
@@ -126,10 +82,7 @@ class ThompsonSampler<T> {
   private alphas: Record<keyof T, number> = {} as any
   private betas: Record<keyof T, number> = {} as any
 
-  constructor(
-    attributes: (keyof T)[],
-    previousGames: LearningData.GameResult[] = []
-  ) {
+  constructor(attributes: (keyof T)[], previousGames: GameResult[] = []) {
     // Initialize with prior knowledge
     attributes.forEach((attr) => {
       this.alphas[attr] = 1
@@ -140,7 +93,7 @@ class ThompsonSampler<T> {
     this.initializeFromHistory(previousGames)
   }
 
-  private initializeFromHistory(previousGames: LearningData.GameResult[]) {
+  private initializeFromHistory(previousGames: GameResult[]) {
     if (previousGames.length === 0) {
       console.log('No previous games found, starting with uniform priors')
       return
@@ -175,10 +128,10 @@ class ThompsonSampler<T> {
 
           if (wasSuccess) {
             // Reward successful parameter values
-            this.alphas[key] += paramValue * 0.5 // Weight successful params
+            this.alphas[key] += paramValue * 0.35 // Weight successful params
           } else {
             // Penalize unsuccessful parameter values
-            this.betas[key] += (2 - paramValue) * 0.3
+            this.betas[key] += (2 - paramValue) * 0.25
           }
         }
       })
@@ -284,15 +237,30 @@ export class HansBouncer<T> implements BergainBouncer {
     this.initializeConstraints()
   }
 
+  initializeConstraints() {
+    for (const gameConstraint of this.state.game.constraints) {
+      const attribute = gameConstraint.attribute as keyof T
+      const constraint = new Constraint(
+        attribute,
+        gameConstraint.minCount,
+        this.getFrequency(attribute),
+        this.getCorrelations(attribute),
+        this.config
+      )
+      this.set(constraint)
+    }
+  }
+
   async initializeLearningData() {
+    console.log('#'.repeat(65))
     // Load previous game data for Thompson Sampling
-    const previousGames = await LearningData.getPreviousGameData()
+    const previousGames = await getPreviousGameResults()
+    console.log({ previousGames })
     this.sampler = new ThompsonSampler(
       Array.from(this.constraints.keys()),
       previousGames
     )
     this.thresholdParams = this.sampler.sample()
-
     console.log(
       'Thompson Sampling initialized with parameters:',
       this.thresholdParams
@@ -364,18 +332,31 @@ export class HansBouncer<T> implements BergainBouncer {
     const finalScore = this.totalRejected
     this.sampler.update(this.thresholdParams, finalScore)
 
-    const gameOutput = {
-      ...this.getProgress(),
-      finished: true,
-      finalScore,
-      thresholdParams: this.thresholdParams,
+    type GameProgress = ReturnType<typeof this.getProgress>
+
+    const gameData: GameState<
+      GameProgress & {
+        finished: boolean
+        finalScore: number
+        thresholdParams: ThresholdParams<T>
+      }
+    > = {
+      ...this.state,
+      timestamp: new Date().toISOString(),
+      output: {
+        ...this.getProgress(),
+        finished: true,
+        finalScore,
+        thresholdParams: this.thresholdParams,
+        // constraints: this.getConstraints(),
+      },
     }
 
-    LearningData.saveGameResult(this.state, gameOutput).catch((e) => {
-      console.warn('[hans-bouncer] failed to saved game data:', e)
+    Disk.saveGameState(gameData).catch((e) => {
+      console.warn('[has-bouncer] failed to save game file:', e)
     })
 
-    return gameOutput
+    return gameData
   }
 
   // Core decision logic
@@ -504,19 +485,5 @@ export class HansBouncer<T> implements BergainBouncer {
 
   getCorrelations(attribute: keyof T): Correlations<T> {
     return this.statistics.correlations[attribute]! as any
-  }
-
-  initializeConstraints() {
-    for (const gameConstraint of this.state.game.constraints) {
-      const attribute = gameConstraint.attribute as keyof T
-      const constraint = new Constraint(
-        attribute,
-        gameConstraint.minCount,
-        this.getFrequency(attribute),
-        this.getCorrelations(attribute),
-        this.config
-      )
-      this.set(constraint)
-    }
   }
 }

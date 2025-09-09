@@ -1,9 +1,8 @@
-import { Bouncer } from './bouncer'
 import { Berghain, type ListenLabsConfig } from './berghain'
 import { getCliArgs } from './cli/get-cli-args'
-import { LearningDataManager } from './example/learning-data-manager'
-import { ParameterOptimizer } from './parameter-optimizer'
 import { HansBouncer } from './hans-bouncer'
+
+console.log('+'.repeat(64))
 
 /**
  *  Configure listen labs default settings.
@@ -36,12 +35,14 @@ if (!scenario) {
 await Berghain.initialize({
   scenario,
 })
-  .withBouncer((initialState) => {
-    return new HansBouncer(initialState, {
+  .withBouncer(async (initialState) => {
+    const bouncer = new HansBouncer(initialState, {
       MAX_CAPACITY: 1000,
       TOTAL_PEOPLE: 10_000,
       TARGET_RANGE: 0,
     })
+    await bouncer.initializeLearningData()
+    return bouncer
   })
   .startNewGame()
   .catch(console.warn)
