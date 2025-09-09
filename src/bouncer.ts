@@ -39,30 +39,30 @@ const FEATURE_FLAGS = {
 }
 
 const TUNED_CONFIG: Partial<GameConfig> = {
-  // Most impactful
-  BASE_THRESHOLD: 0.42, // Lower = More lenient
-  TARGET_RATE: 0.25, // Raise from 0.19 to match 1000/4000 = 25%
-  TARGET_RANGE: 4000, // Back to 4000 from 3000/3050
-  MIN_THRESHOLD: 0.2, // Lower floor
-  MAX_THRESHOLD: 0.8, // Keep reasonable ceiling
-  URGENCY_MODIFIER: 3.0,
-  MULTI_ATTRIBUTE_BONUS: 1.2,
+  // Core admission parameters - more lenient initially
+  BASE_THRESHOLD: 0.38, // Lower from 0.42
+  TARGET_RATE: 0.22, // Lower from 0.25
+  MIN_THRESHOLD: 0.15, // Lower floor
+  MAX_THRESHOLD: 0.85, // Higher ceiling for endgame
 
-  // Critical attributes
-  CRITICAL_REQUIRED_THRESHOLD: 20,
-  CRITICAL_IN_LINE_RATIO: 0.8,
-  CRITICAL_CAPACITY_RATIO: 0.9,
+  // Enhanced urgency and bonuses
+  URGENCY_MODIFIER: 3.5, // Higher from 3.0
+  MULTI_ATTRIBUTE_BONUS: 1.4, // Higher from 1.2
 
-  // Less important with simplified approach
-  CORRELATION_BONUS: 0.2,
-  NEGATIVE_CORRELATION_BONUS: 0.5,
-  NEGATIVE_CORRELATION_THRESHOLD: -0.5,
-  RARE_PERSON_BONUS: 0.4,
+  // More aggressive critical detection
+  CRITICAL_REQUIRED_THRESHOLD: 15, // Lower from 20
+  CRITICAL_IN_LINE_RATIO: 0.75, // Lower from 0.8
+  CRITICAL_CAPACITY_RATIO: 0.85, // Lower from 0.9
 
-  // Constants
+  // Enhanced correlation handling
+  CORRELATION_BONUS: 0.3, // Higher from 0.2
+  NEGATIVE_CORRELATION_BONUS: 0.7, // Higher from 0.5
+  RARE_PERSON_BONUS: 0.6, // Higher from 0.4
+
+  // Constants remain
   MAX_CAPACITY: 1000,
   TOTAL_PEOPLE: 10000,
-  MIN_RAW_SCORES: 1,
+  TARGET_RANGE: 4000,
 }
 
 export class Bouncer<
@@ -181,50 +181,47 @@ export class Bouncer<
   }
 
   private getCriticalAttributes(): CriticalAttributes {
-    if (this.admittedCount < 50) return {}
+    // Start earlier
+    if (this.admittedCount < 25) return {}
 
-    const peopleInLineLeft = this.estimatedPeopleInLineLeft
-    const totalSpotsLeft = this.totalSpotsLeft
     const incompleteConstraints = this.metrics.getIncompleteConstraints()
-
-    this.criticalAttributes = {}
+    const criticalAttributes: CriticalAttributes = {}
 
     incompleteConstraints.forEach((constraint) => {
       const attr = constraint.attribute
       const needed = constraint.needed
       const frequency = this.metrics.frequencies[attr]!
-      const estimatedRemaining = peopleInLineLeft * frequency
+      const estimatedRemaining = this.estimatedPeopleInLineLeft * frequency
 
-      // MORE AGGRESSIVE CRITICAL DETECTION
-      const urgencyRatio = needed / Math.max(1, totalSpotsLeft)
+      // More aggressive ratios
+      const urgencyRatio = needed / Math.max(1, this.totalSpotsLeft)
       const scarcityRatio = needed / Math.max(1, estimatedRemaining)
 
-      // Critical if we need more than 15% of remaining spots for this attribute
-      const isCapacityCritical = urgencyRatio > 0.15
+      // Lower thresholds for critical detection
+      const isCapacityCritical = urgencyRatio > 0.12
+      const isScarcityCritical = scarcityRatio > 0.85
+      const isRareAndBehind =
+        frequency < 0.15 && this.metrics.getProgress(attr) < 0.7
 
-      // Critical if we need more than 90% of expected remaining people with this attribute
-      const isScarcityCritical = scarcityRatio > 0.9
-
-      // Risk assessment critical
-      const isRiskCritical =
-        this.riskAssessment.criticalAttributes.includes(attr)
-
-      if (isCapacityCritical || isScarcityCritical || isRiskCritical) {
-        // MUCH MORE AGGRESSIVE MODIFIER
-        const modifier = Math.max(
-          2,
-          Math.min(10, urgencyRatio * 10 + scarcityRatio * 5)
+      if (isCapacityCritical || isScarcityCritical || isRareAndBehind) {
+        // Higher multipliers for more aggressive admission
+        const baseMultiplier = Math.max(
+          3, // Higher minimum
+          Math.min(12, urgencyRatio * 12 + scarcityRatio * 6) // Higher scaling
         )
 
-        this.criticalAttributes[attr] = {
+        // Extra boost for very rare attributes
+        const rareBoost = frequency < 0.1 ? 1.5 : 1.0
+
+        criticalAttributes[attr] = {
           needed,
-          required: isCapacityCritical, // Only require if capacity critical
-          modifier,
+          required: isCapacityCritical,
+          modifier: baseMultiplier * rareBoost,
         }
       }
     })
 
-    return this.criticalAttributes
+    return criticalAttributes
   }
 
   private updateCounts(
@@ -311,7 +308,8 @@ export class Bouncer<
     if (peoplePerNeed < 5 && spotsLeft < 100) {
       // Less than 5 people per needed quota
       const usefulAttributes = this.metrics.getUsefulAttributes(
-        attributes as Attributes
+        attributes as Attributes,
+        this.isEndgame()
       )
       return usefulAttributes.length > 0
     }
@@ -351,7 +349,7 @@ export class Bouncer<
         admittedCount: this.admittedCount,
         metrics: this.metrics,
       },
-      Score.PRESETS.CONSERVATIVE
+      Score.PRESETS.BALANCED
     )
 
     const endgameScore =
@@ -431,8 +429,20 @@ export class Bouncer<
   }
 
   private isEndgame(): boolean {
-    const spotsLeft = this.totalSpotsLeft
-    return spotsLeft > 0 && spotsLeft <= 50
+    const incomplete = this.metrics.getIncompleteConstraints()
+    const totalNeeded = incomplete.reduce((sum, q) => sum + q.needed, 0)
+
+    // Check for rare attributes that need early endgame
+    const rareIncomplete = incomplete.filter(
+      (c) => this.metrics.getFrequency(c.attribute) < 0.15
+    )
+
+    // Multiple endgame triggers
+    return (
+      this.totalSpotsLeft <= 80 || // Earlier general endgame
+      (rareIncomplete.length > 0 && this.totalSpotsLeft <= 120) || // Rare attribute protection
+      totalNeeded >= this.totalSpotsLeft * 0.7 // Mathematical pressure
+    )
   }
 
   getDebugInfo(): any {

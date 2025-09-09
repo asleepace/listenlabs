@@ -1,6 +1,8 @@
 import { Bouncer } from './bouncer'
 import { Berghain, type ListenLabsConfig } from './core/berghain'
 import { getCliArgs } from './cli/get-cli-args'
+import { OptimizedBouncer } from './example/bouncer-optmized'
+import { ParameterOptimizer } from './core/optimizer'
 
 /**
  *  Configure listen labs default settings.
@@ -27,7 +29,10 @@ console.log('[game] settings:', configuration)
 await Berghain.initialize({
   scenario: configuration.SCENARIO || settings.scenario,
 })
-  .withBouncer(Bouncer.intialize(configuration))
+  // .withBouncer(Bouncer.intialize(configuration))
+  .withBouncer(async (initialState) => {
+    return new ParameterOptimizer(initialState)
+  })
   .startNewGame()
   .catch(console.warn)
   .finally(() => {

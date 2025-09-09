@@ -63,9 +63,7 @@ export class DeflationPIDController {
     const pidOutput = proportional + integral + derivative
 
     // Convert PID output to deflation factor
-    // When pidOutput is positive (over target), deflation < 1
-    // When pidOutput is negative (under target), deflation > 1
-    const deflationFactor = 1.0 - pidOutput * 0.2 // Scaling factor
+    const deflationFactor = Math.max(0.1, 1.0 - Math.abs(pidOutput) * 0.2)
 
     // Update state for next iteration
     this.lastError = error

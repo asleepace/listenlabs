@@ -1,6 +1,6 @@
 {
   "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "data"],
+  "exclude": ["node_modules", "data", "learning-data"],
   "compilerOptions": {
     // Environment setup & latest features
     "lib": ["ESNext"],

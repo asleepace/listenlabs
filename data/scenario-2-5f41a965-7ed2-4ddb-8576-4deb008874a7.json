@@ -1,7 +1,7 @@
 {
-  "file": "./data/scenario-2-e64573d0-f676-412b-92b7-3c600744a164.json",
+  "file": "./data/scenario-2-5f41a965-7ed2-4ddb-8576-4deb008874a7.json",
   "game": {
-    "gameId": "e64573d0-f676-412b-92b7-3c600744a164",
+    "gameId": "5f41a965-7ed2-4ddb-8576-4deb008874a7",
     "constraints": [
       {
         "attribute": "techno_lover",
@@ -58,53 +58,55 @@
   "status": {
     "status": "running",
     "admittedCount": 999,
-    "rejectedCount": 3993,
+    "rejectedCount": 1778,
     "nextPerson": {
-      "personIndex": 4992,
+      "personIndex": 2777,
       "attributes": {
         "techno_lover": true,
         "well_connected": false,
-        "creative": true,
-        "berlin_local": true
+        "creative": false,
+        "berlin_local": false
       }
     }
   },
   "output": {
     "info": {
-      "natural_progress": 1,
-      "target_progress": 1,
-      "actual_progress": 0.9753,
-      "progress_gap": 0.0247,
-      "progress_adjustment": 0.0222,
-      "rate_adjustment": -0.02,
-      "threshold": 0.47,
-      "regular_score": 0.07,
+      "natural_progress": 0.7931,
+      "target_quota_progress": 0.8725,
+      "actual_quota_progress": 0.7976,
+      "progress_gap": 0.0749,
+      "progress_adjustment": 0.0663,
+      "rate_adjustment": 0.02,
+      "threshold": 0.37,
+      "regular_score": 0.58,
       "endgame_score": 0,
-      "raw_score": 0.07,
-      "deflation_factor": 1.15,
-      "last_score": 0.08,
-      "is_endgame": false,
-      "critical_attrs": 2,
+      "raw_score": 0.58,
+      "deflation_factor": 0.61,
+      "last_score": 0.35,
+      "is_endgame": true,
+      "critical_attrs": 3,
       "has_critical": false,
       "has_some_critical": true,
       "emergency_eligible": false,
-      "metrics_efficiency": 0.98,
+      "metrics_efficiency": 0.8,
       "metrics_risk": 0.68,
       "metrics_balance": true,
       "recommendations": [
-        "Prioritize creative (93% complete)"
+        "Prioritize creative (46% complete)"
       ]
     },
     "critical": [
       "⚠️:techno_lover",
-      "⚠️:creative"
+      "⚠️:creative",
+      "⚠️:berlin_local"
     ],
     "config": {
-      "BASE_THRESHOLD": 0.51,
-      "MIN_THRESHOLD": 0.3,
-      "MAX_THRESHOLD": 0.9,
+      "BASE_THRESHOLD": 0.42,
+      "MIN_THRESHOLD": 0.2,
+      "MAX_THRESHOLD": 0.8,
       "THRESHOLD_RAMP": 0.3,
-      "TARGET_RANGE": 3050,
+      "TARGET_RATE": 0.25,
+      "TARGET_RANGE": 3500,
       "URGENCY_MODIFIER": 3,
       "CORRELATION_BONUS": 0.2,
       "NEGATIVE_CORRELATION_BONUS": 0.5,
@@ -122,52 +124,84 @@
     },
     "quotas": [
       {
+        "attribute": "berlin_local",
+        "needed": 81
+      },
+      {
         "attribute": "techno_lover",
-        "needed": 20
+        "needed": 102
       },
       {
         "attribute": "creative",
-        "needed": 20
+        "needed": 163
       }
     ],
-    "admissionRate": 0.20012019230769232,
+    "admissionRate": 0.359740727403673,
     "admitted": 999,
-    "rejected": 3993,
-    "natural_progress": 1,
-    "target_progress": 1,
-    "actual_progress": 0.9753,
-    "progress_gap": 0.0247,
-    "progress_adjustment": 0.0222,
-    "rate_adjustment": -0.02,
-    "threshold": 0.47,
-    "regular_score": 0.07,
+    "rejected": 1778,
+    "natural_progress": 0.7931,
+    "target_quota_progress": 0.8725,
+    "actual_quota_progress": 0.7976,
+    "progress_gap": 0.0749,
+    "progress_adjustment": 0.0663,
+    "rate_adjustment": 0.02,
+    "threshold": 0.37,
+    "regular_score": 0.58,
     "endgame_score": 0,
-    "raw_score": 0.07,
-    "deflation_factor": 1.15,
-    "last_score": 0.08,
-    "is_endgame": false,
-    "critical_attrs": 2,
+    "raw_score": 0.58,
+    "deflation_factor": 0.61,
+    "last_score": 0.35,
+    "is_endgame": true,
+    "critical_attrs": 3,
     "has_critical": false,
     "has_some_critical": true,
     "emergency_eligible": false,
+    "rate_analysis": {
+      "currentRate": 0.3597,
+      "targetRate": 0.25,
+      "deviation": 0.1097,
+      "status": "too_high",
+      "recommendation": "Consider raising thresholds or reducing score bonuses"
+    },
     "critical_progress": [
       {
         "attribute": "techno_lover",
-        "needed": 21,
+        "needed": 103,
         "modifier": 10,
         "frequency": 0.6265000000000001,
-        "estimated_remaining": 3137.512
+        "estimated_remaining": 4525.209500000001
       },
       {
         "attribute": "creative",
-        "needed": 20,
+        "needed": 163,
         "modifier": 10,
         "frequency": 0.06227,
-        "estimated_remaining": 311.84816
+        "estimated_remaining": 449.77621
+      },
+      {
+        "attribute": "berlin_local",
+        "needed": 81,
+        "modifier": 10,
+        "frequency": 0.398,
+        "estimated_remaining": 2874.7540000000004
       }
     ],
     "spots_left": 1,
-    "people_left": 5008,
-    "incomplete_quotas": 2
+    "people_left": 7223,
+    "incomplete_quotas": 3,
+    "rejection_analysis": {
+      "current_rejections": 1778,
+      "target_rejections": 3000,
+      "rejection_gap": -1222,
+      "on_track": false
+    },
+    "pid_debug": {
+      "error": 0.1097,
+      "integralError": -5,
+      "lastError": -0.1095,
+      "proportionalTerm": 0.439,
+      "integralTerm": -1.5,
+      "derivativeTerm": 0.0877
+    }
   }
 }

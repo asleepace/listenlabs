@@ -109,6 +109,12 @@ export class Metrics {
     )
   }
 
+  getFrequency(attr: keyof ScenarioAttributes) {
+    if (!(attr in this.frequencies))
+      throw new Error('Missing frequency:' + attr)
+    return this.frequencies[attr]!
+  }
+
   // Pre-calculate useful statistics
   private preCalculateAttributeStats(): Map<Keys, AttributeStats> {
     const stats = new Map<Keys, AttributeStats>()
@@ -287,13 +293,33 @@ export class Metrics {
     return this._correlations[attr1]?.[attr2] ?? 0
   }
 
+  getOverfillThreshold(frequency: number): number {
+    if (frequency < 0.05) return 0.95  // Very rare - allow near completion
+    if (frequency < 0.1) return 0.92   // Rare - allow high completion
+    
+    // Your existing logic for common attributes
+    const baseThreshold = 0.78
+    const frequencyMultiplier = 0.4
+    const minThreshold = 0.85
+    const maxThreshold = 0.98
+    
+    return Math.max(
+      minThreshold,
+      Math.min(maxThreshold, baseThreshold + frequency * frequencyMultiplier)
+    )
+  }
+
   // Utility methods for person evaluation
   getUsefulAttributes(
-    personAttributes: Partial<ScenarioAttributes>
+    personAttributes: Partial<ScenarioAttributes>,
+    isEndGame: boolean
   ): (keyof ScenarioAttributes)[] {
     return Object.entries(personAttributes)
       .filter(([attr, hasAttr]) => {
         if (!hasAttr) return false
+        // ignore overfills in the endgame
+        if (isEndGame) return !this.isCompleted(attr)
+
         if (this.isCompleted(attr)) return false
 
         const progress = this.getProgress(attr)
@@ -301,17 +327,18 @@ export class Metrics {
         // Dynamic overfill threshold based on rarity
         // const overfillThreshold = Math.min(0.95, 0.85 + frequency * 0.2)
         // More aggressive separation
-        const overfillThreshold = Math.max(
-          0.88,
-          Math.min(0.96, 0.82 + frequency * 0.3)
-        )
+        const overfillThreshold = this.getOverfillThreshold(frequency)
         return progress < overfillThreshold
       })
       .map(([attr, _]) => attr as keyof ScenarioAttributes)
   }
 
-  countUsefulAttributes(personAttributes: Partial<ScenarioAttributes>): number {
-    return this.getUsefulAttributes(personAttributes).length
+  countUsefulAttributes(
+    personAttributes: Partial<ScenarioAttributes>,
+    isEndGame: boolean
+  ): number {
+    // ignore overfill in endgame
+    return this.getUsefulAttributes(personAttributes, isEndGame).length
   }
 
   hasAttribute(

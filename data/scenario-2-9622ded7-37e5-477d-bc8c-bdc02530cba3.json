@@ -1,7 +1,7 @@
 {
-  "file": "./data/scenario-2-da42252b-f292-43e1-bb94-75ddb500a492.json",
+  "file": "./data/scenario-2-9622ded7-37e5-477d-bc8c-bdc02530cba3.json",
   "game": {
-    "gameId": "da42252b-f292-43e1-bb94-75ddb500a492",
+    "gameId": "9622ded7-37e5-477d-bc8c-bdc02530cba3",
     "constraints": [
       {
         "attribute": "techno_lover",
@@ -58,9 +58,9 @@
   "status": {
     "status": "running",
     "admittedCount": 999,
-    "rejectedCount": 5627,
+    "rejectedCount": 1179,
     "nextPerson": {
-      "personIndex": 6626,
+      "personIndex": 2178,
       "attributes": {
         "techno_lover": true,
         "well_connected": false,
@@ -70,60 +70,47 @@
     }
   },
   "output": {
-    "info": {
-      "natural_progress": 1,
-      "target_progress": 1,
-      "actual_progress": 0.9996,
-      "progress_gap": 0.0004,
-      "threshold": 0.5496,
-      "last_score": 0.35,
-      "useful_attrs": 1,
-      "avg_score": 0.71,
-      "metrics_summary": {
-        "totalConstraints": 4,
-        "completedConstraints": 3,
-        "totalProgress": 1,
-        "allMet": false,
-        "mostNeeded": [
-          "techno_lover"
-        ],
-        "leastProgress": [
-          "techno_lover"
-        ],
-        "efficiency": 1,
-        "riskScore": 0.68,
-        "isBalanced": true
+    "quotas": [
+      {
+        "attribute": "creative",
+        "needed": 144,
+        "current": 156,
+        "progress": 0.52,
+        "priority": 1156
       },
-      "metrics_efficiency": 1,
-      "metrics_risk": 0.68,
-      "metrics_balance": true,
-      "recommendations": []
+      {
+        "attribute": "berlin_local",
+        "needed": 160,
+        "current": 590,
+        "progress": 0.79,
+        "priority": 226
+      },
+      {
+        "attribute": "techno_lover",
+        "needed": 55,
+        "current": 595,
+        "progress": 0.92,
+        "priority": 62
+      }
+    ],
+    "debug": {
+      "score": {
+        "baseValue": 0.09,
+        "rarityMultiplier": 1,
+        "urgencyMultiplier": 1,
+        "correlationBonus": 0,
+        "finalScore": 0.09,
+        "reasoning": [
+          "techno_lover: priority=62, needed=56"
+        ]
+      },
+      "threshold": 0.05,
+      "currentRate": 0.458,
+      "rateError": 0.258,
+      "spotsLeft": 2,
+      "decision": "ADMIT"
     },
-    "critical": [],
-    "config": {
-      "BASE_THRESHOLD": 0.55,
-      "MIN_THRESHOLD": 0.35,
-      "MAX_THRESHOLD": 0.8,
-      "THRESHOLD_RAMP": 0.3,
-      "TARGET_RANGE": 5000,
-      "URGENCY_MODIFIER": 2.5,
-      "CORRELATION_BONUS": 0.3,
-      "NEGATIVE_CORRELATION_BONUS": 0.7,
-      "NEGATIVE_CORRELATION_THRESHOLD": -0.5,
-      "MULTI_ATTRIBUTE_BONUS": 0.7,
-      "RARE_PERSON_BONUS": 0.6,
-      "MAX_CAPACITY": 1000,
-      "TOTAL_PEOPLE": 10000,
-      "CRITICAL_REQUIRED_THRESHOLD": 8,
-      "CRITICAL_IN_LINE_RATIO": 0.75,
-      "CRITICAL_CAPACITY_RATIO": 0.75,
-      "MIN_RAW_SCORES": 5,
-      "MESSAGE": "Base Configuration - Balanced Strategy",
-      "SCENARIO": "2"
-    },
-    "quotas": [],
-    "admissionRate": 0.15076969514035618,
-    "admitted": 999,
-    "rejected": 5627
+    "currentThreshold": 0.05,
+    "targetRate": 0.2
   }
 }

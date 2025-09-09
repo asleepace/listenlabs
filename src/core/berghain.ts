@@ -1,3 +1,8 @@
+import https from 'https'
+import http from 'http'
+
+import { PortfolioBouncer } from '../example/smart-bouncer'
+
 import type {
   GameStatus,
   Game,
@@ -5,6 +10,7 @@ import type {
   GameStatusRunning,
   ScenarioAttributes,
 } from '../types'
+import axios from 'axios'
 
 export type ListenLabsConfig = {
   uniqueId: string
@@ -44,6 +50,23 @@ const DEFAULT_CONFIG: ListenLabsConfig = {
   scenario: '3',
 }
 
+const httpsAgent = new https.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 30_000,
+  maxSockets: 1, // Single persistent connection
+  maxFreeSockets: 1,
+  timeout: 60_000,
+  secureProtocol: 'TLSv1_2_method', // Avoid SSL negotiation overhead
+})
+
+const httpAgent = new http.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 30000,
+  maxSockets: 1,
+  maxFreeSockets: 1,
+  timeout: 60000,
+})
+
 // debugging
 
 export function prettyPrint(obj: any) {
@@ -76,7 +99,9 @@ export class Berghain {
 
   // instance variables
 
-  private createBouncer?: (initialState: GameState) => BergainBouncer
+  private createBouncer?: (
+    initialState: GameState
+  ) => BergainBouncer | Promise<BergainBouncer>
   private bouncer?: BergainBouncer
   private current?: GameState
   private maxRetries = 1
@@ -102,7 +127,9 @@ export class Berghain {
   /**
    * Set the bouncer strategy to be used in the game.
    */
-  withBouncer(initializer: (state: GameState) => BergainBouncer): this {
+  withBouncer(
+    initializer: (state: GameState) => BergainBouncer | Promise<BergainBouncer>
+  ): this {
     this.createBouncer = initializer
     return this
   }
@@ -158,7 +185,7 @@ export class Berghain {
   async runGameLoop(): Promise<this> {
     if (!this.current) throw new MissingCurrentState()
     if (!this.createBouncer) throw new MissingBouncer()
-    this.bouncer = this.createBouncer(this.current)
+    this.bouncer = await this.createBouncer(this.current)
 
     // reset the max retries on each run
     this.maxRetries = 10
@@ -179,16 +206,17 @@ export class Berghain {
 
       if (this.current.status.status === 'failed') {
         console.warn('====================== ❌ ======================')
-        prettyPrint(this.bouncer.getProgress())
+        prettyPrint(this.bouncer.getOutput())
         prettyPrint(this.current.status)
         return this
       }
 
       if (this.current.status.status === 'completed') {
         console.warn('====================== ✅ ======================')
-        prettyPrint(this.bouncer.getProgress())
+        prettyPrint(this.bouncer.getOutput())
         prettyPrint(this.current.status)
-        await this.saveGame()
+        // game data is saved in getOutput()
+        // await this.saveGame()
         return this
       }
     } catch (e) {
@@ -216,7 +244,7 @@ export class Berghain {
       endpoint.searchParams.set('personIndex', String(props.index))
       endpoint.searchParams.set('accept', props.accept ? 'true' : 'false')
       // console.log(endpoint.href)
-      return await this.fetch<GameStatus>(endpoint)
+      return (await axios.get<GameStatus>(endpoint.href)).data
     } catch (e) {
       if (--this.maxRetries < 0) throw e
       console.warn(e)
@@ -228,15 +256,22 @@ export class Berghain {
    * Simple fetch wrapper for fetching JSON, does not handle retries.
    */
   private async fetch<T>(url: URL): Promise<T> {
-    const response = await fetch(url, {
+    const resp = await axios.get(url.href, {
       headers: {
-        'content-type': 'application/json',
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Connection: 'keep-alive',
       },
     })
-    if (!response.ok) {
-      throw new NetworkRequestFailed(response, url)
+
+    resp.data
+    if (resp.status >= 300 || resp.status < 200) {
+      throw new NetworkRequestFailed(
+        { status: resp.status, statusText: resp.statusText } as any,
+        url
+      )
     } else {
-      return (await response.json()) as T
+      return resp.data as T
     }
   }
 }

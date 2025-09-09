@@ -1,3 +1,5 @@
+import type { ScorePresets } from '../math/score-calculation'
+
 /**
  * Percentage value as a decimal (e.g. 0.5 = 50%)
  */
@@ -155,6 +157,12 @@ export interface GameConfig {
   MIN_RAW_SCORES: number
 
   /**
+   * The specific scoring preset to use when calculating scores.
+   * @default OPTIMIZED
+   */
+  SCORE_PRESET: keyof ScorePresets
+
+  /**
    * Configuration identifier or description.
    * @default "Base Configuration"
    */
@@ -204,6 +212,7 @@ export const BASE_CONFIG: GameConfig = {
   MIN_RAW_SCORES: 1,
 
   // Misc
+  SCORE_PRESET: 'OPTIMIZED',
   MESSAGE: 'Base Configuration - Balanced Strategy',
   SCENARIO: '3',
 }

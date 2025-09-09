@@ -46,6 +46,7 @@ export interface ScoreConfig {
   multiAttributeBonus: number
   normalizationBase: number
   maxScore: number
+  isEndGame: boolean
 }
 
 const DEFAULT_SCORE_CONFIG: ScoreConfig = {
@@ -74,12 +75,37 @@ const DEFAULT_SCORE_CONFIG: ScoreConfig = {
   multiAttributeBonus: 0.3,
   normalizationBase: 30,
   maxScore: 2.0,
+  isEndGame: false,
 }
+
+export type ScorePresets = typeof SCORE_PRESETS
 
 /**
  * Preset configurations for different game phases or strategies
  */
 export const SCORE_PRESETS = {
+  OPTIMIZED: {
+    urgencyDivisor: 75, // Lower from 100
+    maxUrgencyScore: 2.2, // Higher from 1.5
+    maxCriticalMultiplier: 12.0, // Higher from 10.0
+
+    rarityBonuses: {
+      high: 2.8, // Higher from 2.2
+      medium: 1.8, // Higher from 1.5
+      normal: 1.0,
+    },
+
+    progressBonuses: {
+      low: 2.8, // Higher from 2.2
+      medium: 1.8, // Higher from 1.6
+      normal: 1.0,
+    },
+
+    criticalMultiplierCap: 5.0, // Higher from 4.0
+    multiAttributeBonus: 0.4, // Higher from 0.3
+    normalizationBase: 25, // Lower from 30
+    maxScore: 2.5, // Higher from 2.0
+  } as ScoreConfig,
   CONSERVATIVE: {
     urgencyDivisor: 150,
     maxUrgencyScore: 1.2,
@@ -128,8 +154,9 @@ export function calculateAdmissionScore(
 
   if (params.allQuotasMet) return 1.0
 
+  const isEndGame = Boolean(config.isEndGame)
   const usefulAttributes: (keyof ScenarioAttributes)[] =
-    params.metrics.getUsefulAttributes(params.attributes)
+    params.metrics.getUsefulAttributes(params.attributes, isEndGame)
   if (usefulAttributes.length === 0) return 0.0
 
   let totalScore = 0
@@ -245,19 +272,6 @@ function getRarityBonus(frequency: number, config: ScoreConfig): number {
   }
 }
 
-// /**
-//  * Calculate progress urgency bonus based on quota completion
-//  */
-// function getProgressUrgency(progress: number, config: ScoreConfig): number {
-//   if (progress < config.progressThresholds.low) {
-//     return config.progressBonuses.low
-//   } else if (progress < config.progressThresholds.medium) {
-//     return config.progressBonuses.medium
-//   } else {
-//     return config.progressBonuses.normal
-//   }
-// }
-
 function getProgressUrgency(
   progress: number,
   frequency: number,
@@ -291,7 +305,10 @@ export function calculateEndgameScore(
   if (!params.isEndgame) return 0
 
   const maxScore = config.maxEndgameScore || 3.0
-  const usefulAttributes = params.metrics.getUsefulAttributes(params.attributes)
+  const usefulAttributes = params.metrics.getUsefulAttributes(
+    params.attributes,
+    true
+  )
   const incompleteQuotas = params.metrics.getIncompleteConstraints()
 
   let endgameScore = 0
@@ -319,7 +336,7 @@ export function calculateEndgameScore(
  */
 export function getScoreAnalysis(
   params: ScoreCalculationParams,
-  config: Partial<ScoreConfig> = {}
+  config: Partial<ScoreConfig & { isEndGame: boolean }> = {}
 ): {
   totalScore: number
   breakdown: {
@@ -339,7 +356,10 @@ export function getScoreAnalysis(
   normalizedScore: number
 } {
   const cfg = { ...DEFAULT_SCORE_CONFIG, ...config }
-  const usefulAttributes = params.metrics.getUsefulAttributes(params.attributes)
+  const usefulAttributes = params.metrics.getUsefulAttributes(
+    params.attributes,
+    Boolean(config.isEndGame)
+  )
 
   const breakdown = usefulAttributes.map((attr) => {
     const needed = params.metrics.getNeeded(attr)
@@ -384,10 +404,7 @@ export function getScoreAnalysis(
     ? Math.min(maxCriticalMultiplier, cfg.criticalMultiplierCap)
     : 1.0
 
-  const multiAttributeBonusMultiplier =
-    usefulAttributes.length > 1
-      ? 1 + (usefulAttributes.length - 1) * cfg.multiAttributeBonus
-      : 1.0
+  const multiAttributeBonusMultiplier = Math.pow(2, usefulAttributes.length - 1) // 2x, 4x, 8x for 2, 3, 4 attributes
 
   const totalScore =
     totalAttributeScore *

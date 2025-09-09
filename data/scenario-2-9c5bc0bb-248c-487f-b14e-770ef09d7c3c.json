@@ -1,7 +1,7 @@
 {
-  "file": "./data/scenario-2-55181453-ff42-42aa-8800-85530a8fdd14.json",
+  "file": "./data/scenario-2-9c5bc0bb-248c-487f-b14e-770ef09d7c3c.json",
   "game": {
-    "gameId": "55181453-ff42-42aa-8800-85530a8fdd14",
+    "gameId": "9c5bc0bb-248c-487f-b14e-770ef09d7c3c",
     "constraints": [
       {
         "attribute": "techno_lover",
@@ -58,12 +58,12 @@
   "status": {
     "status": "running",
     "admittedCount": 999,
-    "rejectedCount": 4027,
+    "rejectedCount": 1984,
     "nextPerson": {
-      "personIndex": 5026,
+      "personIndex": 2983,
       "attributes": {
         "techno_lover": true,
-        "well_connected": true,
+        "well_connected": false,
         "creative": false,
         "berlin_local": false
       }
@@ -71,28 +71,28 @@
   },
   "output": {
     "info": {
-      "natural_progress": 1,
-      "target_progress": 1,
-      "actual_progress": 0.9539,
-      "progress_gap": 0.0461,
-      "progress_adjustment": 0.0412,
-      "rate_adjustment": -0.02,
-      "threshold": 0.46,
-      "regular_score": 0.14,
+      "natural_progress": 0.852,
+      "target_quota_progress": 0.9372,
+      "actual_quota_progress": 0.8641,
+      "progress_gap": 0.0731,
+      "progress_adjustment": 0.0647,
+      "rate_adjustment": 0.02,
+      "threshold": 0.34,
+      "regular_score": 0.48,
       "endgame_score": 0,
-      "raw_score": 0.14,
-      "deflation_factor": 1.15,
-      "last_score": 0.16,
-      "is_endgame": false,
+      "raw_score": 0.48,
+      "deflation_factor": 0.61,
+      "last_score": 0.29,
+      "is_endgame": true,
       "critical_attrs": 3,
       "has_critical": false,
       "has_some_critical": true,
       "emergency_eligible": false,
-      "metrics_efficiency": 0.95,
+      "metrics_efficiency": 0.86,
       "metrics_risk": 0.68,
       "metrics_balance": true,
       "recommendations": [
-        "Prioritize creative (90% complete)"
+        "Prioritize creative (66% complete)"
       ]
     },
     "critical": [
@@ -101,85 +101,108 @@
       "⚠️:berlin_local"
     ],
     "config": {
-      "BASE_THRESHOLD": 0.518,
-      "MIN_THRESHOLD": 0.3,
-      "MAX_THRESHOLD": 0.9,
+      "BASE_THRESHOLD": 0.38,
+      "MIN_THRESHOLD": 0.15,
+      "MAX_THRESHOLD": 0.85,
       "THRESHOLD_RAMP": 0.3,
-      "TARGET_RANGE": 3000,
-      "URGENCY_MODIFIER": 3,
-      "CORRELATION_BONUS": 0.2,
-      "NEGATIVE_CORRELATION_BONUS": 0.5,
+      "TARGET_RATE": 0.22,
+      "TARGET_RANGE": 3500,
+      "URGENCY_MODIFIER": 3.5,
+      "CORRELATION_BONUS": 0.3,
+      "NEGATIVE_CORRELATION_BONUS": 0.7,
       "NEGATIVE_CORRELATION_THRESHOLD": -0.5,
-      "MULTI_ATTRIBUTE_BONUS": 1.2,
-      "RARE_PERSON_BONUS": 0.4,
+      "MULTI_ATTRIBUTE_BONUS": 1.4,
+      "RARE_PERSON_BONUS": 0.6,
       "MAX_CAPACITY": 1000,
       "TOTAL_PEOPLE": 10000,
-      "CRITICAL_REQUIRED_THRESHOLD": 20,
-      "CRITICAL_IN_LINE_RATIO": 0.8,
-      "CRITICAL_CAPACITY_RATIO": 0.9,
+      "CRITICAL_REQUIRED_THRESHOLD": 15,
+      "CRITICAL_IN_LINE_RATIO": 0.75,
+      "CRITICAL_CAPACITY_RATIO": 0.85,
       "MIN_RAW_SCORES": 1,
+      "SCORE_PRESET": "OPTIMIZED",
       "MESSAGE": "Base Configuration - Balanced Strategy",
       "SCENARIO": "2"
     },
     "quotas": [
       {
+        "attribute": "techno_lover",
+        "needed": 68
+      },
+      {
         "attribute": "berlin_local",
-        "needed": 8
+        "needed": 73
       },
       {
         "attribute": "creative",
-        "needed": 29
-      },
-      {
-        "attribute": "techno_lover",
-        "needed": 49
+        "needed": 102
       }
     ],
-    "admissionRate": 0.19876641464385197,
+    "admissionRate": 0.3348977539389876,
     "admitted": 999,
-    "rejected": 4027,
-    "natural_progress": 1,
-    "target_progress": 1,
-    "actual_progress": 0.9539,
-    "progress_gap": 0.0461,
-    "progress_adjustment": 0.0412,
-    "rate_adjustment": -0.02,
-    "threshold": 0.46,
-    "regular_score": 0.14,
+    "rejected": 1984,
+    "natural_progress": 0.852,
+    "target_quota_progress": 0.9372,
+    "actual_quota_progress": 0.8641,
+    "progress_gap": 0.0731,
+    "progress_adjustment": 0.0647,
+    "rate_adjustment": 0.02,
+    "threshold": 0.34,
+    "regular_score": 0.48,
     "endgame_score": 0,
-    "raw_score": 0.14,
-    "deflation_factor": 1.15,
-    "last_score": 0.16,
-    "is_endgame": false,
+    "raw_score": 0.48,
+    "deflation_factor": 0.61,
+    "last_score": 0.29,
+    "is_endgame": true,
     "critical_attrs": 3,
     "has_critical": false,
     "has_some_critical": true,
     "emergency_eligible": false,
+    "rate_analysis": {
+      "currentRate": 0.3349,
+      "targetRate": 0.22,
+      "deviation": 0.1149,
+      "status": "too_high",
+      "recommendation": "Consider raising thresholds or reducing score bonuses"
+    },
     "critical_progress": [
       {
         "attribute": "techno_lover",
-        "needed": 50,
-        "modifier": 10,
+        "needed": 69,
+        "modifier": 12,
         "frequency": 0.6265000000000001,
-        "estimated_remaining": 3116.2110000000002
+        "estimated_remaining": 4396.150500000001
       },
       {
         "attribute": "creative",
-        "needed": 29,
-        "modifier": 10,
+        "needed": 102,
+        "modifier": 18,
         "frequency": 0.06227,
-        "estimated_remaining": 309.73098
+        "estimated_remaining": 436.94858999999997
       },
       {
         "attribute": "berlin_local",
-        "needed": 8,
-        "modifier": 10,
+        "needed": 73,
+        "modifier": 12,
         "frequency": 0.398,
-        "estimated_remaining": 1979.652
+        "estimated_remaining": 2792.766
       }
     ],
     "spots_left": 1,
-    "people_left": 4974,
-    "incomplete_quotas": 3
+    "people_left": 7017,
+    "incomplete_quotas": 3,
+    "rejection_analysis": {
+      "current_rejections": 1984,
+      "target_rejections": 3000,
+      "rejection_gap": -1016,
+      "on_track": false
+    },
+    "pid_debug": {
+      "error": 0.1149,
+      "integralError": -5,
+      "lastError": -0.1147,
+      "proportionalTerm": 0.4596,
+      "integralTerm": -1.5,
+      "derivativeTerm": 0.0918
+    }
   }
 }

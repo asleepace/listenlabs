@@ -37,6 +37,8 @@ const defaultFactor: FactorConfig = {
   maxInflation: 0.8,
 }
 
+// === shared helpers === //
+
 function getCurrentRate(params: ScoreDeflationParams) {
   if (params.admittedCount === 0 && params.rejectedCount === 0) return 0
   return params.admittedCount / (params.admittedCount + params.rejectedCount)
