@@ -34,6 +34,10 @@ type CriticalAttributes = Partial<Record<keyof ScenarioAttributes, Critical>>
 
 // fine tune config here...
 
+const FEATURE_FLAGS = {
+  USE_PID_DEFLATION: true,
+}
+
 const TUNED_CONFIG: Partial<GameConfig> = {
   // Most impactful
   BASE_THRESHOLD: 0.42, // Lower = More lenient
@@ -128,12 +132,34 @@ export class Bouncer<
     return this.state.status.rejectedCount
   }
 
-  private getScoreDeflationFactor(): number {
-    const currentRate =
-      this.admittedCount / (this.admittedCount + this.rejectedCount)
-    const targetRate = Bouncer.CONFIG.TARGET_RATE || 0.25
+  /**
+   * e.g. should be 0.25 or 25% for 4000 rejections out of 10,000 people
+   */
+  get targetRate() {
+    return (
+      Bouncer.CONFIG.TARGET_RATE ??
+      Bouncer.CONFIG.TARGET_RANGE / Bouncer.CONFIG.TOTAL_PEOPLE
+    )
+  }
 
-    return this.deflationController.getDeflationFactor(currentRate, targetRate)
+  private getScoreDeflationFactor(): number {
+    if (FEATURE_FLAGS.USE_PID_DEFLATION) {
+      const targetRate = this.targetRate
+      const currentRate =
+        this.admittedCount / (this.admittedCount + this.rejectedCount)
+
+      return this.deflationController.getDeflationFactor(
+        targetRate,
+        currentRate
+      )
+    }
+
+    // see scoring module for alternatives
+    return Score.getScoreDeflationFactorCombined({
+      admittedCount: this.admittedCount,
+      rejectedCount: this.rejectedCount,
+      targetRate: this.targetRate,
+    })
   }
 
   // Delegate counting methods to metrics
@@ -315,12 +341,6 @@ export class Bouncer<
     const criticalKeys = Object.keys(this.criticalAttributes) as Keys[]
     const personAttributes = nextPerson.attributes
 
-    // const currentRate =
-    //   this.admittedCount / (this.admittedCount + this.rejectedCount)
-    const targetRate = Bouncer.CONFIG.TARGET_RATE ?? 0.25
-    // const earlyBoost =
-    //   this.admittedCount < 500 && currentRate < targetRate ? 0.9 : 1.0
-
     // Calculate both regular and endgame scores
     let regularScore = Score.calculateAdmissionScore(
       {
@@ -351,12 +371,7 @@ export class Bouncer<
           )
         : 0
 
-    // Calculate score default factor (see file for more implementations)
-    // const deflationFactor = Score.getScoreDeflationFactorCombined({
-    //   admittedCount: this.admittedCount,
-    //   rejectedCount: this.rejectedCount,
-    //   targetRate,
-    // })
+    // Get specific deflation rate factor for game.
     const deflationFactor = this.getScoreDeflationFactor()
 
     // Use higher of regular or endgame score
@@ -419,19 +434,6 @@ export class Bouncer<
     return spotsLeft > 0 && spotsLeft <= 50
   }
 
-  // private isEndgame(): boolean {
-  //   const spotsLeft = this.totalSpotsLeft
-  //   const incompleteQuotas = this.metrics.getIncompleteConstraints()
-  //   const totalNeeded = incompleteQuotas.reduce((sum, q) => sum + q.needed, 0)
-
-  //   // Trigger endgame when mathematically necessary
-  //   return (
-  //     spotsLeft > 0 &&
-  //     (spotsLeft <= 50 || // Original condition
-  //       totalNeeded >= spotsLeft) // New: when impossible math
-  //   )
-  // }
-
   getDebugInfo(): any {
     const criticalProgress = Object.entries(this.criticalAttributes).map(
       ([attr, info]) => ({
@@ -452,7 +454,6 @@ export class Bouncer<
 
     const currentRate =
       this.admittedCount / (this.admittedCount + this.rejectedCount)
-    const targetRate = Bouncer.CONFIG.TARGET_RATE || 0.25
 
     return {
       ...this.info,
@@ -467,7 +468,10 @@ export class Bouncer<
         rejection_gap: rejectionGap,
         on_track: Math.abs(rejectionGap) < 200,
       },
-      pid_debug: this.deflationController.getDebugInfo(currentRate, targetRate),
+      pid_debug: this.deflationController.getDebugInfo(
+        currentRate,
+        this.targetRate
+      ),
     }
   }
 
@@ -530,8 +534,7 @@ export class Bouncer<
   } {
     const currentRate =
       this.admittedCount / (this.admittedCount + this.rejectedCount)
-    const targetRate = Bouncer.CONFIG.TARGET_RATE || 0.19 // Use config value consistently
-    const deviation = currentRate - targetRate
+    const deviation = currentRate - this.targetRate
 
     let status: 'too_high' | 'too_low' | 'optimal'
     let recommendation: string
@@ -556,7 +559,7 @@ export class Bouncer<
 
     return {
       currentRate: Stats.round(currentRate, 10000),
-      targetRate: Stats.round(targetRate, 10000),
+      targetRate: Stats.round(this.targetRate, 10000),
       deviation: Stats.round(deviation, 10000),
       status,
       recommendation,
