@@ -100,6 +100,7 @@ export class Bouncer<
     this.deflationController = new DeflationPIDController(
       PID_PRESETS.RESPONSIVE
     )
+    this.deflationController.reset()
     this.metrics = new Metrics(initialData.game)
     this.state = initialData
     this.progress = this.getProgress()
