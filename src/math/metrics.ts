@@ -273,14 +273,14 @@ export class Metrics {
   getNegativelyCorrelated(
     attribute: keyof ScenarioAttributes,
     threshold: number = -0.3
-  ): Keys[] {
+  ): (keyof ScenarioAttributes)[] {
     const correlations = this._correlations[attribute]
     if (!correlations) return []
 
     return Object.entries(correlations)
       .filter(([_, correlation]) => (correlation as number) < threshold)
-      .map(([attr, _]) => attr as Keys)
-      .filter((attr) => attr !== attribute)
+      .map(([attr, _]) => attr as keyof ScenarioAttributes)
+      .filter((attr): attr is keyof ScenarioAttributes => attr !== attribute)
   }
 
   getCorrelation(attr1: Keys, attr2: Keys): number {

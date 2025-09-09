@@ -1,7 +1,7 @@
 {
-  "file": "./data/scenario-2-f4d269ae-74c3-4f2f-bef8-a2e7ff3945cd.json",
+  "file": "./data/scenario-2-1260b455-53ac-4ade-99b1-391daabebf11.json",
   "game": {
-    "gameId": "f4d269ae-74c3-4f2f-bef8-a2e7ff3945cd",
+    "gameId": "1260b455-53ac-4ade-99b1-391daabebf11",
     "constraints": [
       {
         "attribute": "techno_lover",
@@ -58,9 +58,9 @@
   "status": {
     "status": "running",
     "admittedCount": 999,
-    "rejectedCount": 3646,
+    "rejectedCount": 3087,
     "nextPerson": {
-      "personIndex": 4645,
+      "personIndex": 4086,
       "attributes": {
         "techno_lover": true,
         "well_connected": false,
@@ -73,17 +73,17 @@
     "info": {
       "natural_progress": 1,
       "target_quota_progress": 1,
-      "actual_quota_progress": 0.9526,
-      "progress_gap": 0.0474,
-      "progress_adjustment": 0.0423,
-      "rate_adjustment": -0.02,
-      "threshold": 0.36,
-      "regular_score": 0,
-      "endgame_score": 0,
-      "raw_score": 0,
+      "actual_quota_progress": 0.9473,
+      "progress_gap": 0.0527,
+      "progress_adjustment": 0.047,
+      "rate_adjustment": 0,
+      "threshold": 0.37,
+      "regular_score": 0.14,
+      "endgame_score": 1.5,
+      "raw_score": 1.5,
       "deflation_factor": 1,
-      "last_score": 0,
-      "is_endgame": false,
+      "last_score": 1.5,
+      "is_endgame": true,
       "critical_attrs": 3,
       "has_critical": false,
       "has_some_critical": true,
@@ -92,7 +92,7 @@
       "metrics_risk": 0.68,
       "metrics_balance": true,
       "recommendations": [
-        "Prioritize creative (88% complete)"
+        "Prioritize creative (86% complete)"
       ]
     },
     "critical": [
@@ -125,75 +125,75 @@
     "quotas": [
       {
         "attribute": "berlin_local",
-        "needed": 4
-      },
-      {
-        "attribute": "creative",
-        "needed": 35
+        "needed": 15
       },
       {
         "attribute": "techno_lover",
-        "needed": 43
+        "needed": 32
+      },
+      {
+        "attribute": "creative",
+        "needed": 42
       }
     ],
-    "admissionRate": 0.21506996770721207,
+    "admissionRate": 0.2444933920704846,
     "admitted": 999,
-    "rejected": 3646,
+    "rejected": 3087,
     "natural_progress": 1,
     "target_quota_progress": 1,
-    "actual_quota_progress": 0.9526,
-    "progress_gap": 0.0474,
-    "progress_adjustment": 0.0423,
-    "rate_adjustment": -0.02,
-    "threshold": 0.36,
-    "regular_score": 0,
-    "endgame_score": 0,
-    "raw_score": 0,
+    "actual_quota_progress": 0.9473,
+    "progress_gap": 0.0527,
+    "progress_adjustment": 0.047,
+    "rate_adjustment": 0,
+    "threshold": 0.37,
+    "regular_score": 0.14,
+    "endgame_score": 1.5,
+    "raw_score": 1.5,
     "deflation_factor": 1,
-    "last_score": 0,
-    "is_endgame": false,
+    "last_score": 1.5,
+    "is_endgame": true,
     "critical_attrs": 3,
     "has_critical": false,
     "has_some_critical": true,
     "emergency_eligible": false,
     "rate_analysis": {
-      "currentRate": 0.2151,
+      "currentRate": 0.2445,
       "targetRate": 0.25,
-      "deviation": -0.0349,
-      "status": "too_low",
-      "recommendation": "Minor adjustment needed"
+      "deviation": -0.0055,
+      "status": "optimal",
+      "recommendation": "Admission rate is well-calibrated"
     },
     "critical_progress": [
       {
         "attribute": "techno_lover",
-        "needed": 43,
+        "needed": 33,
         "modifier": 10,
         "frequency": 0.6265000000000001,
-        "estimated_remaining": 3354.9075000000003
+        "estimated_remaining": 3705.1210000000005
       },
       {
         "attribute": "creative",
-        "needed": 35,
+        "needed": 42,
         "modifier": 10,
         "frequency": 0.06227,
-        "estimated_remaining": 333.45585
+        "estimated_remaining": 368.26478
       },
       {
         "attribute": "berlin_local",
-        "needed": 5,
+        "needed": 15,
         "modifier": 10,
         "frequency": 0.398,
-        "estimated_remaining": 2131.29
+        "estimated_remaining": 2353.772
       }
     ],
     "spots_left": 1,
-    "people_left": 5355,
+    "people_left": 5914,
     "incomplete_quotas": 3,
     "rejection_analysis": {
-      "current_rejections": 3646,
+      "current_rejections": 3087,
       "target_rejections": 3000,
-      "rejection_gap": 646,
-      "on_track": false
+      "rejection_gap": 87,
+      "on_track": true
     }
   }
 }

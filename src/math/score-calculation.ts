@@ -1,4 +1,4 @@
-import type { PersonAttributes, ScenarioAttributes } from '../types'
+import type { ScenarioAttributes } from '../types'
 import type { Metrics } from './metrics'
 import { Stats } from './statistics'
 
@@ -7,6 +7,7 @@ export interface ScoreCalculationParams {
   metrics: Metrics
   criticalAttributes: CriticalAttributes
   allQuotasMet: boolean
+  admittedCount: number
 }
 
 export interface CriticalAttribute {
@@ -127,9 +128,8 @@ export function calculateAdmissionScore(
 
   if (params.allQuotasMet) return 1.0
 
-  const usefulAttributes = params.metrics!.getUsefulAttributes(
-    params.attributes
-  )
+  const usefulAttributes: (keyof ScenarioAttributes)[] =
+    params.metrics.getUsefulAttributes(params.attributes)
   if (usefulAttributes.length === 0) return 0.0
 
   let totalScore = 0
@@ -162,14 +162,57 @@ export function calculateAdmissionScore(
       hasCriticalAttribute = true
     }
 
+    // Check for negative correlation conflicts
+    const negativelyCorrelated = params.metrics.getNegativelyCorrelated(
+      attr,
+      -0.5
+    )
+
+    const hasConflictingAttribute = negativelyCorrelated.some(
+      (conflictAttr) => {
+        // Check if person has the conflicting attribute
+        const hasConflictingAttr = params.attributes[conflictAttr]
+
+        // Check if conflicting attribute is ahead in progress
+        const conflictProgress = params.metrics.getProgress(conflictAttr)
+        const currentProgress = params.metrics.getProgress(attr)
+
+        return hasConflictingAttr && conflictProgress > currentProgress
+      }
+    )
+
     // Rarity bonus
     const frequency = params.metrics.frequencies[attr]!
     const rarityBonus = getRarityBonus(frequency, cfg)
 
-    // Progress urgency
-    const progressUrgency = getProgressUrgency(progress, cfg)
+    // Add velocity-based urgency
+    const expectedProgress = (params.admittedCount || 0) / 1000
+    const actualProgress = progress
+    // const velocity = actualProgress / Math.max(expectedProgress, 0.01)
+    const velocity =
+      expectedProgress > 0.05 ? actualProgress / expectedProgress : 1.0
+    const velocityBonus = velocity < 0.8 ? 2.0 : velocity < 0.9 ? 1.5 : 1.0
 
-    const attributeScore = urgencyScore * rarityBonus * progressUrgency
+    // Modify correlation logic for better conflict handling
+    let correlationBonus = 1.0
+    if (negativelyCorrelated.length > 0) {
+      const hasAnyConflicting = negativelyCorrelated.some(
+        (conflictAttr) => params.attributes[conflictAttr]
+      )
+      if (hasAnyConflicting && progress < 0.9) {
+        correlationBonus = 1.8 // Boost for anyone breaking correlation patterns
+      }
+    }
+
+    // Progress urgency
+    const progressUrgency = getProgressUrgency(progress, frequency, cfg)
+    const attributeScore =
+      urgencyScore *
+      rarityBonus *
+      progressUrgency *
+      correlationBonus *
+      velocityBonus
+
     totalScore += attributeScore
   })
 
@@ -202,17 +245,37 @@ function getRarityBonus(frequency: number, config: ScoreConfig): number {
   }
 }
 
-/**
- * Calculate progress urgency bonus based on quota completion
- */
-function getProgressUrgency(progress: number, config: ScoreConfig): number {
-  if (progress < config.progressThresholds.low) {
-    return config.progressBonuses.low
-  } else if (progress < config.progressThresholds.medium) {
-    return config.progressBonuses.medium
-  } else {
-    return config.progressBonuses.normal
+// /**
+//  * Calculate progress urgency bonus based on quota completion
+//  */
+// function getProgressUrgency(progress: number, config: ScoreConfig): number {
+//   if (progress < config.progressThresholds.low) {
+//     return config.progressBonuses.low
+//   } else if (progress < config.progressThresholds.medium) {
+//     return config.progressBonuses.medium
+//   } else {
+//     return config.progressBonuses.normal
+//   }
+// }
+
+function getProgressUrgency(
+  progress: number,
+  frequency: number,
+  config: ScoreConfig
+): number {
+  const baseUrgency =
+    progress < config.progressThresholds.low
+      ? config.progressBonuses.low
+      : progress < config.progressThresholds.medium
+      ? config.progressBonuses.medium
+      : config.progressBonuses.normal
+
+  // Boost common attributes that are behind where they should be
+  if (frequency > 0.4 && progress < 0.6) {
+    return baseUrgency * 1.5
   }
+
+  return baseUrgency
 }
 
 /**
@@ -288,7 +351,7 @@ export function getScoreAnalysis(
       cfg.maxUrgencyScore
     )
     const rarityBonus = getRarityBonus(frequency, cfg)
-    const progressUrgency = getProgressUrgency(progress, cfg)
+    const progressUrgency = getProgressUrgency(progress, frequency, cfg)
 
     const criticalInfo = params.criticalAttributes[attr]
     const criticalMultiplier = criticalInfo

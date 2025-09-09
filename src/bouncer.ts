@@ -4,6 +4,10 @@ import { BASE_CONFIG, type GameConfig } from './conf/game-config'
 import { Stats } from './math/statistics'
 import { Metrics, type AttributeRisk } from './math/metrics'
 import { Score } from './math/score'
+import {
+  DeflationPIDController,
+  PID_PRESETS,
+} from './math/deflation-controller'
 
 interface GameQuota {
   attribute: keyof ScenarioAttributes
@@ -86,8 +90,12 @@ export class Bouncer<
 
   public criticalAttributes: CriticalAttributes = {}
   public riskAssessment: AttributeRisk
+  public deflationController: DeflationPIDController
 
   constructor(initialData: GameState) {
+    this.deflationController = new DeflationPIDController(
+      PID_PRESETS.RESPONSIVE
+    )
     this.metrics = new Metrics(initialData.game)
     this.state = initialData
     this.progress = this.getProgress()
@@ -118,6 +126,14 @@ export class Bouncer<
   get rejectedCount() {
     if (this.state.status.status !== 'running') throw this.state.status
     return this.state.status.rejectedCount
+  }
+
+  private getScoreDeflationFactor(): number {
+    const currentRate =
+      this.admittedCount / (this.admittedCount + this.rejectedCount)
+    const targetRate = Bouncer.CONFIG.TARGET_RATE || 0.25
+
+    return this.deflationController.getDeflationFactor(currentRate, targetRate)
   }
 
   // Delegate counting methods to metrics
@@ -311,6 +327,7 @@ export class Bouncer<
         allQuotasMet: this.allQuotasMet,
         attributes: personAttributes,
         criticalAttributes: this.criticalAttributes,
+        admittedCount: this.admittedCount,
         metrics: this.metrics,
       },
       Score.PRESETS.CONSERVATIVE
@@ -324,6 +341,7 @@ export class Bouncer<
               totalSpotsLeft: this.totalSpotsLeft,
               attributes: personAttributes,
               criticalAttributes: this.criticalAttributes,
+              admittedCount: this.admittedCount,
               metrics: this.metrics,
               isEndgame: this.isEndgame(),
             },
@@ -334,11 +352,12 @@ export class Bouncer<
         : 0
 
     // Calculate score default factor (see file for more implementations)
-    const deflationFactor = Score.getScoreDeflationFactorCombined({
-      admittedCount: this.admittedCount,
-      rejectedCount: this.rejectedCount,
-      targetRate,
-    })
+    // const deflationFactor = Score.getScoreDeflationFactorCombined({
+    //   admittedCount: this.admittedCount,
+    //   rejectedCount: this.rejectedCount,
+    //   targetRate,
+    // })
+    const deflationFactor = this.getScoreDeflationFactor()
 
     // Use higher of regular or endgame score
     const rawScore = Math.max(regularScore, endgameScore)
@@ -397,10 +416,21 @@ export class Bouncer<
 
   private isEndgame(): boolean {
     const spotsLeft = this.totalSpotsLeft
-    const incompleteQuotas = this.metrics.getIncompleteConstraints()
-    const totalNeeded = incompleteQuotas.reduce((sum, q) => sum + q.needed, 0)
-    return spotsLeft > 0 && spotsLeft <= 20 && totalNeeded <= spotsLeft * 2
+    return spotsLeft > 0 && spotsLeft <= 50
   }
+
+  // private isEndgame(): boolean {
+  //   const spotsLeft = this.totalSpotsLeft
+  //   const incompleteQuotas = this.metrics.getIncompleteConstraints()
+  //   const totalNeeded = incompleteQuotas.reduce((sum, q) => sum + q.needed, 0)
+
+  //   // Trigger endgame when mathematically necessary
+  //   return (
+  //     spotsLeft > 0 &&
+  //     (spotsLeft <= 50 || // Original condition
+  //       totalNeeded >= spotsLeft) // New: when impossible math
+  //   )
+  // }
 
   getDebugInfo(): any {
     const criticalProgress = Object.entries(this.criticalAttributes).map(
@@ -420,6 +450,10 @@ export class Bouncer<
     const targetRejections = 3000
     const rejectionGap = currentRejections - targetRejections
 
+    const currentRate =
+      this.admittedCount / (this.admittedCount + this.rejectedCount)
+    const targetRate = Bouncer.CONFIG.TARGET_RATE || 0.25
+
     return {
       ...this.info,
       rate_analysis: rateAnalysis,
@@ -433,6 +467,7 @@ export class Bouncer<
         rejection_gap: rejectionGap,
         on_track: Math.abs(rejectionGap) < 200,
       },
+      pid_debug: this.deflationController.getDebugInfo(currentRate, targetRate),
     }
   }
 
