@@ -207,9 +207,9 @@ class ContextualBandit {
 
     // Use diagonal approximation with regularization
     for (let i = 0; i < n; i++) {
-      const diag = A[i]![i]!
+      const diag = A[i][i]
       if (Math.abs(diag) > 1e-8) {
-        weights[i] = b[i]! / diag
+        weights[i] = b[i] / diag
 
         // Clip weights to prevent explosion
         weights[i] = Math.max(-10, Math.min(10, weights[i]))
@@ -226,13 +226,13 @@ class ContextualBandit {
     // Update A = A + x * x^T
     for (let i = 0; i < context.length; i++) {
       for (let j = 0; j < context.length; j++) {
-        A[i]![j] += context[i]! * context[j]!
+        A[i][j] += context[i] * context[j]
       }
     }
 
     // Update b = b + r * x
     for (let i = 0; i < context.length; i++) {
-      b[i] += reward * context[i]!
+      b[i] += reward * context[i]
     }
   }
 
@@ -240,7 +240,7 @@ class ContextualBandit {
     let sum = 0
     const len = Math.min(a.length, b.length)
     for (let i = 0; i < len; i++) {
-      sum += a[i]! * b[i]!
+      sum += a[i] * b[i]
     }
     return sum
   }
@@ -393,9 +393,10 @@ export class BanditBouncer<T> implements BergainBouncer {
     let reward = 0
 
     if (admitted) {
-      // Calculate value of this person for unsatisfied constraints
+      // Calculate value of this person for unsatisfied constraints ONLY
       let personValue = 0
       let hasUsefulAttribute = false
+      let hasOverSatisfiedAttribute = false
 
       this.constraints.forEach((constraint, attr) => {
         if (person[attr]) {
@@ -404,37 +405,56 @@ export class BanditBouncer<T> implements BergainBouncer {
             const progress = constraint.getProgress()
             const urgency = constraint.getUrgency(this.remainingSlots)
 
-            // Reward based on how much this constraint needs progress
-            const progressValue = (1 - progress) * 15 // 0-15 points
-            const urgencyValue = Math.min(urgency * 2, 20) // 0-20 points
+            // Exponentially higher rewards for less satisfied constraints
+            const progressValue = Math.pow(1 - progress, 2) * 25 // 0-25 points, exponential
+            const urgencyValue = Math.min(urgency * 3, 30) // 0-30 points
 
             personValue += progressValue + urgencyValue
 
-            // Bonus for rare attributes
-            if (constraint.isRare()) {
-              personValue += 10
+            // Massive bonus for rare attributes when desperately needed
+            if (constraint.isRare() && progress < 0.5) {
+              personValue += 50
             }
           } else {
-            // Small penalty for over-satisfying constraints
-            personValue -= 2
+            // Heavy penalty for over-satisfying constraints
+            hasOverSatisfiedAttribute = true
+            personValue -= 15 // significant penalty
           }
         }
       })
 
-      reward = personValue
-
-      // Heavy penalty for admitting useless people, especially when capacity is low
-      if (!hasUsefulAttribute) {
-        const wastefulness = Math.max(1, (1000 - this.remainingSlots) / 100)
-        reward -= wastefulness * 8
-
-        // Catastrophic penalty in endgame
-        if (this.remainingSlots < 50) {
-          reward -= 50
+      // Special bonus: focus heavily on the worst constraint
+      const worstProgress = Math.min(...context.progressRatios)
+      if (worstProgress < 0.3) {
+        const worstConstraintIndex =
+          context.progressRatios.indexOf(worstProgress)
+        const worstConstraint = this.getConstraints()[worstConstraintIndex]
+        if (person[worstConstraint.attribute]) {
+          personValue += 40 // huge bonus for helping worst constraint
         }
       }
 
-      // Penalty for impossible situations (admitting when we can't satisfy constraints)
+      reward = personValue
+
+      // Massive penalties for bad decisions
+      if (!hasUsefulAttribute) {
+        const wastefulness = Math.max(1, (1000 - this.remainingSlots) / 50)
+        reward -= wastefulness * 20
+
+        if (this.remainingSlots < 50) {
+          reward -= 150
+        }
+        if (this.remainingSlots < 20) {
+          reward -= 300
+        }
+      }
+
+      // Extra penalty for admitting people who only help over-satisfied constraints
+      if (hasOverSatisfiedAttribute && !hasUsefulAttribute) {
+        reward -= 25 // penalty for wasting slot on over-satisfied constraints
+      }
+
+      // Penalty for impossible situations
       if (this.remainingSlots < 100) {
         const unsatisfiedConstraints = this.getConstraints().filter(
           (c) => !c.isSatisfied()
@@ -445,7 +465,7 @@ export class BanditBouncer<T> implements BergainBouncer {
         }, 0)
 
         if (totalNeeded > this.remainingSlots * 3 && !hasUsefulAttribute) {
-          reward -= 25 // major penalty for making impossible situation worse
+          reward -= 50
         }
       }
     } else {
@@ -455,15 +475,23 @@ export class BanditBouncer<T> implements BergainBouncer {
       )
 
       if (!hasUsefulAttribute) {
-        reward += 2 // good rejection
+        reward += 5 // good rejection
+
+        // Bonus for rejecting over-satisfied constraint holders
+        const hasOverSatisfiedOnly = Array.from(
+          this.constraints.entries()
+        ).some(([attr, constraint]) => person[attr] && constraint.isSatisfied())
+        if (hasOverSatisfiedOnly) {
+          reward += 10 // extra bonus for smart rejection
+        }
       } else {
         // Penalty for rejecting useful people
         const maxUrgency = Math.max(...context.urgencyScores, 0)
-        reward -= Math.min(maxUrgency * 0.5, 15)
+        reward -= Math.min(maxUrgency * 0.3, 10) // reduced penalty since we want to be selective
 
-        // Larger penalty if we're running out of chances
+        // But smaller penalty if we're running out of chances
         if (this.remainingSlots < 200) {
-          reward -= 5
+          reward -= 3
         }
       }
     }
