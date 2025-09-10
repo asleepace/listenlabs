@@ -154,8 +154,11 @@ class LinearBandit {
     const confidence = this.calculateConfidence(features)
     const ucbValue = value + 0.5 * Math.min(confidence, 5)
 
-    // Simple threshold
-    const threshold = 5
+    // Start with low threshold, gradually increase as bandit learns
+    let threshold = 3
+    if (this.decisionCount > 100) threshold = 8
+    if (this.decisionCount > 300) threshold = 12
+
     const action = ucbValue > threshold ? 'admit' : 'reject'
 
     return { action, value: ucbValue }

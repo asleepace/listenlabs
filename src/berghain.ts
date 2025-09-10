@@ -192,6 +192,7 @@ export class Berghain {
           accept: admit,
         })
         if (this.current.status.status !== 'running') break
+        console.log('- '.repeat(32))
         console.log(this.bouncer.getProgress()) // better to console here
       }
 
