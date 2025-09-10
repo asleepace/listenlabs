@@ -1,10 +1,5 @@
 import type { BerghainBouncer } from './berghain'
-import type {
-  GameConstraints,
-  GameState,
-  GameStatusRunning,
-  ScenarioAttributes,
-} from './types'
+import type { GameState, GameStatusRunning, ScenarioAttributes } from './types'
 import { Disk } from './utils/disk'
 
 interface GameResult {
@@ -127,7 +122,7 @@ class LinearBandit {
     1.2, // capacity, scarcity
   ]
 
-  // for deugging:
+  // for debugging:
   private lastThrDbg = {
     med: 0,
     mad: 0,
@@ -155,14 +150,15 @@ class LinearBandit {
 
   public totalAdmitted = 0
   public maxCapacity: number // Remove hardcoded value
+  public maxFeasRatio = 0
 
   private recentValues: number[] = []
   private recentCap = 500
 
-  private targetAdmitRate = 0.21
+  public targetAdmitRate = 0.21
   private eta = 0.2 // tune 0.05–0.5
 
-  private admitRateEma = this.targetAdmitRate
+  public admitRateEma = this.targetAdmitRate
   private emaBeta = 0.035 // a bit more responsive
 
   private rateErrI = 0
@@ -206,11 +202,17 @@ class LinearBandit {
     }
   }
 
-  getTargetAdmitRate(): number {
+  // In LinearBandit
+  public getTargetAdmitRate(): number {
     const used = this.totalAdmitted / this.maxCapacity // 0..1
-    const late = Math.min(1, Math.max(0, (used - 0.5) / 0.4)) // ramps 0→1 from 50% to 90% capacity
-    // Early target ≈ 0.28, late target ≈ 0.12
-    return 0.28 - 0.16 * late
+    // base schedule: early -> mid -> late
+    const base = used < 0.33 ? 0.26 : used < 0.66 ? 0.18 : 0.1
+
+    // Pull target down when any constraint is infeasible
+    // (pass maxRatio in via selectAction or read it from caller if you prefer)
+    const maxRatio = this.maxFeasRatio || 1.0
+    const riskPull = Math.min(0.08, 0.04 * Math.max(0, maxRatio - 1)) // up to -0.08
+    return Math.max(0.06, base - riskPull)
   }
 
   // inside LinearBandit
@@ -523,28 +525,20 @@ export class BanditBouncer<T> implements BerghainBouncer {
     return Math.min(5.0, urgency)
   }
 
-  // Add this helper to compute per-constraint feasibility
+  // add this helper inside BanditBouncer<T>
   private getFeasibilityRatios() {
-    const ratios: Array<{
-      attr: keyof T
-      ratio: number
-      shortfall: number
-      freq: number
-    }> = []
-    for (const c of this.getConstraints()) {
-      const need = c.getShortfall()
-      if (need <= 0) continue
-      const expAvail = Math.max(1e-6, this.remainingSlots * c.frequency)
-      ratios.push({
-        attr: c.attribute,
-        ratio: need / expAvail,
-        shortfall: need,
+    const ratios = this.getConstraints()
+      .filter((c) => !c.isSatisfied())
+      .map((c) => ({
+        attr: String(c.attribute),
+        ratio:
+          c.getShortfall() / Math.max(1e-6, this.remainingSlots * c.frequency),
+        shortfall: c.getShortfall(),
         freq: c.frequency,
-      })
-    }
-    ratios.sort((a, b) => b.ratio - a.ratio) // highest risk first
-    const max = ratios[0]?.ratio ?? 0
-    return { ratios, max, mostCritical: ratios[0]?.attr as keyof T | undefined }
+      }))
+    const max = ratios.reduce((m, r) => Math.max(m, r.ratio), 0)
+    const most = ratios.sort((a, b) => b.ratio - a.ratio)[0]?.attr
+    return { max, mostCritical: most, ratios }
   }
 
   // Optional: expose this in getProgress() (small addition shown later)
@@ -595,44 +589,46 @@ export class BanditBouncer<T> implements BerghainBouncer {
     if (status !== 'running') return false
     if (this.remainingSlots <= 0) return false
 
+    const person = nextPerson.attributes as Person<T>
+    const features = this.extractFeatures(person)
+
+    // Feasibility first
     const feas = this.getFeasibilityRatios()
-    const personHelps = (attr: keyof T) =>
-      !!(nextPerson.attributes as Person<T>)[attr]
 
-    // If any constraint is infeasible under naive frequency (ratio>1), force admits to help it
-    if (feas.max > 1.0 && feas.mostCritical) {
-      const helpsCritical = personHelps(feas.mostCritical)
+    if (feas.max > 1.0) {
+      this.bandit.maxFeasRatio = feas.max // make controller aware immediately
       const helpsAnyAtRisk = feas.ratios.some(
-        (r) => r.ratio > 1.0 && personHelps(r.attr)
+        (r) => r.ratio > 1.0 && person[r.attr as keyof T]
       )
-
-      if (!helpsCritical && !helpsAnyAtRisk) {
-        // Hard reject: this admit would only dig the hole deeper
+      if (!helpsAnyAtRisk) {
+        // Hard reject: don’t waste slots when some constraints are infeasible
+        const reward = -2
+        this.decisions.push({
+          context: this.buildContext(),
+          action: 'reject',
+          person,
+          reward,
+          features,
+          banditValue: 0, // we didn't score; 0 is a harmless placeholder
+          heuristicValue: 0,
+        })
+        this.constraints.forEach((c) => c.update(person, false))
         this.totalRejected++
-        this.logDecision(
-          nextPerson.attributes as Person<T>,
-          'reject',
-          -2,
-          this.bandit.getLastRawValue?.() ?? 0,
-          this.extractFeatures(nextPerson.attributes as Person<T>)
-        )
+        this.logDecision(person, 'reject', reward, 0, features)
         this.bandit.updateController(false)
-        // Still update constraints with "rejected" so progress stats stay consistent
-        this.constraints.forEach((c) =>
-          c.update(nextPerson.attributes as Person<T>, false)
-        )
+        this.bandit.updateModel(features, -2) // teach the model this was bad under risk
         return false
       }
     }
 
-    const person = nextPerson.attributes as Person<T>
-    const features = this.extractFeatures(person)
+    // Single write here (avoid double assignment)
+    this.bandit.maxFeasRatio = feas.max
 
     const urgency = this.computeConstraintUrgency()
     const { action, value } = this.bandit.selectAction(features, urgency)
     const shouldAdmit = action === 'admit'
 
-    // Simple, bounded reward calculation
+    // Reward + learning
     const reward = this.calculateReward(person, shouldAdmit)
     this.bandit.updateModel(features, reward)
 
@@ -645,14 +641,11 @@ export class BanditBouncer<T> implements BerghainBouncer {
       reward,
       features,
       banditValue: value,
-      heuristicValue: 0, // not used in this version
+      heuristicValue: 0,
     })
 
     // Update state
-    this.constraints.forEach((constraint) => {
-      constraint.update(person, shouldAdmit)
-    })
-
+    this.constraints.forEach((c) => c.update(person, shouldAdmit))
     if (shouldAdmit) {
       this.totalAdmitted++
       this.bandit.totalAdmitted++
@@ -660,7 +653,6 @@ export class BanditBouncer<T> implements BerghainBouncer {
       this.totalRejected++
     }
 
-    // Enhanced logging
     this.logDecision(person, action, reward, value, features)
     this.bandit.updateController(shouldAdmit)
 
@@ -671,48 +663,50 @@ export class BanditBouncer<T> implements BerghainBouncer {
     const constraints = this.getConstraints()
     const features: number[] = []
 
-    // Features 0-3: Has each constraint attribute
-    constraints.forEach((constraint) => {
-      features.push(person[constraint.attribute] ? 1 : 0)
+    // Indicators 0..3: 1 only if person has it AND the constraint isn't already satisfied
+    constraints.forEach((c) => {
+      features.push(person[c.attribute] && !c.isSatisfied() ? 1 : 0)
     })
 
-    // Features 4-7: Progress on each constraint
-    constraints.forEach((constraint) => {
-      features.push(constraint.getProgress())
+    // Progress 4..7: keep as-is (weights for these are clamped ≤ 0, so higher progress reduces value)
+    constraints.forEach((c) => {
+      features.push(c.getProgress())
     })
 
-    // Feature 8: Capacity utilization
-    // features.push(this.totalAdmitted / this.config.MAX_CAPACITY)
+    // Capacity 8
     features.push(Math.pow(this.totalAdmitted / this.config.MAX_CAPACITY, 0.8))
 
-    // Feature 9: Creative scarcity (special focus on bottleneck)
+    // Scarcity 9: keep creative scarcity focus
     const creativeConstraint = constraints.find(
       (c) => String(c.attribute) === 'creative'
     )
-    if (creativeConstraint) {
-      features.push(
-        creativeConstraint
-          ? 0.5 *
-              Math.min(3, creativeConstraint.getScarcity(this.remainingSlots))
-          : 0
-      )
-    } else {
-      features.push(0)
-    }
+    features.push(
+      creativeConstraint
+        ? 0.5 * Math.min(3, creativeConstraint.getScarcity(this.remainingSlots))
+        : 0
+    )
 
     return features
   }
 
   private calculateReward(person: Person<T>, admitted: boolean): number {
     const used = this.totalAdmitted / this.config.MAX_CAPACITY
-    const { max, ratios } = this.getFeasibilityRatios()
+    const { max } = this.getFeasibilityRatios()
 
+    // --- Rejection penalty (slightly harsher when urgent/late) ---
     if (!admitted) {
       const base = used < 0.2 ? -0.25 : -0.5
-      const urgency = Math.min(5, max) // reuse risk as urgency-ish
+      const urgency = Math.min(5, max) // reuse feasibility as urgency proxy
       const extra = -(0.15 + 0.1 * (used > 0.6 ? 1 : 0)) * urgency
       return Math.max(-2, base + extra)
     }
+
+    // --- Pace controller knobs ---
+    const paceMargin = 0.04 // deadband (~4% progress error)
+    const kUnder = 2.2 // boost when under-pace
+    const kOver = 1.6 // penalize when over-pace
+    const clamp = (x: number, lo: number, hi: number) =>
+      Math.max(lo, Math.min(hi, x))
 
     let reward = 0
     let usefulCount = 0
@@ -720,16 +714,32 @@ export class BanditBouncer<T> implements BerghainBouncer {
     this.constraints.forEach((constraint) => {
       if (!person[constraint.attribute]) return
 
+      const prog = constraint.getProgress() // admitted/required ∈ [0,1]
+      const paceGap = used - prog // >0 => behind pace
+      let paceAdj: number
+      if (Math.abs(paceGap) <= paceMargin) {
+        paceAdj = 1
+      } else if (paceGap > 0) {
+        // under-pace → boost
+        paceAdj = 1 + kUnder * (paceGap - paceMargin)
+      } else {
+        // over-pace → penalize
+        paceAdj = 1 - kOver * (-paceGap - paceMargin)
+      }
+      paceAdj = clamp(paceAdj, 0.2, 2.0)
+
       if (!constraint.isSatisfied()) {
         usefulCount++
 
-        let base =
+        // base payoff (your priors)
+        const base =
           String(constraint.attribute) === 'creative'
             ? 4.0
             : String(constraint.attribute) === 'berlin_local'
             ? 2.0
             : 0.8
 
+        // feasibility / scarcity (your existing signals)
         const need = constraint.getShortfall()
         const expAvail = Math.max(
           1e-6,
@@ -739,11 +749,12 @@ export class BanditBouncer<T> implements BerghainBouncer {
         const feasBoost = Math.min(2.0, 0.75 + 0.5 * feasRatio)
 
         const scarcity = constraint.getScarcity(this.remainingSlots)
-        const scarcityBoost = Math.max(0.5, Math.min(2.0, scarcity))
+        const scarcityBoost = clamp(scarcity, 0.5, 2.0)
 
-        reward += base * feasBoost * scarcityBoost
+        // 👉 apply pace adjustment multiplicatively
+        reward += base * feasBoost * scarcityBoost * paceAdj
       } else {
-        // Stronger overshoot penalty
+        // stronger overshoot penalty
         const overshoot =
           (constraint.admitted - constraint.minRequired) /
           Math.max(1, constraint.minRequired)
@@ -755,17 +766,22 @@ export class BanditBouncer<T> implements BerghainBouncer {
       }
     })
 
-    // If any constraint is at-risk (max>1), and this admit helps none, slap it down
+    // If any constraint is at-risk and this admit helps none → hard slap
     if (max > 1.0 && usefulCount === 0) return -2
 
+    // Small concave combo bonus for helping multiple unmet constraints
     if (usefulCount > 1) {
       const combo = Math.min(1.4, 1.0 + 0.15 * Math.log2(1 + usefulCount))
       reward *= combo
     }
 
+    // Late-capacity guardrail
     if (used > 0.6 && usefulCount <= 1) reward -= 1.2
+
+    // If truly useless, small negative
     if (usefulCount === 0) reward = Math.min(reward, -0.5)
 
+    // Clamp to keep the bandit stable
     return Math.max(-2, Math.min(6, reward))
   }
 
@@ -813,17 +829,16 @@ export class BanditBouncer<T> implements BerghainBouncer {
   }
 
   getProgress() {
-    const admitRate = (this.bandit as any).admitRateEma?.toFixed?.(3)
-    const thrDbg = (this.bandit as any).getThresholdDebug?.() || {}
+    const admitRate = this.bandit.admitRateEma?.toFixed?.(3)
+    const thrDbg = this.bandit.getThresholdDebug?.() || {}
     const feas = this.getFeasibilityRatios()
 
     // NEW: expose dynamic target + error if available
     const targetRate =
-      (this.bandit as any).getTargetAdmitRate?.() ??
-      (this.bandit as any).targetAdmitRate
+      this.bandit.getTargetAdmitRate?.() ?? this.bandit.targetAdmitRate
     const rateError =
-      (this.bandit as any).admitRateEma !== undefined
-        ? (this.bandit as any).admitRateEma - targetRate
+      this.bandit.admitRateEma !== undefined
+        ? this.bandit.admitRateEma - targetRate
         : null
     return {
       attributes: this.getConstraints().map((c) => ({
@@ -850,8 +865,8 @@ export class BanditBouncer<T> implements BerghainBouncer {
       feasibility: {
         maxRatio: feas.max,
         mostCritical: feas.mostCritical,
-        ratios: JSON.stringify(feas.ratios.slice(0, 4), null, 2), // short preview
       },
+      feasibilityRatios: feas.ratios.slice(0, 4),
       controller: {
         targetRate: targetRate?.toFixed?.(3),
         error: rateError?.toFixed?.(3),
@@ -880,9 +895,9 @@ export class BanditBouncer<T> implements BerghainBouncer {
       finalScore,
       totalAdmitted: this.totalAdmitted,
       totalRejected: this.totalRejected,
-      admitRate: (this.bandit as any).admitRateEma,
+      admitRate: this.bandit.admitRateEma,
       threshold: this.bandit.getLastThreshold(),
-      thresholdDebug: (this.bandit as any).getThresholdDebug?.(),
+      thresholdDebug: this.bandit.getThresholdDebug(),
     }
     Disk.saveJsonFile('summary.json', summary).catch(() => {})
 
