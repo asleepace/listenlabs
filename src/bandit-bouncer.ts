@@ -55,17 +55,34 @@ class Constraint<T> {
   public admitted = 0
   public rejected = 0
 
+  // NEW: streaming arrival stats (smoothed)
+  private seenTotal = 0
+  private seenTrue = 0
+
   constructor(
     public attribute: keyof T,
     public minRequired: number,
-    public frequency: number,
+    public frequency: number, // prior
     public config: Config
   ) {}
 
   update(person: Person<T>, admitted: boolean): void {
-    if (!person[this.attribute]) return
-    if (admitted) this.admitted++
-    else this.rejected++
+    // count stream
+    this.seenTotal++
+    if (person[this.attribute]) {
+      this.seenTrue++
+      if (admitted) this.admitted++
+      else this.rejected++
+    }
+  }
+
+  // NEW: robust empirical frequency with a tiny prior
+  getEmpiricalFrequency(): number {
+    const priorTrue = 2,
+      priorTotal = 8
+    const num = this.seenTrue + priorTrue
+    const den = this.seenTotal + priorTotal
+    return Math.max(1e-6, num / Math.max(1, den))
   }
 
   getProgress(): number {
@@ -83,7 +100,8 @@ class Constraint<T> {
   getScarcity(remainingSlots: number): number {
     if (this.isSatisfied()) return 0
     const needed = this.getShortfall()
-    const expectedAvailable = remainingSlots * this.frequency
+    const f = this.getEmpiricalFrequency() || this.frequency // <- use empirical
+    const expectedAvailable = remainingSlots * f
     return needed / Math.max(0.1, expectedAvailable)
   }
 }
@@ -106,7 +124,7 @@ class LinearBandit {
     // IMPORTANT: neutralize recentValues to avoid stale, inflated quantiles
     lb.recentValues = LinearBandit.randomInitialValues()
     // align controller to target to avoid big early shift
-    lb.admitRateEma = lb.targetAdmitRate
+    lb.admitRateEma = lb.getTargetAdmitRate()
     return lb
   }
 
@@ -510,16 +528,16 @@ export class BanditBouncer<T> implements BerghainBouncer {
     let scores: number[] = []
     for (const c of this.getConstraints()) {
       if (!c.isSatisfied()) {
+        const f = c.getEmpiricalFrequency() || c.frequency
         const need = c.getShortfall()
-        const expAvail = Math.max(1e-6, this.remainingSlots * c.frequency)
-        const ratio = need / expAvail // >1 means unlikely to finish
+        const expAvail = Math.max(1e-6, this.remainingSlots * f)
+        const ratio = need / expAvail
         scores.push(ratio)
       }
     }
     if (scores.length === 0) return 0
-    // Use a softplus-ish squashing so it grows >1 but doesn’t explode
     const maxRatio = Math.max(...scores)
-    const urgency = Math.log1p(Math.E * maxRatio) // ~1 at ratio≈1, grows gently
+    const urgency = Math.log1p(Math.E * maxRatio)
     return Math.min(5.0, urgency)
   }
 
@@ -537,13 +555,15 @@ export class BanditBouncer<T> implements BerghainBouncer {
   private getFeasibilityRatios() {
     const ratios = this.getConstraints()
       .filter((c) => !c.isSatisfied())
-      .map((c) => ({
-        attr: String(c.attribute),
-        ratio:
-          c.getShortfall() / Math.max(1e-6, this.remainingSlots * c.frequency),
-        shortfall: c.getShortfall(),
-        freq: c.frequency,
-      }))
+      .map((c) => {
+        const f = c.getEmpiricalFrequency() || c.frequency
+        return {
+          attr: String(c.attribute),
+          ratio: c.getShortfall() / Math.max(1e-6, this.remainingSlots * f),
+          shortfall: c.getShortfall(),
+          freq: f, // report empirical
+        }
+      })
     const max = ratios.reduce((m, r) => Math.max(m, r.ratio), 0)
     const most = ratios.sort((a, b) => b.ratio - a.ratio)[0]?.attr
     return { max, mostCritical: most, ratios }
@@ -603,7 +623,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
 
     // ---- Pace gate (later + bigger gap, and no bandit training on gate) ----
     const pace = this.mostBehindConstraint()
-    if (pace && used > 0.2 && pace.gap > 0.15) {
+    if (pace && used > 0.25 && pace.gap > 0.18) {
       // was 0.12/0.12
       if (!person[pace.attr]) {
         const reward = -1.5
@@ -627,6 +647,30 @@ export class BanditBouncer<T> implements BerghainBouncer {
 
     // ---- Feasibility gate (phase-dependent cutoff; no bandit training on gate) ----
     const feas = this.getFeasibilityRatios()
+    if (used > 0.82 && feas.max > 1.2 && feas.mostCritical) {
+      const hasCritical = person[feas.mostCritical as keyof T] ? 1 : 0
+      const helpsAtRisk = feas.ratios.filter(
+        (r) => r.ratio > 1.0 && person[r.attr as keyof T]
+      ).length
+      if (!hasCritical && helpsAtRisk < 2) {
+        const reward = -2
+        this.decisions.push({
+          context: this.buildContext(),
+          action: 'reject',
+          person,
+          reward,
+          features,
+          banditValue: 0,
+          heuristicValue: 0,
+        })
+        this.constraints.forEach((c) => c.update(person, false))
+        this.totalRejected++
+        this.logDecision(person, 'reject', reward, 0, features)
+        this.bandit.updateController(false)
+        return false
+      }
+    }
+
     const infeasibleCutoff = used < 0.33 ? 1.6 : used < 0.66 ? 1.3 : 1.0
 
     if (feas.max > infeasibleCutoff) {
@@ -781,12 +825,10 @@ export class BanditBouncer<T> implements BerghainBouncer {
 
         // feasibility / scarcity (your existing signals)
         const need = constraint.getShortfall()
-        const expAvail = Math.max(
-          1e-6,
-          this.remainingSlots * constraint.frequency
-        )
-        const feasRatio = need / expAvail // >1 => at-risk
-        const feasBoost = Math.min(2.0, 0.75 + 0.5 * feasRatio)
+        const f = constraint.getEmpiricalFrequency() || constraint.frequency
+        const expAvail = Math.max(1e-6, this.remainingSlots * f)
+        const feasRatio = need / expAvail
+        const feasBoost = Math.min(2.2, 0.75 + 0.65 * feasRatio)
 
         const scarcity = constraint.getScarcity(this.remainingSlots)
         const scarcityBoost = clamp(scarcity, 0.5, 2.0)
@@ -890,6 +932,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
         progress: c.getProgress(),
         shortfall: c.getShortfall(),
         frequency: c.frequency,
+        empiricalFrequency: c.getEmpiricalFrequency(), // 👈 add this
         scarcity: c.getScarcity(this.remainingSlots),
       })),
       lastLogs: this.logs.slice(-3),
