@@ -1,0 +1,21 @@
+{
+  "gameId": "13eff250-99b2-4f33-aa7e-9632ebe2a7f6",
+  "finalScore": 37,
+  "totalAdmitted": 999,
+  "totalRejected": 37,
+  "admitRate": 0.9679693043831259,
+  "threshold": 3.9999955522,
+  "thresholdDebug": {
+    "med": 4,
+    "mad": 0.000001,
+    "sigma": 0.0000014825999999999998,
+    "z": 0,
+    "quantileEstimate": 4,
+    "capacityBias": 0.5988,
+    "rateAdjustment": 0.9939036294515374,
+    "urgencyAdj": 5,
+    "lo": 3.9999955522,
+    "hi": 4.0000044478,
+    "final": 3.9999955522
+  }
+}

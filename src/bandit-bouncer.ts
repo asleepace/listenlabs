@@ -94,6 +94,13 @@ class Constraint<T> {
 }
 
 class LinearBandit {
+  // initialize values with random data
+  static randomInitialValues(n = 60) {
+    return Array(n)
+      .fill(0)
+      .map((_, i) => 1.5 + 0.02 * i)
+  }
+
   static fromSnapshot(s: BanditSnapshot) {
     const lb = new LinearBandit(s.featureDim, s.maxCapacity) // OR use constructorBare if you split it
     // overwrite core params
@@ -101,7 +108,7 @@ class LinearBandit {
     lb.b = s.b
     lb.weights = s.weights
     // IMPORTANT: neutralize recentValues to avoid stale, inflated quantiles
-    lb.recentValues = Array(Math.min(60, lb.recentCap)).fill(2.0)
+    lb.recentValues = LinearBandit.randomInitialValues()
     // align controller to target to avoid big early shift
     lb.admitRateEma = lb.targetAdmitRate
     return lb
@@ -180,7 +187,7 @@ class LinearBandit {
     this.b = this.priorWeights.map((w) => lambda * w)
     this.weights = [...this.priorWeights]
 
-    this.recentValues = Array(60).fill(2.0)
+    this.recentValues = LinearBandit.randomInitialValues()
     console.log('Bandit reset with initial weights:', this.weights.slice(0, 6))
   }
 
@@ -253,32 +260,62 @@ class LinearBandit {
     const mad = dev.length % 2 ? dev[m] : 0.5 * (dev[m - 1] + dev[m])
     return Math.max(mad, 1e-6)
   }
-  // Map target admit rate -> z for a Normal (robust approx)
-  private zForTail(p: number): number {
-    // p is the tail prob: e.g. 0.30 -> z≈0.524 (70th percentile)
-    const table: Record<string, number> = {
-      '0.50': 0.0,
-      '0.40': 0.253,
-      '0.35': 0.385,
-      '0.30': 0.524,
-      '0.25': 0.674,
-      '0.20': 0.842,
-      '0.15': 1.036,
-      '0.10': 1.282,
-      '0.07': 1.476,
-      '0.05': 1.645,
-      '0.03': 1.881,
-      '0.02': 2.054,
+  // Abramowitz & Stegun 26.2.23-ish rational approx for Φ^{-1}(p)
+  private invNorm(p: number): number {
+    // clamp away from 0/1
+    const pp = Math.max(1e-9, Math.min(1 - 1e-9, p))
+    const a1 = -39.69683028665376,
+      a2 = 220.9460984245205,
+      a3 = -275.9285104469687
+    const a4 = 138.357751867269,
+      a5 = -30.66479806614716,
+      a6 = 2.506628277459239
+    const b1 = -54.47609879822406,
+      b2 = 161.5858368580409,
+      b3 = -155.6989798598866
+    const b4 = 66.80131188771972,
+      b5 = -13.28068155288572
+    const c1 = -0.007784894002430293,
+      c2 = -0.3223964580411365
+    const c3 = -2.400758277161838,
+      c4 = -2.549732539343734
+    const c5 = 4.374664141464968,
+      c6 = 2.938163982698783
+    const d1 = 0.007784695709041462,
+      d2 = 0.3224671290700398
+    const d3 = 2.445134137142996,
+      d4 = 3.754408661907416
+
+    let q, r
+    if (pp < 0.02425) {
+      // lower tail
+      q = Math.sqrt(-2 * Math.log(pp))
+      return (
+        (((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) /
+        ((((d1 * q + d2) * q + d3) * q + d4) * q + 1)
+      )
+    } else if (pp > 1 - 0.02425) {
+      // upper tail
+      q = Math.sqrt(-2 * Math.log(1 - pp))
+      return (
+        -(((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) /
+        ((((d1 * q + d2) * q + d3) * q + d4) * q + 1)
+      )
+    } else {
+      // central
+      q = pp - 0.5
+      r = q * q
+      return (
+        ((((((a1 * r + a2) * r + a3) * r + a4) * r + a5) * r + a6) * q) /
+        (((((b1 * r + b2) * r + b3) * r + b4) * r + b5) * r + 1)
+      )
     }
-    // snap to nearest key
-    const keys = Object.keys(table)
-      .map(parseFloat)
-      .sort((a, b) => a - b)
-    const nearest = keys.reduce(
-      (best, k) => (Math.abs(k - p) < Math.abs(best - p) ? k : best),
-      keys[0]
-    )
-    return table[nearest.toFixed(2)] ?? 0.524
+  }
+
+  private zForTail(tail: number): number {
+    // tail = fraction ABOVE the threshold. If targetAdmitRate = 0.21,
+    // we want the 79th percentile => z ≈ +0.806
+    return this.invNorm(tail)
   }
 
   /**
@@ -426,24 +463,12 @@ class LinearBandit {
   }
 
   private pushRaw(v: number) {
-    const clipped = Math.max(-4, Math.min(4, v))
-    this.recentValues.push(clipped)
+    // Soft clip using tanh so extreme values compress but still move stats
+    const s = 8 // scale: scores map roughly into (-s, s)
+    const soft = s * Math.tanh(v / s)
+    this.recentValues.push(soft)
     if (this.recentValues.length > this.recentCap) this.recentValues.shift()
   }
-
-  // private percentile(p: number): number {
-  //   if (this.recentValues.length < 50) return this.calculateAdaptiveThreshold()
-  //   const arr = [...this.recentValues].sort((a, b) => a - b)
-  //   const n = arr.length
-  //   const lo = Math.floor(0.05 * n),
-  //     hi = Math.ceil(0.95 * n)
-  //   const trimmed = arr.slice(lo, Math.max(lo + 1, hi)) // ensure non-empty
-  //   const idx = Math.min(
-  //     trimmed.length - 1,
-  //     Math.max(0, Math.floor(p * (trimmed.length - 1)))
-  //   )
-  //   return trimmed[idx]
-  // }
 }
 
 export class BanditBouncer<T> implements BerghainBouncer {
@@ -679,45 +704,31 @@ export class BanditBouncer<T> implements BerghainBouncer {
     value: number,
     features: number[]
   ) {
-    const shouldLog =
-      this.remainingSlots < 100 ||
-      Math.abs(reward) > 15 ||
-      this.totalAdmitted + this.totalRejected < 50 ||
-      (this.totalAdmitted + this.totalRejected) % 100 === 0
-
-    if (shouldLog) {
-      const constraintStatus = this.getConstraints()
-        .map(
-          (c) => `${String(c.attribute)}:${(c.getProgress() * 100).toFixed(0)}%`
-        )
-        .join(' ')
-
-      const usefulAttrs = this.getConstraints()
-        .filter((c) => person[c.attribute] && !c.isSatisfied())
-        .map((c) => String(c.attribute))
-
-      this.logs.push(
-        `[${this.remainingSlots.toString().padStart(3)}] ${JSON.stringify(
-          person
-        )} -> ${action}`
+    const constraintStatus = this.getConstraints()
+      .map(
+        (c) => `${String(c.attribute)}:${(c.getProgress() * 100).toFixed(0)}%`
       )
-      this.logs.push(
-        `    Reward: ${reward.toFixed(1)}, Bandit Value: ${value.toFixed(1)}`
-      )
-      this.logs.push(
-        `    Useful: [${usefulAttrs.join(',')}], Status: [${constraintStatus}]`
-      )
+      .join(' ')
 
-      if (this.totalAdmitted + this.totalRejected < 20) {
-        this.logs.push(
-          `    Features: [${features.map((f) => f.toFixed(2)).join(', ')}]`
-        )
-        this.logs.push(
-          `    Bandit stats:`,
-          JSON.stringify(this.bandit.getStats(), null, 2)
-        )
-      }
-    }
+    const usefulAttrs = this.getConstraints()
+      .filter((c) => person[c.attribute] && !c.isSatisfied())
+      .map((c) => String(c.attribute))
+
+    this.logs.push(
+      `[${this.remainingSlots.toString().padStart(3)}] ${JSON.stringify(
+        person
+      )} -> ${action}`
+    )
+    this.logs.push(
+      `    reward: ${reward.toFixed(1)}, bandit: ${value.toFixed(1)}`
+    )
+    this.logs.push(
+      `    useful: [${usefulAttrs.join(',')}], status: [${constraintStatus}]`
+    )
+
+    this.logs.push(
+      `    features: [${features.map((f) => f.toFixed(2)).join(', ')}]`
+    )
   }
 
   private buildContext(): Context {
