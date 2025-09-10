@@ -1,21 +1,21 @@
 {
-  "gameId": "13eff250-99b2-4f33-aa7e-9632ebe2a7f6",
-  "finalScore": 37,
+  "gameId": "eb14443d-a8de-40b7-ade7-4d1ee93d4b52",
+  "finalScore": 472,
   "totalAdmitted": 999,
-  "totalRejected": 37,
-  "admitRate": 0.9679693043831259,
-  "threshold": 3.9999955522,
+  "totalRejected": 472,
+  "admitRate": 0.5621442521503243,
+  "threshold": 3.92827846840477,
   "thresholdDebug": {
-    "med": 4,
-    "mad": 0.000001,
-    "sigma": 0.0000014825999999999998,
-    "z": 0,
-    "quantileEstimate": 4,
+    "med": 5.869093936028246,
+    "mad": 1.6514611776800412,
+    "sigma": 2.448456342028429,
+    "z": 0.8064212461083199,
+    "quantileEstimate": 7.843581150408631,
     "capacityBias": 0.5988,
-    "rateAdjustment": 0.9939036294515374,
+    "rateAdjustment": 0.48589731799613933,
     "urgencyAdj": 5,
-    "lo": 3.9999955522,
-    "hi": 4.0000044478,
-    "final": 3.9999955522
+    "lo": -1.4762750900570403,
+    "hi": 13.214462962113533,
+    "final": 3.92827846840477
   }
 }

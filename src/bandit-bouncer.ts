@@ -140,6 +140,9 @@ class LinearBandit {
     lo: 0,
     hi: 0,
     final: 0,
+    target: 0,
+    err: 0,
+    tail: 0,
   }
 
   private weights!: number[]
@@ -201,6 +204,13 @@ class LinearBandit {
       featureDim: this.featureDim,
       maxCapacity: this.maxCapacity,
     }
+  }
+
+  getTargetAdmitRate(): number {
+    const used = this.totalAdmitted / this.maxCapacity // 0..1
+    const late = Math.min(1, Math.max(0, (used - 0.5) / 0.4)) // ramps 0→1 from 50% to 90% capacity
+    // Early target ≈ 0.28, late target ≈ 0.12
+    return 0.28 - 0.16 * late
   }
 
   // inside LinearBandit
@@ -330,27 +340,35 @@ class LinearBandit {
     const arr = this.recentValues.length ? this.recentValues : [0]
     const med = this.median(arr)
     const mad = this.mad(arr, med)
-    const sigma = 1.4826 * mad
+    const sigma = Math.max(1.4826 * mad, 0.35) // (optional) larger floor
 
-    const tail = 1 - this.targetAdmitRate
+    const target = this.getTargetAdmitRate() // dynamic target
+    const err = this.admitRateEma - target
+
+    const tail = 1 - target // <-- use dynamic target here
     const z = this.zForTail(tail)
 
     const quantileEstimate = med + z * sigma
     const used = this.totalAdmitted / this.maxCapacity
-    const capacityBias = 0.6 * used
-    const k = 0.8
-    const urgencyAdj = Math.min(5.0, Math.max(0, constraintUrgency))
+    const capacityBias = 0.9 * used
 
-    const err = this.admitRateEma - this.targetAdmitRate
+    const urgencyScale = 1 - 0.5 * used
+    const urgencyAdj =
+      Math.min(2.5, Math.max(0, constraintUrgency)) * urgencyScale
+
+    // PI controller (you already maintain rateErrI)
     this.rateErrI = (1 - this.iBeta) * this.rateErrI + this.iBeta * err
-
-    const kP = 0.8,
+    const kP = 1.6,
       kI = 0.6
     const rateAdjustment = kP * err + kI * this.rateErrI
-    let thr = quantileEstimate + capacityBias + rateAdjustment - urgencyAdj
 
-    const lo = med - 3 * sigma
-    const hi = med + 3 * sigma
+    let thr = quantileEstimate + capacityBias + rateAdjustment - urgencyAdj
+    if (err > 0.15) {
+      thr = Math.max(thr, med + 0.25 * sigma)
+    }
+
+    const lo = med - 3 * sigma,
+      hi = med + 3 * sigma
     if (!Number.isFinite(thr)) thr = med
     const final = Math.max(lo, Math.min(hi, thr))
 
@@ -366,18 +384,16 @@ class LinearBandit {
       lo,
       hi,
       final,
+      // debug extras:
+      target,
+      err,
+      tail,
     }
     return final
   }
 
   getThresholdDebug() {
     return this.lastThrDbg
-  }
-
-  private calculateUrgencyBonus(): number {
-    // This would need access to constraints - for now return 0
-    // In practice, you'd pass constraint info or calculate here
-    return 0
   }
 
   private getNoise() {
@@ -719,15 +735,13 @@ export class BanditBouncer<T> implements BerghainBouncer {
         person
       )} -> ${action}`
     )
+    this.logs.push(`reward: ${reward.toFixed(1)}, bandit: ${value.toFixed(1)}`)
     this.logs.push(
-      `    reward: ${reward.toFixed(1)}, bandit: ${value.toFixed(1)}`
-    )
-    this.logs.push(
-      `    useful: [${usefulAttrs.join(',')}], status: [${constraintStatus}]`
+      `useful: [${usefulAttrs.join(',')}], status: [${constraintStatus}]`
     )
 
     this.logs.push(
-      `    features: [${features.map((f) => f.toFixed(2)).join(', ')}]`
+      `features: [${features.map((f) => f.toFixed(2)).join(', ')}]`
     )
   }
 
@@ -745,6 +759,16 @@ export class BanditBouncer<T> implements BerghainBouncer {
   getProgress() {
     const admitRate = (this.bandit as any).admitRateEma?.toFixed?.(3)
     const thrDbg = (this.bandit as any).getThresholdDebug?.() || {}
+
+    // NEW: expose dynamic target + error if available
+    const targetRate =
+      (this.bandit as any).getTargetAdmitRate?.() ??
+      (this.bandit as any).targetAdmitRate
+    const rateError =
+      (this.bandit as any).admitRateEma !== undefined
+        ? (this.bandit as any).admitRateEma - targetRate
+        : null
+
     const rv = (this as any).bandit ? (this as any).bandit : null
     const recent =
       rv && (rv as any).recentValues ? (rv as any).recentValues : []
@@ -771,14 +795,13 @@ export class BanditBouncer<T> implements BerghainBouncer {
       threshold: this.bandit.getLastThreshold(),
       lastRawValue: this.bandit.getLastRawValue(),
       admitRate,
-      // NEW: score distribution + threshold components
-      scoreDist: {
-        n: sorted.length,
-        p10: pick(0.1),
-        p50: pick(0.5),
-        p90: pick(0.9),
+      scoreDist: this.bandit.getScoreSummary(),
+      thresholdDebug: thrDbg,
+      // 👇 NEW FIELDS
+      controller: {
+        targetRate: targetRate?.toFixed?.(3),
+        error: rateError?.toFixed?.(3),
       },
-      thresholdDebug: thrDbg, // med, mad, z, capacityBias, rateAdjustment, urgencyAdj, lo/hi, final
     }
   }
 
