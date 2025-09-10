@@ -141,21 +141,30 @@ function getPeopleFromConstraints({ game }: GameState) {
         // incrament the seen variable if person has attribute
         if (hasAttribute) this.totalSeen++
 
+        const totalNeeded = this.totalNeeded()
+
         // map over combos and calculate score, +1 for combos and +2 for rare
         // combos with more people
         const comboScore = this.forCombos((key, value): number => {
-          if (!person[key]) return 0
-          if (value > 0) return 1
-          if (value === 0) return 0
-          return 2
+          if (!person[key]) return 1.0
+
+          return 1 - value / totalNeeded
         })
 
         return comboScore.reduce((a, b) => a + b, 0) * this.modifer
       },
       didAdmit(person: ScenarioAttributes) {
         if (person[this.attribute]) this.admitted++
-        this.forCombos((key) => {
-          this.combos[key]--
+        this.forCombos((key, value) => {
+          if (value > 0) {
+            this.combos[key]--
+          } else {
+            this.combos[key]++
+          }
+          // remove when done
+          if (this.combos[key] === 0) {
+            delete this.combos[key]
+          }
         })
       },
     }
@@ -235,12 +244,12 @@ export class ColinsBouncer implements BergainBouncer {
     return config.maxAdmissions - this.totalAdmitted
   }
 
-  public get totalProcessed() {
-    return this.totalAdmitted + this.totalRejected
+  public get toalRejected() {
+    return this.totalProcessed - this.totalAdmitted
   }
 
   public totalAdmitted = 0
-  public totalRejected = 0
+  public totalProcessed = 0
 
   isAtMaxCapacity() {
     return this.totalAdmitted >= config.maxAdmissions
@@ -264,6 +273,7 @@ export class ColinsBouncer implements BergainBouncer {
 
   admit(next: GameStatusRunning<ScenarioAttributes>): boolean {
     if (next.status !== 'running') return false
+    this.totalProcessed++
     if (this.isAtMaxCapacity()) return false
     if (this.isFinishedWithQuotas()) return true
 
@@ -281,6 +291,7 @@ export class ColinsBouncer implements BergainBouncer {
     const shouldAdmit = totalScore >= threshold
 
     if (shouldAdmit) {
+      this.totalAdmitted++
       this.people.forEach((person) =>
         person.didAdmit(next.nextPerson.attributes)
       )
@@ -297,14 +308,19 @@ export class ColinsBouncer implements BergainBouncer {
   }
 
   getProgress() {
-    return {
-      ...this.people.reduce((output, person) => ({
+    const combined = this.people.reduce((output, person) => {
+      return {
         ...output,
         ...person.getOutput(),
-      })),
+      }
+    }, {})
+
+    return {
+      ...combined,
       admissionRate: round(this.totalProcessed / this.totalSpotsLeft),
       weights: this.lastScore,
       totalSpotsLeft: this.totalSpotsLeft,
+      totalRejections: this.toalRejected,
       threshold: this.lastThreshold,
       score: this.lastTotal,
     }
