@@ -91,6 +91,8 @@ class LinearBandit {
   private b!: number[]
   private featureDim: number
   private decisionCount: number = 0
+  private lastThreshold = 9
+  private lastRawValue = 9
 
   constructor(featureDimension: number, previousData: DecisionRecord[] = []) {
     this.featureDim = featureDimension
@@ -104,15 +106,15 @@ class LinearBandit {
 
     // Initialize with reasonable weights instead of zeros
     this.weights = [
-      7, // techno_lover indicator
-      7, // well_connected indicator
-      10, // creative indicator (more valuable)
-      8, // berlin_local indicator
+      5, // techno_lover indicator
+      5, // well_connected indicator
+      5, // creative indicator (more valuable)
+      5, // berlin_local indicator
       -5, // techno_lover progress (less valuable when satisfied)
       -5, // well_connected progress
-      -10, // creative progress (penalty for being satisfied)
-      -8, // berlin_local progress
-      -3, // capacity utilization (penalty for being full)
+      -5, // creative progress (penalty for being satisfied)
+      -5, // berlin_local progress
+      -5, // capacity utilization (penalty for being full)
       5, // creative scarcity (bonus for high scarcity)
     ]
 
@@ -145,7 +147,7 @@ class LinearBandit {
       let normalizedReward = decision.reward
       if (Math.abs(decision.reward) > 100) {
         // Scale down large historical rewards
-        normalizedReward = decision.reward * 0.2 // rough scaling factor
+        normalizedReward = decision.reward * 1.1 // rough scaling factor
         normalizedReward = Math.max(-50, Math.min(50, normalizedReward))
       }
 
@@ -169,6 +171,11 @@ class LinearBandit {
 
     // Simple threshold on raw prediction
     const threshold = 15 + this.decisionCount / 100 // gradually increase threshold
+
+    this.lastThreshold = threshold // TODO: add logging
+    this.lastRawValue = rawValue
+
+    // Determine action to take based on score
     const action = rawValue > threshold ? 'admit' : 'reject'
 
     return { action, value: rawValue }
@@ -199,6 +206,14 @@ class LinearBandit {
         this.weights[i] = Math.max(-25, Math.min(25, this.weights[i])) // increased bounds
       }
     }
+  }
+
+  getLastRawValue() {
+    return this.lastRawValue
+  }
+
+  getLastThreshold() {
+    return this.lastThreshold
   }
 
   updateModel(features: number[], reward: number) {
@@ -350,7 +365,8 @@ export class BanditBouncer<T> implements BergainBouncer {
 
   private calculateReward(person: Person<T>, admitted: boolean): number {
     if (!admitted) {
-      return 1 // Small positive for rejection
+      return 7 // should be like 20%
+      // return 1 // Small positive for rejection
     }
 
     // Simple reward: sum of rarity values for useful attributes
@@ -453,10 +469,12 @@ export class BanditBouncer<T> implements BergainBouncer {
         frequency: constraint.frequency,
         scarcity: constraint.getScarcity(this.remainingSlots),
       })),
-      totalAdmitted: this.totalAdmitted,
-      totalRejected: this.totalRejected,
       remainingSlots: this.remainingSlots,
       banditStats: this.bandit?.getStats(),
+      totalAdmitted: this.totalAdmitted,
+      totalRejected: this.totalRejected,
+      threshold: this.bandit.getLastThreshold(),
+      lastRawValue: this.bandit.getLastRawValue(),
     }
   }
 
