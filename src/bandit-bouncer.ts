@@ -101,8 +101,22 @@ class LinearBandit {
   private reset() {
     this.A = this.createIdentityMatrix(this.featureDim, 0.1)
     this.b = Array(this.featureDim).fill(0)
-    this.weights = Array(this.featureDim).fill(0)
-    console.log('Bandit reset to initial state')
+
+    // Initialize with reasonable weights instead of zeros
+    this.weights = [
+      7, // techno_lover indicator
+      7, // well_connected indicator
+      10, // creative indicator (more valuable)
+      8, // berlin_local indicator
+      -5, // techno_lover progress (less valuable when satisfied)
+      -5, // well_connected progress
+      -10, // creative progress (penalty for being satisfied)
+      -8, // berlin_local progress
+      -3, // capacity utilization (penalty for being full)
+      5, // creative scarcity (bonus for high scarcity)
+    ]
+
+    console.log('Bandit reset with initial weights:', this.weights.slice(0, 6))
   }
 
   private createIdentityMatrix(size: number, lambda: number): number[][] {
@@ -148,20 +162,16 @@ class LinearBandit {
     value: number
   } {
     this.decisionCount++
+
+    // Skip the complex UCB - just predict raw value
     this.updateWeights()
+    const rawValue = this.predictValue(features)
 
-    const value = this.predictValue(features)
-    const confidence = this.calculateConfidence(features)
-    const ucbValue = value + 0.5 * Math.min(confidence, 5)
+    // Simple threshold on raw prediction
+    const threshold = 15 + this.decisionCount / 100 // gradually increase threshold
+    const action = rawValue > threshold ? 'admit' : 'reject'
 
-    // Start with low threshold, gradually increase as bandit learns
-    let threshold = 3
-    if (this.decisionCount > 100) threshold = 8
-    if (this.decisionCount > 300) threshold = 12
-
-    const action = ucbValue > threshold ? 'admit' : 'reject'
-
-    return { action, value: ucbValue }
+    return { action, value: rawValue }
   }
 
   private predictValue(features: number[]): number {
@@ -186,7 +196,7 @@ class LinearBandit {
     for (let i = 0; i < this.featureDim; i++) {
       if (this.A[i][i] > 1e-6) {
         this.weights[i] = this.b[i] / this.A[i][i]
-        this.weights[i] = Math.max(-10, Math.min(10, this.weights[i]))
+        this.weights[i] = Math.max(-25, Math.min(25, this.weights[i])) // increased bounds
       }
     }
   }
