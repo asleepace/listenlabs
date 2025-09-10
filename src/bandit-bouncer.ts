@@ -157,7 +157,7 @@ class LinearBandit {
   private recentCap = 500
 
   public targetAdmitRate = 0.21
-  private eta = 0.2 // tune 0.05–0.5
+  private eta = 0.12 // was 0.2
 
   public admitRateEma = this.targetAdmitRate
   private emaBeta = 0.035 // a bit more responsive
@@ -340,8 +340,8 @@ class LinearBandit {
     const med = this.median(arr)
     const mad = this.mad(arr, med)
 
-    const warmup = this.decisionCount < 200
-    const sigma = Math.max(1.4826 * mad, warmup ? 0.25 : 0.35)
+    const warmup = this.decisionCount < 300
+    const sigma = Math.max(1.4826 * mad, 0.35)
 
     const target = this.getTargetAdmitRate()
     const err = this.admitRateEma - target
@@ -351,7 +351,8 @@ class LinearBandit {
 
     const quantileEstimate = med + z * sigma
     const used = this.totalAdmitted / this.maxCapacity
-    const capacityBias = (warmup ? 0.6 : 1.25) * used // softer early
+    const biasK = used < 0.5 ? 0.7 : 1.0 // gentler <50% capacity
+    const capacityBias = biasK * used * sigma // scale by sigma
 
     const urgencyScale = Math.pow(Math.max(0, used - 0.3) / 0.6, 1.2)
     const urgencyAdj =
@@ -368,7 +369,6 @@ class LinearBandit {
     let thr = quantileEstimate + capacityBias + rateAdjustment - urgencyAdj
 
     if (err > 0) {
-      // limit floor during warmup
       const cap = warmup ? 0.3 : 0.75
       const floorBump = 0.25 + 1.25 * Math.min(cap, Math.max(0, err))
       thr = Math.max(thr, med + floorBump * sigma)
@@ -627,9 +627,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
 
     // ---- Feasibility gate (phase-dependent cutoff; no bandit training on gate) ----
     const feas = this.getFeasibilityRatios()
-    // in admit()
-    const infeasibleCutoff =
-      used < 0.2 ? 2.5 : used < 0.5 ? 1.8 : used < 0.8 ? 1.3 : 1.0
+    const infeasibleCutoff = used < 0.33 ? 1.6 : used < 0.66 ? 1.3 : 1.0
 
     if (feas.max > infeasibleCutoff) {
       this.bandit.maxFeasRatio = feas.max // inform controller immediately
@@ -660,7 +658,12 @@ export class BanditBouncer<T> implements BerghainBouncer {
     this.bandit.maxFeasRatio = feas.max
 
     // ---- Bandit decision ----
-    const urgency = this.computeConstraintUrgency()
+    let urgency = this.computeConstraintUrgency()
+
+    if (feas.mostCritical && person[feas.mostCritical as keyof T]) {
+      urgency += 1.0 // small, targeted nudge
+    }
+
     const { action, value } = this.bandit.selectAction(features, urgency)
     const shouldAdmit = action === 'admit'
 
