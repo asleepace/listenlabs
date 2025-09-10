@@ -108,6 +108,18 @@ function getPeopleFromConstraints({ game }: GameState) {
       combos: comboCopy,
       admitted: 0,
       totalSeen: 0,
+
+      getOutput() {
+        return {
+          [this.attribute]: {
+            admitted: this.admitted,
+            rejected: this.totalSeen - this.admitted,
+            needed: this.minCount - this.admitted,
+            modifier: this.modifer,
+          },
+        }
+      },
+
       forCombos<T>(callback: (key: string, value: number) => T): T[] {
         return Object.entries(this.combos).map(([key, value]) => {
           return callback(key, value)
@@ -196,6 +208,10 @@ function getPeopleFromConstraints({ game }: GameState) {
 
 type People = ReturnType<typeof getPeopleFromConstraints>[0]
 
+function clamp(lowerBound: number, value: number, upperBound: number): number {
+  return Math.max(lowerBound, Math.min(upperBound, value))
+}
+
 /**
  *  Custom implementation.
  */
@@ -240,12 +256,8 @@ export class ColinsBouncer implements BergainBouncer {
   }
 
   getThreshold() {
-    const totalPeopleNeeded = this.people.reduce(
-      (total, person) => total + person.totalNeeded(),
-      0
-    )
-    const ratio = totalPeopleNeeded / this.totalSpotsLeft
-    return Math.max(0.25, Math.min(ratio, 0.9))
+    const ratio = this.totalAdmitted / this.totalSpotsLeft
+    return clamp(0.41, ratio, 0.91)
   }
 
   // override methods
@@ -286,8 +298,11 @@ export class ColinsBouncer implements BergainBouncer {
 
   getProgress() {
     return {
+      ...this.people.reduce((output, person) => ({
+        ...output,
+        ...person.getOutput(),
+      })),
       admissionRate: round(this.totalProcessed / this.totalSpotsLeft),
-      people: this.people,
       weights: this.lastScore,
       totalSpotsLeft: this.totalSpotsLeft,
       threshold: this.lastThreshold,
