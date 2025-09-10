@@ -1,7 +1,6 @@
 import { BanditBouncer } from './bandit-bouncer'
 import { Berghain, type ListenLabsConfig } from './berghain'
 import { getCliArgs } from './cli/get-cli-args'
-import { HansBouncer } from './hans-bouncer'
 
 console.log('+'.repeat(64))
 
