@@ -155,6 +155,9 @@ class LinearBandit {
   private admitRateEma = this.targetAdmitRate
   private emaBeta = 0.02 // slow + stable
 
+  private rateErrI = 0
+  private iBeta = 0.002 // very slow
+
   constructor(
     featureDimension: number,
     maxCapacity: number,
@@ -191,6 +194,14 @@ class LinearBandit {
       featureDim: this.featureDim,
       maxCapacity: this.maxCapacity,
     }
+  }
+
+  // inside LinearBandit
+  getScoreSummary() {
+    const s = [...this.recentValues].sort((a, b) => a - b)
+    const pick = (p: number) =>
+      s.length ? s[Math.floor(p * (s.length - 1))] : 0
+    return { n: s.length, p10: pick(0.1), p50: pick(0.5), p90: pick(0.9) }
   }
 
   updateController(admitted: boolean) {
@@ -291,9 +302,14 @@ class LinearBandit {
     const used = this.totalAdmitted / this.maxCapacity
     const capacityBias = 0.6 * used
     const k = 0.8
-    const rateAdjustment = k * (this.admitRateEma - this.targetAdmitRate)
     const urgencyAdj = Math.min(5.0, Math.max(0, constraintUrgency))
 
+    const err = this.admitRateEma - this.targetAdmitRate
+    this.rateErrI = (1 - this.iBeta) * this.rateErrI + this.iBeta * err
+
+    const kP = 0.8,
+      kI = 0.6
+    const rateAdjustment = kP * err + kI * this.rateErrI
     let thr = quantileEstimate + capacityBias + rateAdjustment - urgencyAdj
 
     const lo = med - 3 * sigma
@@ -415,19 +431,19 @@ class LinearBandit {
     if (this.recentValues.length > this.recentCap) this.recentValues.shift()
   }
 
-  private percentile(p: number): number {
-    if (this.recentValues.length < 50) return this.calculateAdaptiveThreshold()
-    const arr = [...this.recentValues].sort((a, b) => a - b)
-    const n = arr.length
-    const lo = Math.floor(0.05 * n),
-      hi = Math.ceil(0.95 * n)
-    const trimmed = arr.slice(lo, Math.max(lo + 1, hi)) // ensure non-empty
-    const idx = Math.min(
-      trimmed.length - 1,
-      Math.max(0, Math.floor(p * (trimmed.length - 1)))
-    )
-    return trimmed[idx]
-  }
+  // private percentile(p: number): number {
+  //   if (this.recentValues.length < 50) return this.calculateAdaptiveThreshold()
+  //   const arr = [...this.recentValues].sort((a, b) => a - b)
+  //   const n = arr.length
+  //   const lo = Math.floor(0.05 * n),
+  //     hi = Math.ceil(0.95 * n)
+  //   const trimmed = arr.slice(lo, Math.max(lo + 1, hi)) // ensure non-empty
+  //   const idx = Math.min(
+  //     trimmed.length - 1,
+  //     Math.max(0, Math.floor(p * (trimmed.length - 1)))
+  //   )
+  //   return trimmed[idx]
+  // }
 }
 
 export class BanditBouncer<T> implements BerghainBouncer {
@@ -436,6 +452,8 @@ export class BanditBouncer<T> implements BerghainBouncer {
   public totalRejected = 0
   private bandit!: LinearBandit
   private decisions: DecisionRecord[] = []
+
+  private logs: string[] = []
 
   constructor(public state: GameState, public config: Config) {
     this.initializeConstraints()
@@ -584,38 +602,73 @@ export class BanditBouncer<T> implements BerghainBouncer {
 
   private calculateReward(person: Person<T>, admitted: boolean): number {
     const used = this.totalAdmitted / this.config.MAX_CAPACITY
-    if (!admitted) return used < 0.2 ? -0.25 : -0.5
+    const urgency = this.computeConstraintUrgency?.() ?? 0 // 0..~5
+
+    // Rejection penalty: a bit harsher when constraints are at risk
+    if (!admitted) {
+      const base = used < 0.2 ? -0.25 : -0.5
+      const extra = -(0.15 + 0.1 * (used > 0.6 ? 1 : 0)) * urgency // up to ~ -1.25 when urgent+late
+      return Math.max(-2, base + extra)
+    }
 
     let reward = 0
     let usefulCount = 0
 
     this.constraints.forEach((constraint) => {
-      if (person[constraint.attribute]) {
-        if (!constraint.isSatisfied()) {
-          // 👍 positive reward for helping satisfy this constraint
-          usefulCount++
-          let baseReward =
-            String(constraint.attribute) === 'creative'
-              ? 4.0 // boosted
-              : String(constraint.attribute) === 'berlin_local'
-              ? 2.0 // boosted
-              : 0.8
-          const scarcityMultiplier = constraint.getScarcity(this.remainingSlots)
-          reward +=
-            baseReward * Math.max(0.5, Math.min(2.0, scarcityMultiplier))
-        } else {
-          // 👇 penalty if constraint already satisfied
-          reward -= 1.0
-        }
+      if (!person[constraint.attribute]) return
+
+      if (!constraint.isSatisfied()) {
+        // Positive reward for helping unmet constraints
+        usefulCount++
+
+        // Base per-attribute payoff (you can tweak these priors)
+        let base =
+          String(constraint.attribute) === 'creative'
+            ? 4.0
+            : String(constraint.attribute) === 'berlin_local'
+            ? 2.0
+            : 0.8
+
+        // Feasibility factor: shortfall vs expected available from remaining slots
+        const need = constraint.getShortfall()
+        const expAvail = Math.max(
+          1e-6,
+          this.remainingSlots * constraint.frequency
+        )
+        const feasRatio = need / expAvail // >1 => unlikely to finish without prioritizing
+        const feasBoost = Math.min(2.0, 0.75 + 0.5 * feasRatio) // 0.75..2.0
+
+        // Scarcity multiplier (already capped inside getScarcity via your code path)
+        const scarcity = constraint.getScarcity(this.remainingSlots)
+        const scarcityBoost = Math.max(0.5, Math.min(2.0, scarcity))
+
+        reward += base * feasBoost * scarcityBoost
+      } else {
+        // Penalty for oversatisfying: scale by overshoot
+        const overshoot =
+          (constraint.admitted - constraint.minRequired) /
+          Math.max(1, constraint.minRequired)
+        const overshootPenalty = Math.min(
+          1.5,
+          0.8 + 0.7 * Math.max(0, overshoot)
+        )
+        reward -= overshootPenalty
       }
     })
 
-    // late capacity penalty if admits aren’t very useful
+    // Small concave combo bonus if the person helps multiple unmet constraints
+    if (usefulCount > 1) {
+      const combo = Math.min(1.4, 1.0 + 0.15 * Math.log2(1 + usefulCount)) // at most +40%
+      reward *= combo
+    }
+
+    // Late-capacity guardrail: discourage low-value admits when nearly full
     if (used > 0.6 && usefulCount <= 1) reward -= 1.2
 
-    // if truly useless, small negative
-    reward = usefulCount === 0 ? -0.5 : reward
+    // If they helped nothing unmet, give a small negative
+    if (usefulCount === 0) reward = Math.min(reward, -0.5)
 
+    // Final clamp to keep the bandit stable
     return Math.max(-2, Math.min(6, reward))
   }
 
@@ -643,23 +696,26 @@ export class BanditBouncer<T> implements BerghainBouncer {
         .filter((c) => person[c.attribute] && !c.isSatisfied())
         .map((c) => String(c.attribute))
 
-      console.log(
+      this.logs.push(
         `[${this.remainingSlots.toString().padStart(3)}] ${JSON.stringify(
           person
         )} -> ${action}`
       )
-      console.log(
+      this.logs.push(
         `    Reward: ${reward.toFixed(1)}, Bandit Value: ${value.toFixed(1)}`
       )
-      console.log(
+      this.logs.push(
         `    Useful: [${usefulAttrs.join(',')}], Status: [${constraintStatus}]`
       )
 
       if (this.totalAdmitted + this.totalRejected < 20) {
-        console.log(
+        this.logs.push(
           `    Features: [${features.map((f) => f.toFixed(2)).join(', ')}]`
         )
-        console.log(`    Bandit stats:`, this.bandit.getStats())
+        this.logs.push(
+          `    Bandit stats:`,
+          JSON.stringify(this.bandit.getStats(), null, 2)
+        )
       }
     }
   }
@@ -696,8 +752,9 @@ export class BanditBouncer<T> implements BerghainBouncer {
         frequency: c.frequency,
         scarcity: c.getScarcity(this.remainingSlots),
       })),
-      remainingSlots: this.remainingSlots,
+      lastLogs: this.logs.slice(-3),
       banditStats: this.bandit?.getStats(),
+      remainingSlots: this.remainingSlots,
       totalAdmitted: this.totalAdmitted,
       totalRejected: this.totalRejected,
       threshold: this.bandit.getLastThreshold(),
