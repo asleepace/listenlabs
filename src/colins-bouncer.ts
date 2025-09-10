@@ -148,7 +148,9 @@ function getPeopleFromConstraints({ game }: GameState) {
         const comboScore = this.forCombos((key, value): number => {
           if (!person[key]) return 1.0
 
-          return 1 - value / totalNeeded
+          if (value < 0) return 1.5
+          if (value > 0) return 0.5
+          return 1.0
         })
 
         return comboScore.reduce((a, b) => a + b, 0) * this.modifer
@@ -281,7 +283,7 @@ export class ColinsBouncer implements BergainBouncer {
       person.getScore(next.nextPerson.attributes)
     )
     const threshold = this.getThreshold()
-    const totalScore = score.reduce((a, b) => a + b, 0) / score.length
+    const totalScore = score.reduce((a, b) => a * b, 1.0) / score.length
 
     this.lastAttributes = next.nextPerson.attributes
     this.lastScore = score
@@ -320,6 +322,7 @@ export class ColinsBouncer implements BergainBouncer {
       admissionRate: round(this.totalProcessed / this.totalSpotsLeft),
       weights: this.lastScore,
       totalSpotsLeft: this.totalSpotsLeft,
+      totalAdmissions: this.totalAdmitted,
       totalRejections: this.toalRejected,
       threshold: this.lastThreshold,
       score: this.lastTotal,

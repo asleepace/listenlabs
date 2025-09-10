@@ -1,7 +1,7 @@
 import { BanditBouncer } from './bandit-bouncer'
 import { Berghain, type ListenLabsConfig } from './berghain'
 import { getCliArgs } from './cli/get-cli-args'
-import { ColinsBouncer } from './colins-bouncer'
+// import { ColinsBouncer } from './colins-bouncer'
 
 console.log('+'.repeat(64))
 
@@ -36,16 +36,16 @@ if (!scenario) {
 await Berghain.initialize({
   scenario,
 })
-  // .withBouncer(async (gameState) => {
-  //   const bouncer = new BanditBouncer(gameState, {
-  //     MAX_CAPACITY: 1_000,
-  //     TARGET_RANGE: 4_000,
-  //     TOTAL_PEOPLE: 10_000,
-  //   })
-  //   await bouncer.initializeLearningData()
-  //   return bouncer
-  // })
-  .withBouncer((initialState) => new ColinsBouncer(initialState))
+  .withBouncer(async (gameState) => {
+    const bouncer = new BanditBouncer(gameState, {
+      MAX_CAPACITY: 1_000,
+      TARGET_RANGE: 4_000,
+      TOTAL_PEOPLE: 10_000,
+    })
+    await bouncer.initializeLearningData()
+    return bouncer
+  })
+  // .withBouncer((initialState) => new ColinsBouncer(initialState))
   .startNewGame()
   .catch(console.warn)
   .finally(async () => {

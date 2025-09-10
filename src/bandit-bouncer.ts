@@ -82,9 +82,6 @@ class Constraint<T> {
   }
 }
 
-/**
- * Simple Linear Bandit with proper reward scaling
- */
 class LinearBandit {
   private weights!: number[]
   private A!: number[][]
@@ -94,8 +91,18 @@ class LinearBandit {
   private lastThreshold = 9
   private lastRawValue = 9
 
-  constructor(featureDimension: number, previousData: DecisionRecord[] = []) {
+  public totalAdmitted = 0
+  public maxCapacity: number // Remove hardcoded value
+  private admitRateEma = 0.5
+  private emaBeta = 0.02 // slow + stable
+
+  constructor(
+    featureDimension: number,
+    maxCapacity: number,
+    previousData: DecisionRecord[] = []
+  ) {
     this.featureDim = featureDimension
+    this.maxCapacity = maxCapacity // Pass actual capacity
     this.reset()
     this.initializeFromHistory(previousData)
   }
@@ -106,19 +113,24 @@ class LinearBandit {
 
     // Initialize with reasonable weights instead of zeros
     this.weights = [
-      5, // techno_lover indicator
-      5, // well_connected indicator
-      5, // creative indicator (more valuable)
-      5, // berlin_local indicator
-      -5, // techno_lover progress (less valuable when satisfied)
-      -5, // well_connected progress
-      -5, // creative progress (penalty for being satisfied)
-      -5, // berlin_local progress
-      -5, // capacity utilization (penalty for being full)
-      5, // creative scarcity (bonus for high scarcity)
+      1.2, // techno_lover
+      1.0, // well_connected
+      1.8, // creative
+      1.0, // berlin_local
+      -0.8, // techno_lover progress
+      -0.8, // well_connected progress
+      -1.4, // creative progress
+      -0.8, // berlin_local progress
+      -1.6, // capacity utilization
+      1.2, // creative scarcity
     ]
 
     console.log('Bandit reset with initial weights:', this.weights.slice(0, 6))
+  }
+
+  updateController(admitted: boolean) {
+    this.admitRateEma =
+      this.admitRateEma * (1 - this.emaBeta) + (admitted ? 1 : 0) * this.emaBeta
   }
 
   private createIdentityMatrix(size: number, lambda: number): number[][] {
@@ -132,22 +144,18 @@ class LinearBandit {
   }
 
   private initializeFromHistory(decisions: DecisionRecord[]) {
-    // Filter valid decisions but be more lenient with reward scale
-    // (historical data might have different reward scales)
     const validDecisions = decisions
       .filter((d) => d.features && d.features.length === this.featureDim)
-      .slice(-100) // Just take recent decisions, ignore reward scale
+      .slice(-100)
 
     console.log(
       `Learning from ${validDecisions.length} valid historical decisions`
     )
 
     validDecisions.forEach((decision) => {
-      // Normalize historical rewards to current scale
       let normalizedReward = decision.reward
       if (Math.abs(decision.reward) > 100) {
-        // Scale down large historical rewards
-        normalizedReward = decision.reward * 1.1 // rough scaling factor
+        normalizedReward = decision.reward * 0.1
         normalizedReward = Math.max(-50, Math.min(50, normalizedReward))
       }
 
@@ -159,24 +167,60 @@ class LinearBandit {
     }
   }
 
-  selectAction(features: number[]): {
+  private calculateAdaptiveThreshold(): number {
+    const capacityUsed = this.totalAdmitted / this.maxCapacity
+    const baseThreshold = 0 // better matches your reward scale
+
+    let threshold = baseThreshold
+    if (capacityUsed < 0.3) {
+      threshold = baseThreshold + capacityUsed * 2.0
+    } else if (capacityUsed < 0.7) {
+      threshold = baseThreshold + 0.6 + (capacityUsed - 0.3) * 3.0
+    } else {
+      threshold = baseThreshold + 1.8 + (capacityUsed - 0.7) * 5.0
+    }
+
+    const urgencyBonus = this.calculateUrgencyBonus()
+    threshold -= urgencyBonus
+
+    // Keep a sensible floor/ceiling so we never saturate
+    return Math.max(-1.5, Math.min(4.0, threshold))
+  }
+
+  private calculateUrgencyBonus(): number {
+    // This would need access to constraints - for now return 0
+    // In practice, you'd pass constraint info or calculate here
+    return 0
+  }
+
+  selectAction(
+    features: number[],
+    constraintUrgency: number = 0
+  ): {
     action: 'admit' | 'reject'
     value: number
   } {
     this.decisionCount++
 
-    // Skip the complex UCB - just predict raw value
     this.updateWeights()
     const rawValue = this.predictValue(features)
 
-    // Simple threshold on raw prediction
-    const threshold = 15 + this.decisionCount / 100 // gradually increase threshold
+    // Apply urgency adjustment to threshold
+    const baseThreshold = this.calculateAdaptiveThreshold()
 
-    this.lastThreshold = threshold // TODO: add logging
+    // Nudge threshold up if we're admitting too much, down if too little
+    const targetRate = 0.5 // tune per game
+    const k = 0.8
+    const rateAdjustment = k * (this.admitRateEma - targetRate)
+
+    const threshold = baseThreshold + rateAdjustment - constraintUrgency
+
+    this.lastThreshold = threshold
     this.lastRawValue = rawValue
 
-    // Determine action to take based on score
-    const action = rawValue > threshold ? 'admit' : 'reject'
+    const noise = (Math.random() - 0.5) * 0.2
+
+    const action = rawValue + noise > threshold ? 'admit' : 'reject'
 
     return { action, value: rawValue }
   }
@@ -189,21 +233,11 @@ class LinearBandit {
     return value
   }
 
-  private calculateConfidence(features: number[]): number {
-    let confidence = 0
-    for (let i = 0; i < features.length; i++) {
-      if (this.A[i][i] > 1e-6) {
-        confidence += (features[i] * features[i]) / this.A[i][i]
-      }
-    }
-    return Math.sqrt(Math.max(0, confidence))
-  }
-
   private updateWeights() {
     for (let i = 0; i < this.featureDim; i++) {
       if (this.A[i][i] > 1e-6) {
         this.weights[i] = this.b[i] / this.A[i][i]
-        this.weights[i] = Math.max(-25, Math.min(25, this.weights[i])) // increased bounds
+        this.weights[i] = Math.max(-5, Math.min(5, this.weights[i]))
       }
     }
   }
@@ -217,7 +251,6 @@ class LinearBandit {
   }
 
   updateModel(features: number[], reward: number) {
-    // Clip extreme rewards
     const clippedReward = Math.max(-50, Math.min(50, reward))
 
     for (let i = 0; i < features.length; i++) {
@@ -232,6 +265,8 @@ class LinearBandit {
     return {
       weights: this.weights.slice(0, 6),
       decisionCount: this.decisionCount,
+      capacityUsed: (this.totalAdmitted / this.maxCapacity).toFixed(3),
+      threshold: this.lastThreshold.toFixed(1),
       avgWeight: (
         this.weights.reduce((a, b) => a + Math.abs(b), 0) / this.weights.length
       ).toFixed(2),
@@ -248,6 +283,18 @@ export class BanditBouncer<T> implements BergainBouncer {
 
   constructor(public state: GameState, public config: Config) {
     this.initializeConstraints()
+  }
+
+  private computeConstraintUrgency(): number {
+    // Aggregate scarcity of unmet constraints; softly capped
+    let urgency = 0
+    for (const c of this.getConstraints()) {
+      if (!c.isSatisfied()) {
+        urgency += Math.min(3, c.getScarcity(this.remainingSlots))
+      }
+    }
+    // Normalize a bit so it behaves like a small threshold shift
+    return Math.min(2.0, urgency * 0.25)
   }
 
   initializeConstraints() {
@@ -270,12 +317,12 @@ export class BanditBouncer<T> implements BergainBouncer {
     const allDecisions = previousGames.flatMap((game) => game.decisions || [])
 
     const featureDim = 10
-    this.bandit = new LinearBandit(featureDim, allDecisions)
-
-    console.log(
-      `Bandit initialized: ${allDecisions.length} decisions, ${featureDim}D features`
+    // Pass actual capacity instead of hardcoded 10_000
+    this.bandit = new LinearBandit(
+      featureDim,
+      this.config.MAX_CAPACITY,
+      allDecisions
     )
-    console.log('Initial stats:', this.bandit.getStats())
   }
 
   get statistics(): Statistics<T> {
@@ -295,7 +342,9 @@ export class BanditBouncer<T> implements BergainBouncer {
 
     const person = nextPerson.attributes as Person<T>
     const features = this.extractFeatures(person)
-    const { action, value } = this.bandit.selectAction(features)
+
+    const urgency = this.computeConstraintUrgency()
+    const { action, value } = this.bandit.selectAction(features, urgency)
     const shouldAdmit = action === 'admit'
 
     // Simple, bounded reward calculation
@@ -321,12 +370,14 @@ export class BanditBouncer<T> implements BergainBouncer {
 
     if (shouldAdmit) {
       this.totalAdmitted++
+      this.bandit.totalAdmitted++
     } else {
       this.totalRejected++
     }
 
     // Enhanced logging
     this.logDecision(person, action, reward, value, features)
+    this.bandit.updateController(shouldAdmit)
 
     return shouldAdmit
   }
@@ -346,7 +397,8 @@ export class BanditBouncer<T> implements BergainBouncer {
     })
 
     // Feature 8: Capacity utilization
-    features.push(this.totalAdmitted / this.config.MAX_CAPACITY)
+    // features.push(this.totalAdmitted / this.config.MAX_CAPACITY)
+    features.push(Math.pow(this.totalAdmitted / this.config.MAX_CAPACITY, 0.8))
 
     // Feature 9: Creative scarcity (special focus on bottleneck)
     const creativeConstraint = constraints.find(
@@ -354,7 +406,10 @@ export class BanditBouncer<T> implements BergainBouncer {
     )
     if (creativeConstraint) {
       features.push(
-        Math.min(3, creativeConstraint.getScarcity(this.remainingSlots))
+        creativeConstraint
+          ? 0.5 *
+              Math.min(3, creativeConstraint.getScarcity(this.remainingSlots))
+          : 0
       )
     } else {
       features.push(0)
@@ -364,41 +419,36 @@ export class BanditBouncer<T> implements BergainBouncer {
   }
 
   private calculateReward(person: Person<T>, admitted: boolean): number {
-    if (!admitted) {
-      return 7 // should be like 20%
-      // return 1 // Small positive for rejection
-    }
+    if (!admitted) return 0.5 // Much smaller
 
-    // Simple reward: sum of rarity values for useful attributes
     let reward = 0
     let usefulCount = 0
+    const capacityUsed = this.totalAdmitted / this.config.MAX_CAPACITY
 
     this.constraints.forEach((constraint) => {
       if (person[constraint.attribute] && !constraint.isSatisfied()) {
         usefulCount++
+        let baseReward = 0
 
-        // Fixed values to prevent explosion
         if (String(constraint.attribute) === 'creative') {
-          reward += 20 // creative is very valuable
+          baseReward = 3 // Down from 50
         } else if (String(constraint.attribute) === 'berlin_local') {
-          reward += 8 // berlin_local is moderately valuable
+          baseReward = 1.5 // Down from 20
         } else {
-          reward += 3 // others are less valuable
+          baseReward = 1 // Down from 10
         }
+
+        const scarcityMultiplier = constraint.getScarcity(this.remainingSlots)
+        reward += baseReward * Math.max(0.5, Math.min(2, scarcityMultiplier)) // Cap multiplier
       }
     })
 
-    // Small combo bonus
-    if (usefulCount > 1) {
-      reward += usefulCount * 2
+    // Penalty for admitting when capacity is high and person isn't very useful
+    if (capacityUsed > 0.6 && usefulCount <= 1) {
+      reward -= 2 // Down from 15
     }
 
-    // Penalty for no useful attributes
-    if (usefulCount === 0) {
-      reward = -5
-    }
-
-    return reward
+    return usefulCount === 0 ? -1 : reward // Much smaller penalties
   }
 
   private logDecision(
