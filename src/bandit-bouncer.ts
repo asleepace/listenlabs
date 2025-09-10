@@ -90,10 +90,11 @@ class Constraint<T> {
 
 class LinearBandit {
   // initialize values with random data
+  // in LinearBandit
+  // LinearBandit
   static randomInitialValues(n = 60) {
-    return Array(n)
-      .fill(0)
-      .map((_, i) => 1.5 + 0.02 * i)
+    // was 3.5 + 0.02*i
+    return Array.from({ length: n }, (_, i) => 1.6 + 0.01 * i) // ~1.6..2.2
   }
 
   static fromSnapshot(s: BanditSnapshot) {
@@ -202,17 +203,13 @@ class LinearBandit {
     }
   }
 
-  // In LinearBandit
   public getTargetAdmitRate(): number {
-    const used = this.totalAdmitted / this.maxCapacity // 0..1
-    // base schedule: early -> mid -> late
-    const base = used < 0.33 ? 0.26 : used < 0.66 ? 0.18 : 0.1
-
-    // Pull target down when any constraint is infeasible
-    // (pass maxRatio in via selectAction or read it from caller if you prefer)
-    const maxRatio = this.maxFeasRatio || 1.0
-    const riskPull = Math.min(0.08, 0.04 * Math.max(0, maxRatio - 1)) // up to -0.08
-    return Math.max(0.06, base - riskPull)
+    const used = this.totalAdmitted / this.maxCapacity
+    // earlier base: 0.26/0.18/0.10; you had 0.20/0.14/0.09
+    const base = used < 0.33 ? 0.24 : used < 0.66 ? 0.16 : 0.1
+    const maxRatio = this.maxFeasRatio ?? 1.0
+    const riskPull = Math.min(0.05, 0.03 * Math.max(0, maxRatio - 1)) // was up to 0.08
+    return Math.max(0.07, base - riskPull) // min 7%
   }
 
   // inside LinearBandit
@@ -338,40 +335,42 @@ class LinearBandit {
    * - Subtracts constraint urgency
    * - Clips to robust data-dependent band (median ± 3*MAD*)
    */
-  private calculateAdaptiveThreshold(constraintUrgency: number = 0): number {
+  private calculateAdaptiveThreshold(constraintUrgency = 0): number {
     const arr = this.recentValues.length ? this.recentValues : [0]
     const med = this.median(arr)
     const mad = this.mad(arr, med)
-    const sigma = Math.max(1.4826 * mad, 0.35) // (optional) larger floor
 
-    const target = this.getTargetAdmitRate() // dynamic target
+    const warmup = this.decisionCount < 200
+    const sigma = Math.max(1.4826 * mad, warmup ? 0.25 : 0.35)
+
+    const target = this.getTargetAdmitRate()
     const err = this.admitRateEma - target
 
-    const tail = 1 - target // <-- use dynamic target here
+    const tail = 1 - target
     const z = this.zForTail(tail)
 
     const quantileEstimate = med + z * sigma
     const used = this.totalAdmitted / this.maxCapacity
-    const capacityBias = 1.1 * used // small global nudge
+    const capacityBias = (warmup ? 0.6 : 1.25) * used // softer early
 
-    const urgencyScale = Math.pow(Math.max(0, used - 0.3) / 0.6, 1.2) // 0 until 30% used, then ramps → ~1 near 90%
+    const urgencyScale = Math.pow(Math.max(0, used - 0.3) / 0.6, 1.2)
     const urgencyAdj =
       Math.min(2.5, Math.max(0, constraintUrgency)) * urgencyScale
 
-    // PI controller (you already maintain rateErrI)
     this.rateErrI = (1 - this.iBeta) * this.rateErrI + this.iBeta * err
     const kPbase = 1.6,
       kIbase = 0.6
-    const boost = err > 0.2 ? 1.35 : 1.0 // only when clearly over target
+    const boost = err > 0.2 ? 1.35 : 1.0
     const kP = kPbase * boost
     const kI = kIbase * boost
     const rateAdjustment = kP * err + kI * this.rateErrI
+
     let thr = quantileEstimate + capacityBias + rateAdjustment - urgencyAdj
 
-    // New: scale the floor with error (caps at 0.75σ)
-    // More rejections early game w/o affecting late game
     if (err > 0) {
-      const floorBump = 0.25 + 1.25 * Math.min(0.4, Math.max(0, err)) // 0.25..0.75
+      // limit floor during warmup
+      const cap = warmup ? 0.3 : 0.75
+      const floorBump = 0.25 + 1.25 * Math.min(cap, Math.max(0, err))
       thr = Math.max(thr, med + floorBump * sigma)
     }
 
@@ -392,7 +391,6 @@ class LinearBandit {
       lo,
       hi,
       final,
-      // debug extras:
       target,
       err,
       tail,
@@ -525,6 +523,16 @@ export class BanditBouncer<T> implements BerghainBouncer {
     return Math.min(5.0, urgency)
   }
 
+  private mostBehindConstraint(): { attr: keyof T; gap: number } | null {
+    const used = this.totalAdmitted / this.config.MAX_CAPACITY
+    let best: { attr: keyof T; gap: number } | null = null
+    for (const c of this.getConstraints()) {
+      const gap = used - c.getProgress() // >0 => behind pace
+      if (!best || gap > best.gap) best = { attr: c.attribute, gap }
+    }
+    return best
+  }
+
   // add this helper inside BanditBouncer<T>
   private getFeasibilityRatios() {
     const ratios = this.getConstraints()
@@ -591,17 +599,44 @@ export class BanditBouncer<T> implements BerghainBouncer {
 
     const person = nextPerson.attributes as Person<T>
     const features = this.extractFeatures(person)
+    const used = this.totalAdmitted / this.config.MAX_CAPACITY
 
-    // Feasibility first
+    // ---- Pace gate (later + bigger gap, and no bandit training on gate) ----
+    const pace = this.mostBehindConstraint()
+    if (pace && used > 0.2 && pace.gap > 0.15) {
+      // was 0.12/0.12
+      if (!person[pace.attr]) {
+        const reward = -1.5
+        this.decisions.push({
+          context: this.buildContext(),
+          action: 'reject',
+          person,
+          reward,
+          features,
+          banditValue: 0,
+          heuristicValue: 0,
+        })
+        this.constraints.forEach((c) => c.update(person, false))
+        this.totalRejected++
+        this.logDecision(person, 'reject', reward, 0, features)
+        this.bandit.updateController(false)
+        // NOTE: no updateModel() on policy-gate rejections
+        return false
+      }
+    }
+
+    // ---- Feasibility gate (phase-dependent cutoff; no bandit training on gate) ----
     const feas = this.getFeasibilityRatios()
+    // in admit()
+    const infeasibleCutoff =
+      used < 0.2 ? 2.5 : used < 0.5 ? 1.8 : used < 0.8 ? 1.3 : 1.0
 
-    if (feas.max > 1.0) {
-      this.bandit.maxFeasRatio = feas.max // make controller aware immediately
+    if (feas.max > infeasibleCutoff) {
+      this.bandit.maxFeasRatio = feas.max // inform controller immediately
       const helpsAnyAtRisk = feas.ratios.some(
-        (r) => r.ratio > 1.0 && person[r.attr as keyof T]
+        (r) => r.ratio > infeasibleCutoff && person[r.attr as keyof T]
       )
       if (!helpsAnyAtRisk) {
-        // Hard reject: don’t waste slots when some constraints are infeasible
         const reward = -2
         this.decisions.push({
           context: this.buildContext(),
@@ -609,21 +644,22 @@ export class BanditBouncer<T> implements BerghainBouncer {
           person,
           reward,
           features,
-          banditValue: 0, // we didn't score; 0 is a harmless placeholder
+          banditValue: 0, // didn't score; placeholder
           heuristicValue: 0,
         })
         this.constraints.forEach((c) => c.update(person, false))
         this.totalRejected++
         this.logDecision(person, 'reject', reward, 0, features)
         this.bandit.updateController(false)
-        this.bandit.updateModel(features, -2) // teach the model this was bad under risk
+        // NOTE: no updateModel() on policy-gate rejections
         return false
       }
     }
 
-    // Single write here (avoid double assignment)
+    // Single write (avoid duplicate assignments)
     this.bandit.maxFeasRatio = feas.max
 
+    // ---- Bandit decision ----
     const urgency = this.computeConstraintUrgency()
     const { action, value } = this.bandit.selectAction(features, urgency)
     const shouldAdmit = action === 'admit'
@@ -732,9 +768,10 @@ export class BanditBouncer<T> implements BerghainBouncer {
         usefulCount++
 
         // base payoff (your priors)
+        // base payoff in calculateReward()
         const base =
           String(constraint.attribute) === 'creative'
-            ? 4.0
+            ? 3.4
             : String(constraint.attribute) === 'berlin_local'
             ? 2.0
             : 0.8
@@ -758,9 +795,10 @@ export class BanditBouncer<T> implements BerghainBouncer {
         const overshoot =
           (constraint.admitted - constraint.minRequired) /
           Math.max(1, constraint.minRequired)
+
         const overshootPenalty = Math.min(
-          2.0,
-          1.0 + 0.9 * Math.max(0, overshoot)
+          2.2,
+          1.2 + 1.0 * Math.max(0, overshoot)
         )
         reward -= overshootPenalty
       }
@@ -776,7 +814,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
     }
 
     // Late-capacity guardrail
-    if (used > 0.6 && usefulCount <= 1) reward -= 1.2
+    if (used > 0.5 && usefulCount <= 1) reward -= 1.4 // was 1.2 and at 0.6
 
     // If truly useless, small negative
     if (usefulCount === 0) reward = Math.min(reward, -0.5)
