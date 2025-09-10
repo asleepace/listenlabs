@@ -33,6 +33,7 @@ interface Context {
   capacityUtilization: number
   worstConstraintProgress: number
   hasRareAttribute: boolean
+  criticalityLevel: number
 }
 
 interface Config {
@@ -82,11 +83,66 @@ class Constraint<T> {
   isRare(): boolean {
     return this.frequency <= 0.1
   }
+
+  isNearlySatisfied(): boolean {
+    return this.getProgress() >= 0.95
+  }
 }
 
 /**
- * Linear Contextual Bandit using epsilon-greedy with UCB exploration
- */
+  # Bandit Bouncer
+
+  1. Mathematical Foundation
+
+  Proper context dimension calculation (4 + 3×numConstraints + 5)
+  Improved linear algebra with adaptive regularization
+  Better weight clipping based on feature importance
+  Tanh normalization for urgency scores
+
+  2. Sophisticated Exploration Strategy
+
+  Adaptive epsilon based on performance, criticality, and game state
+  Zero exploration in critical endgame (≤10 slots or impossible constraints)
+  Exploration bias toward rejection (safer default)
+  Performance-based epsilon adjustment
+
+  3. Enhanced Override System
+
+  Multiple override conditions (dire endgame, over-satisfied constraints)
+  Overrides teach the bandit with positive rewards
+  Clear logging of override reasons
+
+  4. Strategic Reward Engineering
+
+  Massive bonuses (100+ points) for worst constraint and rare attributes
+  Exponential penalties for bad decisions (up to 800 points in final slots)
+  Clear distinctions between useful/useless attributes
+  Smart rejection rewards for over-satisfied constraints
+
+  5. Robust Learning
+
+  Learns preferentially from recent decisions
+  Tracks recent performance for adaptive behavior
+  Better historical data integration
+  Memory management for long games
+
+  6. Comprehensive Context
+
+  Criticality level calculation combining capacity and impossibility
+  Better scarcity scoring
+  Enhanced person attribute detection
+  Rich progress tracking
+
+  This implementation should dramatically outperform the previous versions by:
+
+  Never admitting useless people in endgame
+  Heavily prioritizing the worst constraint (creative in your case)
+  Learning quickly from massive reward differences
+  Adapting exploration based on game criticality
+  Making strategic decisions about constraint priorities
+
+  The bandit will be conservative when it matters most and aggressive about pursuing the bottleneck constraints that determine success.
+*/
 class ContextualBandit {
   private admitWeights: number[]
   private rejectWeights: number[]
@@ -94,30 +150,26 @@ class ContextualBandit {
   private rejectA: number[][]
   private admitB: number[]
   private rejectB: number[]
-  private epsilon: number = 0.1 // exploration rate
+  private baseEpsilon: number = 0.15
   private contextDim: number
   private decisionCount: number = 0
+  private recentRewards: number[] = []
 
   constructor(contextDimension: number, previousData: DecisionRecord[] = []) {
     this.contextDim = contextDimension
 
-    // Initialize A matrices with small regularization
-    this.admitA = this.createRegularizedIdentity(contextDimension, 0.1)
-    this.rejectA = this.createRegularizedIdentity(contextDimension, 0.1)
+    // Initialize with proper regularization
+    const lambda = 0.1
+    this.admitA = this.createRegularizedIdentity(contextDimension, lambda)
+    this.rejectA = this.createRegularizedIdentity(contextDimension, lambda)
 
-    // Initialize b vectors
     this.admitB = Array(contextDimension).fill(0)
     this.rejectB = Array(contextDimension).fill(0)
 
-    // Initialize weights with small random values
-    this.admitWeights = Array(contextDimension)
-      .fill(0)
-      .map(() => (Math.random() - 0.5) * 0.01)
-    this.rejectWeights = Array(contextDimension)
-      .fill(0)
-      .map(() => (Math.random() - 0.5) * 0.01)
+    // Initialize weights conservatively
+    this.admitWeights = Array(contextDimension).fill(0)
+    this.rejectWeights = Array(contextDimension).fill(0)
 
-    // Learn from previous data
     this.initializeFromHistory(previousData)
   }
 
@@ -135,61 +187,120 @@ class ContextualBandit {
     console.log(
       `Initializing bandit with ${decisions.length} historical decisions`
     )
-    decisions.forEach((decision) => {
+
+    // Learn from recent decisions with higher weight
+    const recentDecisions = decisions.slice(-500) // Last 500 decisions
+
+    recentDecisions.forEach((decision, index) => {
       const context = this.contextToVector(decision.context)
-      this.updateModel(context, decision.action, decision.reward)
+      const weight = 1 + (index / recentDecisions.length) * 0.5 // Recent decisions weighted more
+      this.updateModel(context, decision.action, decision.reward * weight)
     })
 
     if (decisions.length > 0) {
       this.updateWeights()
+      console.log(`Learned from ${recentDecisions.length} recent decisions`)
     }
   }
 
   contextToVector(context: Context): number[] {
-    return [
+    // Fixed feature order - exactly 4 + 3*numConstraints + 5 features
+    const features = [
       // Basic state (4 features)
       context.admittedCount / 1000,
       context.remainingSlots / 1000,
       context.capacityUtilization,
-      Math.min(context.scarcityScore / 1000, 3),
+      Math.min(context.scarcityScore / 1000, 5),
 
-      // Constraint progress (dynamic size)
+      // Constraint progress (numConstraints features)
       ...context.progressRatios,
 
-      // Constraint urgencies (dynamic size, capped)
-      ...context.urgencyScores.map((u) => Math.min(u / 100, 10)),
+      // Constraint urgencies (numConstraints features, normalized)
+      ...context.urgencyScores.map((u) => Math.tanh(u / 50)), // tanh normalization
 
-      // Person attributes (dynamic size)
+      // Person attributes (numConstraints features)
       ...context.personAttributes.map((x) => (x ? 1 : 0)),
 
-      // Derived features (4 features)
+      // Derived features (5 features)
       context.worstConstraintProgress,
       context.hasRareAttribute ? 1 : 0,
-      context.remainingSlots < 50 ? 1 : 0, // emergency mode
+      context.criticalityLevel,
       context.progressRatios.filter((p) => p < 0.5).length /
         Math.max(1, context.progressRatios.length),
+      context.progressRatios.filter((p) => p >= 0.95).length /
+        Math.max(1, context.progressRatios.length),
     ]
+
+    return features
   }
 
-  selectAction(context: Context): 'admit' | 'reject' {
+  selectAction(
+    context: Context,
+    bouncer: BanditBouncer<any>
+  ): 'admit' | 'reject' {
     this.decisionCount++
 
-    // Decay epsilon over time
-    const currentEpsilon = this.epsilon * Math.exp(-this.decisionCount / 1000)
+    // Adaptive epsilon based on performance and criticality
+    let currentEpsilon = this.calculateAdaptiveEpsilon(context)
 
-    // Epsilon-greedy exploration
+    // ZERO exploration in critical endgame situations
+    const constraints = bouncer.getConstraints()
+    const hasImpossibleConstraints = this.hasImpossibleConstraints(
+      context,
+      constraints
+    )
+
+    if (context.remainingSlots <= 10 || hasImpossibleConstraints) {
+      currentEpsilon = 0 // Pure exploitation
+    }
+
+    // Epsilon-greedy with adaptive exploration
     if (Math.random() < currentEpsilon) {
-      return Math.random() < 0.5 ? 'admit' : 'reject'
+      return Math.random() < 0.3 ? 'admit' : 'reject' // Bias toward rejection during exploration
     }
 
     // Exploit: choose action with highest predicted reward
     const contextVec = this.contextToVector(context)
-    this.updateWeights() // Ensure weights are current
+    this.updateWeights()
 
     const admitScore = this.predictReward(contextVec, this.admitWeights)
     const rejectScore = this.predictReward(contextVec, this.rejectWeights)
 
     return admitScore > rejectScore ? 'admit' : 'reject'
+  }
+
+  private calculateAdaptiveEpsilon(context: Context): number {
+    // Start with base epsilon
+    let epsilon = this.baseEpsilon
+
+    // Decay over time
+    epsilon *= Math.exp(-this.decisionCount / 1000)
+
+    // Reduce exploration based on criticality
+    epsilon *= 1 - context.criticalityLevel * 0.8
+
+    // Reduce if recent performance is good
+    if (this.recentRewards.length > 10) {
+      const avgReward =
+        this.recentRewards.reduce((a, b) => a + b) / this.recentRewards.length
+      if (avgReward > 5) {
+        epsilon *= 0.5 // Cut exploration when doing well
+      }
+    }
+
+    return Math.max(0, Math.min(epsilon, 0.3))
+  }
+
+  private hasImpossibleConstraints(
+    context: Context,
+    constraints: Constraint<any>[]
+  ): boolean {
+    return constraints.some((constraint) => {
+      if (constraint.isSatisfied()) return false
+      const needed = constraint.minRequired - constraint.admitted
+      const expectedNeeded = needed / constraint.frequency
+      return expectedNeeded > context.remainingSlots * 2.5
+    })
   }
 
   private predictReward(context: number[], weights: number[]): number {
@@ -205,14 +316,15 @@ class ContextualBandit {
     const n = b.length
     const weights = Array(n).fill(0)
 
-    // Use diagonal approximation with regularization
+    // Improved diagonal approximation with regularization
     for (let i = 0; i < n; i++) {
       const diag = A[i][i]
-      if (Math.abs(diag) > 1e-8) {
+      if (Math.abs(diag) > 1e-6) {
         weights[i] = b[i] / diag
 
-        // Clip weights to prevent explosion
-        weights[i] = Math.max(-10, Math.min(10, weights[i]))
+        // Adaptive weight clipping based on feature importance
+        const maxWeight = i < 4 ? 20 : 10 // Higher limits for basic features
+        weights[i] = Math.max(-maxWeight, Math.min(maxWeight, weights[i]))
       }
     }
 
@@ -223,16 +335,19 @@ class ContextualBandit {
     const A = action === 'admit' ? this.admitA : this.rejectA
     const b = action === 'admit' ? this.admitB : this.rejectB
 
-    // Update A = A + x * x^T
+    // Update matrices with regularization
+    const regularization = 0.01
     for (let i = 0; i < context.length; i++) {
       for (let j = 0; j < context.length; j++) {
-        A[i][j] += context[i] * context[j]
+        A[i][j] += context[i] * context[j] + (i === j ? regularization : 0)
       }
+      b[i] += reward * context[i]
     }
 
-    // Update b = b + r * x
-    for (let i = 0; i < context.length; i++) {
-      b[i] += reward * context[i]
+    // Track recent performance
+    this.recentRewards.push(reward)
+    if (this.recentRewards.length > 50) {
+      this.recentRewards.shift() // Keep only recent rewards
     }
   }
 
@@ -240,18 +355,25 @@ class ContextualBandit {
     let sum = 0
     const len = Math.min(a.length, b.length)
     for (let i = 0; i < len; i++) {
-      sum += a[i] * b[i]
+      sum += (a[i] || 0) * (b[i] || 0)
     }
     return sum
   }
 
   getStats() {
+    const avgRecentReward =
+      this.recentRewards.length > 0
+        ? this.recentRewards.reduce((a, b) => a + b) / this.recentRewards.length
+        : 0
+
     return {
-      admitWeights: [...this.admitWeights],
-      rejectWeights: [...this.rejectWeights],
-      epsilon: this.epsilon,
+      admitWeights: this.admitWeights.slice(0, 10), // Only show first 10 for brevity
+      rejectWeights: this.rejectWeights.slice(0, 10),
+      baseEpsilon: this.baseEpsilon,
       contextDim: this.contextDim,
       decisionCount: this.decisionCount,
+      avgRecentReward: avgRecentReward.toFixed(2),
+      recentRewardCount: this.recentRewards.length,
     }
   }
 }
@@ -286,19 +408,14 @@ export class BanditBouncer<T> implements BergainBouncer {
     const previousGames = await this.getPreviousGameResults()
     const allDecisions = previousGames.flatMap((game) => game.decisions || [])
 
-    // Calculate exact context dimension
+    // Calculate exact context dimension: 4 + 3*numConstraints + 5
     const numConstraints = this.constraints.size
-    const contextDim =
-      4 + // basic state features
-      numConstraints + // progress ratios
-      numConstraints + // urgency scores
-      numConstraints + // person attributes
-      4 // derived features
+    const contextDim = 4 + numConstraints * 3 + 5
 
     this.bandit = new ContextualBandit(contextDim, allDecisions)
 
     console.log(
-      `Bandit initialized: ${allDecisions.length} decisions, ${contextDim}D context`
+      `Bandit initialized: ${allDecisions.length} total decisions, ${contextDim}D context`
     )
     console.log('Initial stats:', this.bandit.getStats())
   }
@@ -320,44 +437,41 @@ export class BanditBouncer<T> implements BergainBouncer {
 
     const person = nextPerson.attributes as Person<T>
     const context = this.buildContext(person)
-    const action = this.bandit.selectAction(context)
+
+    // CRITICAL OVERRIDE: Force reject useless people in dire situations
+    const hasUsefulAttribute = this.hasUsefulAttribute(person)
+    const isDire = this.isDireEndgame(context)
+
+    if (!hasUsefulAttribute && isDire) {
+      return this.forceReject(
+        person,
+        context,
+        'No useful attributes in dire endgame'
+      )
+    }
+
+    // Override: Force reject people who only help over-satisfied constraints
+    const onlyHelpsOverSatisfied =
+      this.onlyHelpsOverSatisfiedConstraints(person)
+    if (onlyHelpsOverSatisfied && context.remainingSlots < 50) {
+      return this.forceReject(
+        person,
+        context,
+        'Only helps over-satisfied constraints'
+      )
+    }
+
+    // Normal bandit decision
+    const action = this.bandit.selectAction(context, this)
     const shouldAdmit = action === 'admit'
 
-    // Calculate reward after seeing the outcome
+    // Calculate reward and update
     const reward = this.calculateReward(person, shouldAdmit, context)
-
-    // Update bandit
     const contextVec = this.bandit.contextToVector(context)
     this.bandit.updateModel(contextVec, action, reward)
 
-    // Record decision
-    this.decisions.push({
-      context,
-      action,
-      person,
-      reward,
-      constraintsSatisfied: this.getConstraints().map((c) => c.isSatisfied()),
-    })
-
-    // Update constraints
-    this.constraints.forEach((constraint) => {
-      constraint.update(person, shouldAdmit)
-    })
-
-    if (shouldAdmit) {
-      this.totalAdmitted++
-    } else {
-      this.totalRejected++
-    }
-
-    // Log important decisions
-    if (this.remainingSlots < 100 || reward < -10) {
-      console.log(
-        `[${this.remainingSlots} slots] ${JSON.stringify(
-          person
-        )} -> ${action} (reward: ${reward.toFixed(2)})`
-      )
-    }
+    // Record and update
+    this.recordDecision(context, action, person, reward, shouldAdmit)
 
     return shouldAdmit
   }
@@ -370,6 +484,9 @@ export class BanditBouncer<T> implements BergainBouncer {
     )
     const personAttributes = constraints.map((c) => !!person[c.attribute])
 
+    const worstProgress = Math.min(...progressRatios)
+    const criticalityLevel = this.calculateCriticalityLevel()
+
     return {
       admittedCount: this.totalAdmitted,
       remainingSlots: this.remainingSlots,
@@ -378,11 +495,81 @@ export class BanditBouncer<T> implements BergainBouncer {
       personAttributes,
       scarcityScore: this.calculateScarcityScore(),
       capacityUtilization: this.totalAdmitted / this.config.MAX_CAPACITY,
-      worstConstraintProgress: Math.min(...progressRatios),
-      hasRareAttribute: constraints.some(
-        (c) => person[c.attribute] && c.isRare()
-      ),
+      worstConstraintProgress: worstProgress,
+      hasRareAttribute: this.hasRareAttribute(person),
+      criticalityLevel,
     }
+  }
+
+  private calculateCriticalityLevel(): number {
+    // 0 = early game, 1 = critical endgame
+    const capacityFactor = Math.min(1, (1000 - this.remainingSlots) / 900)
+
+    const unsatisfiedConstraints = this.getConstraints().filter(
+      (c) => !c.isSatisfied()
+    )
+    const impossibilityFactor = unsatisfiedConstraints.reduce(
+      (max, constraint) => {
+        const needed = constraint.minRequired - constraint.admitted
+        const expectedNeeded = needed / constraint.frequency
+        const impossibility = Math.min(
+          1,
+          expectedNeeded / Math.max(1, this.remainingSlots)
+        )
+        return Math.max(max, impossibility)
+      },
+      0
+    )
+
+    return Math.max(capacityFactor, impossibilityFactor)
+  }
+
+  private hasUsefulAttribute(person: Person<T>): boolean {
+    return Array.from(this.constraints.entries()).some(
+      ([attr, constraint]) => person[attr] && !constraint.isSatisfied()
+    )
+  }
+
+  private hasRareAttribute(person: Person<T>): boolean {
+    return this.getConstraints().some((c) => person[c.attribute] && c.isRare())
+  }
+
+  private isDireEndgame(context: Context): boolean {
+    return context.remainingSlots <= 20 || context.criticalityLevel > 0.8
+  }
+
+  private onlyHelpsOverSatisfiedConstraints(person: Person<T>): boolean {
+    const hasAnyAttribute = Array.from(this.constraints.entries()).some(
+      ([attr]) => person[attr]
+    )
+
+    if (!hasAnyAttribute) return false
+
+    const helpsUnsatisfied = Array.from(this.constraints.entries()).some(
+      ([attr, constraint]) =>
+        person[attr] &&
+        !constraint.isSatisfied() &&
+        !constraint.isNearlySatisfied()
+    )
+
+    return !helpsUnsatisfied
+  }
+
+  private forceReject(
+    person: Person<T>,
+    context: Context,
+    reason: string
+  ): boolean {
+    const action = 'reject'
+    const reward = 15 // Strong positive reward for good override
+
+    const contextVec = this.bandit.contextToVector(context)
+    this.bandit.updateModel(contextVec, action, reward)
+
+    this.recordDecision(context, action, person, reward, false)
+
+    console.log(`[OVERRIDE] ${this.remainingSlots} slots: ${reason}`)
+    return false
   }
 
   private calculateReward(
@@ -390,123 +577,167 @@ export class BanditBouncer<T> implements BergainBouncer {
     admitted: boolean,
     context: Context
   ): number {
-    let reward = 0
-
     if (admitted) {
-      // Calculate value of this person for unsatisfied constraints ONLY
-      let personValue = 0
-      let hasUsefulAttribute = false
-      let hasOverSatisfiedAttribute = false
+      return this.calculateAdmissionReward(person, context)
+    } else {
+      return this.calculateRejectionReward(person, context)
+    }
+  }
 
-      this.constraints.forEach((constraint, attr) => {
-        if (person[attr]) {
-          if (!constraint.isSatisfied()) {
+  private calculateAdmissionReward(
+    person: Person<T>,
+    context: Context
+  ): number {
+    let reward = 0
+    let hasUsefulAttribute = false
+    let hasOverSatisfiedAttribute = false
+
+    // Evaluate each attribute
+    this.constraints.forEach((constraint, attr) => {
+      if (person[attr]) {
+        if (!constraint.isSatisfied()) {
+          const progress = constraint.getProgress()
+
+          if (progress < 0.95) {
+            // Only reward if truly needed
             hasUsefulAttribute = true
-            const progress = constraint.getProgress()
             const urgency = constraint.getUrgency(this.remainingSlots)
 
-            // Exponentially higher rewards for less satisfied constraints
-            const progressValue = Math.pow(1 - progress, 2) * 25 // 0-25 points, exponential
-            const urgencyValue = Math.min(urgency * 3, 30) // 0-30 points
+            // Exponential rewards for less satisfied constraints
+            const progressValue = Math.pow(1 - progress, 2) * 30
+            const urgencyValue = Math.min(urgency * 4, 40)
 
-            personValue += progressValue + urgencyValue
+            reward += progressValue + urgencyValue
 
             // Massive bonus for rare attributes when desperately needed
-            if (constraint.isRare() && progress < 0.5) {
-              personValue += 50
+            if (constraint.isRare() && progress < 0.6) {
+              reward += 100
             }
           } else {
-            // Heavy penalty for over-satisfying constraints
+            // Penalty for nearly-satisfied constraints
             hasOverSatisfiedAttribute = true
-            personValue -= 15 // significant penalty
+            reward -= 15
           }
-        }
-      })
-
-      // Special bonus: focus heavily on the worst constraint
-      const worstProgress = Math.min(...context.progressRatios)
-      if (worstProgress < 0.3) {
-        const worstConstraintIndex =
-          context.progressRatios.indexOf(worstProgress)
-        const worstConstraint = this.getConstraints()[worstConstraintIndex]
-        if (person[worstConstraint.attribute]) {
-          personValue += 40 // huge bonus for helping worst constraint
+        } else {
+          // Heavy penalty for over-satisfying
+          hasOverSatisfiedAttribute = true
+          reward -= 25
         }
       }
+    })
 
-      reward = personValue
-
-      // Massive penalties for bad decisions
-      if (!hasUsefulAttribute) {
-        const wastefulness = Math.max(1, (1000 - this.remainingSlots) / 50)
-        reward -= wastefulness * 20
-
-        if (this.remainingSlots < 50) {
-          reward -= 150
-        }
-        if (this.remainingSlots < 20) {
-          reward -= 300
-        }
+    // Special focus on worst constraint
+    const worstConstraint = this.getWorstConstraint()
+    if (worstConstraint && person[worstConstraint.attribute]) {
+      const progress = worstConstraint.getProgress()
+      if (progress < 0.8) {
+        reward += 100 - progress * 100 // 100 points when 0%, 20 points when 80%
       }
+    }
 
-      // Extra penalty for admitting people who only help over-satisfied constraints
-      if (hasOverSatisfiedAttribute && !hasUsefulAttribute) {
-        reward -= 25 // penalty for wasting slot on over-satisfied constraints
-      }
+    // Severe penalties for bad admissions
+    if (!hasUsefulAttribute) {
+      const severityMultiplier = Math.max(1, (1000 - this.remainingSlots) / 50)
+      reward -= severityMultiplier * 25
 
-      // Penalty for impossible situations
-      if (this.remainingSlots < 100) {
-        const unsatisfiedConstraints = this.getConstraints().filter(
-          (c) => !c.isSatisfied()
-        )
-        const totalNeeded = unsatisfiedConstraints.reduce((sum, c) => {
-          const needed = c.minRequired - c.admitted
-          return sum + needed / c.frequency
-        }, 0)
+      if (this.remainingSlots < 50) reward -= 200
+      if (this.remainingSlots < 20) reward -= 400
+      if (this.remainingSlots < 10) reward -= 800
+    }
 
-        if (totalNeeded > this.remainingSlots * 3 && !hasUsefulAttribute) {
-          reward -= 50
-        }
-      }
-    } else {
-      // Rejecting someone
-      const hasUsefulAttribute = Array.from(this.constraints.entries()).some(
-        ([attr, constraint]) => person[attr] && !constraint.isSatisfied()
-      )
-
-      if (!hasUsefulAttribute) {
-        reward += 5 // good rejection
-
-        // Bonus for rejecting over-satisfied constraint holders
-        const hasOverSatisfiedOnly = Array.from(
-          this.constraints.entries()
-        ).some(([attr, constraint]) => person[attr] && constraint.isSatisfied())
-        if (hasOverSatisfiedOnly) {
-          reward += 10 // extra bonus for smart rejection
-        }
-      } else {
-        // Penalty for rejecting useful people
-        const maxUrgency = Math.max(...context.urgencyScores, 0)
-        reward -= Math.min(maxUrgency * 0.3, 10) // reduced penalty since we want to be selective
-
-        // But smaller penalty if we're running out of chances
-        if (this.remainingSlots < 200) {
-          reward -= 3
-        }
-      }
+    // Penalty for helping only over-satisfied constraints
+    if (hasOverSatisfiedAttribute && !hasUsefulAttribute) {
+      reward -= 40
     }
 
     return reward
   }
 
+  private calculateRejectionReward(
+    person: Person<T>,
+    context: Context
+  ): number {
+    const hasUsefulAttribute = this.hasUsefulAttribute(person)
+    const onlyHelpsOverSatisfied =
+      this.onlyHelpsOverSatisfiedConstraints(person)
+
+    if (!hasUsefulAttribute || onlyHelpsOverSatisfied) {
+      let reward = 8 // Good rejection
+
+      if (onlyHelpsOverSatisfied) reward += 12 // Extra bonus for smart rejection
+      if (context.remainingSlots < 50) reward += 5 // Bonus for endgame selectivity
+
+      return reward
+    } else {
+      // Penalty for rejecting useful people, but keep it reasonable
+      const worstConstraint = this.getWorstConstraint()
+      const isHelpingWorstConstraint =
+        worstConstraint && person[worstConstraint.attribute]
+
+      let penalty = 8
+      if (isHelpingWorstConstraint) penalty += 10
+      if (context.remainingSlots < 100) penalty += 5
+
+      return -penalty
+    }
+  }
+
+  private getWorstConstraint(): Constraint<T> | null {
+    const unsatisfied = this.getConstraints().filter((c) => !c.isSatisfied())
+    if (unsatisfied.length === 0) return null
+
+    return unsatisfied.reduce((worst, constraint) =>
+      constraint.getProgress() < worst.getProgress() ? constraint : worst
+    )
+  }
+
+  private recordDecision(
+    context: Context,
+    action: 'admit' | 'reject',
+    person: Person<T>,
+    reward: number,
+    admitted: boolean
+  ) {
+    this.decisions.push({
+      context,
+      action,
+      person,
+      reward,
+      constraintsSatisfied: this.getConstraints().map((c) => c.isSatisfied()),
+    })
+
+    // Update constraints and counts
+    this.constraints.forEach((constraint) => {
+      constraint.update(person, admitted)
+    })
+
+    if (admitted) {
+      this.totalAdmitted++
+    } else {
+      this.totalRejected++
+    }
+
+    // Enhanced logging
+    if (this.remainingSlots < 100 || Math.abs(reward) > 15) {
+      const constraintStatus = this.getConstraints()
+        .map(
+          (c) => `${String(c.attribute)}:${(c.getProgress() * 100).toFixed(0)}%`
+        )
+        .join(' ')
+      console.log(
+        `[${this.remainingSlots} slots] ${JSON.stringify(
+          person
+        )} -> ${action} (${reward.toFixed(1)}) [${constraintStatus}]`
+      )
+    }
+  }
+
   private calculateScarcityScore(): number {
-    const constraints = this.getConstraints()
-    const totalExpected = constraints
-      .filter((c) => !c.isSatisfied())
-      .reduce((sum, c) => {
-        const needed = c.minRequired - c.admitted
-        return sum + needed / c.frequency
-      }, 0)
+    const constraints = this.getConstraints().filter((c) => !c.isSatisfied())
+    const totalExpected = constraints.reduce((sum, c) => {
+      const needed = c.minRequired - c.admitted
+      return sum + needed / c.frequency
+    }, 0)
 
     return totalExpected / Math.max(1, this.remainingSlots)
   }
@@ -520,11 +751,14 @@ export class BanditBouncer<T> implements BergainBouncer {
         satisfied: constraint.isSatisfied(),
         progress: constraint.getProgress(),
         urgency: constraint.getUrgency(this.remainingSlots),
+        isRare: constraint.isRare(),
+        isNearlySatisfied: constraint.isNearlySatisfied(),
       })),
       totalAdmitted: this.totalAdmitted,
       totalRejected: this.totalRejected,
       remainingSlots: this.remainingSlots,
       banditStats: this.bandit?.getStats(),
+      criticalityLevel: this.calculateCriticalityLevel(),
     }
   }
 
@@ -544,6 +778,8 @@ export class BanditBouncer<T> implements BergainBouncer {
           satisfied: c.isSatisfied(),
           progress: c.getProgress(),
           shortfall: Math.max(0, c.minRequired - c.admitted),
+          isRare: c.isRare(),
+          frequency: c.frequency,
         })),
       },
     }
@@ -555,7 +791,7 @@ export class BanditBouncer<T> implements BergainBouncer {
     return gameData
   }
 
-  // Helper methods
+  // Public helper methods
   getConstraints(): Constraint<T>[] {
     return Array.from(this.constraints.values())
   }
@@ -568,7 +804,9 @@ export class BanditBouncer<T> implements BergainBouncer {
     try {
       const savedGameData = await Disk.getJsonDataFromFiles<GameState<any>>()
       return savedGameData
-        .filter((game) => game.output?.decisions) // only games with decision data
+        .filter(
+          (game) => game.output?.decisions && game.output.decisions.length > 0
+        )
         .map((game) => ({
           gameId: game.game.gameId,
           finalScore: game.output?.finalScore || 20000,
@@ -576,6 +814,7 @@ export class BanditBouncer<T> implements BergainBouncer {
           constraints: game.game?.constraints || [],
           decisions: game.output?.decisions || [],
         }))
+        .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()) // Most recent first
     } catch (e) {
       console.warn('Failed to load previous games:', e)
       return []
