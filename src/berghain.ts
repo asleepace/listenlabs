@@ -16,7 +16,7 @@ export type ListenLabsConfig = {
   scenario: '1' | '2' | '3'
 }
 
-export interface BergainBouncer {
+export interface BerghainBouncer {
   admit(next: GameStatusRunning<ScenarioAttributes>): boolean
   getProgress(): any
   getOutput(): any | Promise<any>
@@ -99,8 +99,8 @@ export class Berghain {
 
   private createBouncer?: (
     initialState: GameState
-  ) => BergainBouncer | Promise<BergainBouncer>
-  private bouncer?: BergainBouncer
+  ) => BerghainBouncer | Promise<BerghainBouncer>
+  private bouncer?: BerghainBouncer
   private current?: GameState
   private maxRetries = 1
 
@@ -126,7 +126,9 @@ export class Berghain {
    * Set the bouncer strategy to be used in the game.
    */
   withBouncer(
-    initializer: (state: GameState) => BergainBouncer | Promise<BergainBouncer>
+    initializer: (
+      state: GameState
+    ) => BerghainBouncer | Promise<BerghainBouncer>
   ): this {
     this.createBouncer = initializer
     return this
@@ -198,16 +200,16 @@ export class Berghain {
 
       if (this.current.status.status === 'failed') {
         console.warn('====================== ❌ ======================')
-        prettyPrint(this.bouncer.getProgress())
         prettyPrint(this.bouncer.getOutput())
+        prettyPrint(this.bouncer.getProgress())
         prettyPrint(this.current.status)
         return this
       }
 
       if (this.current.status.status === 'completed') {
         console.warn('====================== ✅ ======================')
-        prettyPrint(this.bouncer.getProgress())
         prettyPrint(this.bouncer.getOutput())
+        prettyPrint(this.bouncer.getProgress())
         prettyPrint(this.current.status)
         return this
       }

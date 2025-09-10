@@ -1,11 +1,11 @@
-import type { BergainBouncer } from './berghain'
+import type { BergainBouncer } from '../berghain'
 import type {
   GameConstraints,
   GameState,
   GameStatusRunning,
   ScenarioAttributes,
-} from './types'
-import { Disk } from './utils/disk'
+} from '../types'
+import { Disk } from '../utils/disk'
 
 interface GameResult {
   gameId: string

@@ -1,10 +1,10 @@
-import { Berghain, type BergainBouncer } from './berghain'
+import { Berghain, type BergainBouncer } from '../berghain'
 import type {
   GameConstraints,
   GameState,
   GameStatusRunning,
   ScenarioAttributes,
-} from './types'
+} from '../types'
 
 const config = {
   totalPeople: 10_000,

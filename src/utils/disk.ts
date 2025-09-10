@@ -51,4 +51,22 @@ export namespace Disk {
     await file.write(JSON.stringify(gameState, null, 2))
     return path
   }
+
+  /**
+   *  Simple help for saving JSON.
+   */
+  export async function saveJsonFile<T extends {}>(
+    filePath: string,
+    jsonData: T
+  ) {
+    try {
+      const file = Bun.file(filePath)
+      await file.write(JSON.stringify(jsonData, null, 2))
+      return filePath
+    } catch (e) {
+      console.warn('[disk] failed to save data:')
+      console.log(jsonData)
+      return undefined
+    }
+  }
 }

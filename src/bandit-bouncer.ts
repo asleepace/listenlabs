@@ -1,4 +1,4 @@
-import type { BergainBouncer } from './berghain'
+import type { BerghainBouncer } from './berghain'
 import type {
   GameConstraints,
   GameState,
@@ -13,6 +13,7 @@ interface GameResult {
   timestamp: Date
   constraints: any[]
   decisions: DecisionRecord[]
+  snapshot?: BanditSnapshot
 }
 
 interface DecisionRecord {
@@ -39,6 +40,16 @@ interface Config {
 }
 
 type Person<T> = Record<keyof T, boolean>
+
+type BanditSnapshot = {
+  A: number[][]
+  b: number[]
+  weights: number[]
+  admitRateEma: number
+  recentValues: number[]
+  featureDim: number
+  maxCapacity: number
+}
 
 interface Statistics<T> {
   correlations: Record<keyof T, Record<keyof T, number>>
@@ -83,6 +94,47 @@ class Constraint<T> {
 }
 
 class LinearBandit {
+  static fromSnapshot(s: BanditSnapshot) {
+    const lb = new LinearBandit(s.featureDim, s.maxCapacity) // OR use constructorBare if you split it
+    // overwrite core params
+    lb.A = s.A
+    lb.b = s.b
+    lb.weights = s.weights
+    // IMPORTANT: neutralize recentValues to avoid stale, inflated quantiles
+    lb.recentValues = Array(Math.min(60, lb.recentCap)).fill(2.0)
+    // align controller to target to avoid big early shift
+    lb.admitRateEma = lb.targetAdmitRate
+    return lb
+  }
+
+  private priorWeights = [
+    1.2,
+    1.0,
+    1.8,
+    1.0, // indicators
+    -0.8,
+    -0.8,
+    -1.4,
+    -0.8, // progress (negative)
+    -1.6,
+    1.2, // capacity, scarcity
+  ]
+
+  // for deugging:
+  private lastThrDbg = {
+    med: 0,
+    mad: 0,
+    sigma: 0,
+    z: 0,
+    quantileEstimate: 0,
+    capacityBias: 0,
+    rateAdjustment: 0,
+    urgencyAdj: 0,
+    lo: 0,
+    hi: 0,
+    final: 0,
+  }
+
   private weights!: number[]
   private A!: number[][]
   private b!: number[]
@@ -93,12 +145,15 @@ class LinearBandit {
 
   public totalAdmitted = 0
   public maxCapacity: number // Remove hardcoded value
-  private admitRateEma = 0.5
-  private emaBeta = 0.02 // slow + stable
 
   private recentValues: number[] = []
   private recentCap = 500
-  private targetAdmitRate = 0.1 // tune: 0.25–0.45 are typical
+
+  private targetAdmitRate = 0.21
+  private eta = 0.2 // tune 0.05–0.5
+
+  private admitRateEma = this.targetAdmitRate
+  private emaBeta = 0.02 // slow + stable
 
   constructor(
     featureDimension: number,
@@ -111,26 +166,31 @@ class LinearBandit {
     this.initializeFromHistory(previousData)
   }
 
+  public warmStartFromHistory(decisions: DecisionRecord[]) {
+    this.initializeFromHistory(decisions)
+  }
+
   private reset() {
-    this.A = this.createIdentityMatrix(this.featureDim, 0.1)
-    this.b = Array(this.featureDim).fill(0)
+    const lambda = 0.1
+    this.A = this.createIdentityMatrix(this.featureDim, lambda)
+    // Seed b so that w = A^{-1} b starts at your priors
+    this.b = this.priorWeights.map((w) => lambda * w)
+    this.weights = [...this.priorWeights]
 
-    // Initialize with reasonable weights instead of zeros
-    this.weights = [
-      1.2, // techno_lover
-      1.0, // well_connected
-      1.8, // creative
-      1.0, // berlin_local
-      -0.8, // techno_lover progress
-      -0.8, // well_connected progress
-      -1.4, // creative progress
-      -0.8, // berlin_local progress
-      -1.6, // capacity utilization
-      1.2, // creative scarcity
-    ]
-
-    this.recentValues = Array(60).fill(0) // > 50 so percentile is used
+    this.recentValues = Array(60).fill(2.0)
     console.log('Bandit reset with initial weights:', this.weights.slice(0, 6))
+  }
+
+  toSnapshot(): BanditSnapshot {
+    return {
+      A: this.A,
+      b: this.b,
+      weights: this.weights,
+      admitRateEma: this.admitRateEma,
+      recentValues: this.recentValues.slice(-this.recentCap),
+      featureDim: this.featureDim,
+      maxCapacity: this.maxCapacity,
+    }
   }
 
   updateController(admitted: boolean) {
@@ -157,14 +217,10 @@ class LinearBandit {
       `Learning from ${validDecisions.length} valid historical decisions`
     )
 
-    validDecisions.forEach((decision) => {
-      let normalizedReward = decision.reward
-      if (Math.abs(decision.reward) > 100) {
-        normalizedReward = decision.reward * 0.1
-        normalizedReward = Math.max(-50, Math.min(50, normalizedReward))
-      }
-
-      this.updateModel(decision.features, normalizedReward)
+    validDecisions.forEach((decision, idx) => {
+      const age = validDecisions.length - idx // 1=newest
+      const w = Math.pow(0.9, age) // newer decisions count more
+      this.updateModel(decision.features, decision.reward * w)
     })
 
     if (validDecisions.length > 0) {
@@ -172,24 +228,97 @@ class LinearBandit {
     }
   }
 
-  private calculateAdaptiveThreshold(): number {
-    const capacityUsed = this.totalAdmitted / this.maxCapacity
-    const baseThreshold = 0 // better matches your reward scale
-
-    let threshold = baseThreshold
-    if (capacityUsed < 0.3) {
-      threshold = baseThreshold + capacityUsed * 2.0
-    } else if (capacityUsed < 0.7) {
-      threshold = baseThreshold + 0.6 + (capacityUsed - 0.3) * 3.0
-    } else {
-      threshold = baseThreshold + 1.8 + (capacityUsed - 0.7) * 5.0
+  // Helper: robust stats
+  private median(xs: number[]): number {
+    if (xs.length === 0) return 0
+    const a = [...xs].sort((x, y) => x - y)
+    const m = Math.floor(a.length / 2)
+    return a.length % 2 ? a[m] : 0.5 * (a[m - 1] + a[m])
+  }
+  private mad(xs: number[], med: number): number {
+    if (xs.length === 0) return 1e-6
+    const dev = xs.map((v) => Math.abs(v - med)).sort((x, y) => x - y)
+    const m = Math.floor(dev.length / 2)
+    const mad = dev.length % 2 ? dev[m] : 0.5 * (dev[m - 1] + dev[m])
+    return Math.max(mad, 1e-6)
+  }
+  // Map target admit rate -> z for a Normal (robust approx)
+  private zForTail(p: number): number {
+    // p is the tail prob: e.g. 0.30 -> z≈0.524 (70th percentile)
+    const table: Record<string, number> = {
+      '0.50': 0.0,
+      '0.40': 0.253,
+      '0.35': 0.385,
+      '0.30': 0.524,
+      '0.25': 0.674,
+      '0.20': 0.842,
+      '0.15': 1.036,
+      '0.10': 1.282,
+      '0.07': 1.476,
+      '0.05': 1.645,
+      '0.03': 1.881,
+      '0.02': 2.054,
     }
+    // snap to nearest key
+    const keys = Object.keys(table)
+      .map(parseFloat)
+      .sort((a, b) => a - b)
+    const nearest = keys.reduce(
+      (best, k) => (Math.abs(k - p) < Math.abs(best - p) ? k : best),
+      keys[0]
+    )
+    return table[nearest.toFixed(2)] ?? 0.524
+  }
 
-    const urgencyBonus = this.calculateUrgencyBonus()
-    threshold -= urgencyBonus
+  /**
+   * Scenario-agnostic adaptive threshold:
+   * - Robustly estimates the desired quantile from recent scores (median + 1.4826*MAD*z)
+   * - Adds small capacity bias
+   * - Adds P-control admit-rate correction
+   * - Subtracts constraint urgency
+   * - Clips to robust data-dependent band (median ± 3*MAD*)
+   */
+  private calculateAdaptiveThreshold(constraintUrgency: number = 0): number {
+    const arr = this.recentValues.length ? this.recentValues : [0]
+    const med = this.median(arr)
+    const mad = this.mad(arr, med)
+    const sigma = 1.4826 * mad
 
-    // Keep a sensible floor/ceiling so we never saturate
-    return Math.max(0.0, Math.min(4.0, threshold)) // floor at 0
+    const tail = 1 - this.targetAdmitRate
+    const z = this.zForTail(tail)
+
+    const quantileEstimate = med + z * sigma
+    const used = this.totalAdmitted / this.maxCapacity
+    const capacityBias = 0.6 * used
+    const k = 0.8
+    const rateAdjustment = k * (this.admitRateEma - this.targetAdmitRate)
+    const urgencyAdj = Math.min(5.0, Math.max(0, constraintUrgency))
+
+    let thr = quantileEstimate + capacityBias + rateAdjustment - urgencyAdj
+
+    const lo = med - 3 * sigma
+    const hi = med + 3 * sigma
+    if (!Number.isFinite(thr)) thr = med
+    const final = Math.max(lo, Math.min(hi, thr))
+
+    this.lastThrDbg = {
+      med,
+      mad,
+      sigma,
+      z,
+      quantileEstimate,
+      capacityBias,
+      rateAdjustment,
+      urgencyAdj,
+      lo,
+      hi,
+      final,
+    }
+    return final
+  }
+
+  getThresholdDebug() {
+    return this.lastThrDbg
   }
 
   private calculateUrgencyBonus(): number {
@@ -198,40 +327,27 @@ class LinearBandit {
     return 0
   }
 
-  selectAction(
-    features: number[],
-    constraintUrgency: number = 0
-  ): {
-    action: 'admit' | 'reject'
-    value: number
-  } {
+  private getNoise() {
+    const baseNoise = 0.2
+    const decay = Math.min(1, this.decisionCount / 400)
+    const noise = (Math.random() - 0.5) * (baseNoise * (1 - 0.5 * decay))
+    // 0.2 → ~0.1 by 400 decisions
+    return noise
+  }
+
+  selectAction(features: number[], constraintUrgency = 0) {
     this.decisionCount++
-
     this.updateWeights()
-
     const rawValue = this.predictValue(features)
     this.pushRaw(rawValue)
 
-    // quantile: admit rate ~ targetAdmitRate
-    const base = this.percentile(1 - this.targetAdmitRate)
-    const urgencyAdj = Math.min(2.0, Math.max(0, constraintUrgency))
-
-    // Nudge threshold up if we're admitting too much, down if too little
-    const targetRate = this.targetAdmitRate // use the same target
-    const k = 0.8
-    const rateAdjustment = k * (this.admitRateEma - targetRate)
-
-    // urgency pulls threshold DOWN a bit when constraints are at risk
-    const threshold = base + rateAdjustment - urgencyAdj
+    const threshold = this.calculateAdaptiveThreshold(constraintUrgency)
 
     this.lastThreshold = threshold
     this.lastRawValue = rawValue
-
-    const noise = (Math.random() - 0.5) * 0.2
-
+    const noise = this.getNoise()
     const action = rawValue + noise > threshold ? 'admit' : 'reject'
-
-    return { action, value: rawValue }
+    return { action, value: rawValue } as const
   }
 
   private predictValue(features: number[]): number {
@@ -276,8 +392,8 @@ class LinearBandit {
   updateModel(features: number[], reward: number) {
     const r = Math.max(-50, Math.min(50, reward))
     for (let i = 0; i < features.length; i++) {
-      this.A[i][i] += features[i] * features[i] // only diagonal
-      this.b[i] += r * features[i]
+      this.A[i][i] += this.eta * (features[i] * features[i])
+      this.b[i] += this.eta * (r * features[i])
     }
   }
 
@@ -294,22 +410,27 @@ class LinearBandit {
   }
 
   private pushRaw(v: number) {
-    this.recentValues.push(v)
+    const clipped = Math.max(-4, Math.min(4, v))
+    this.recentValues.push(clipped)
     if (this.recentValues.length > this.recentCap) this.recentValues.shift()
   }
 
   private percentile(p: number): number {
     if (this.recentValues.length < 50) return this.calculateAdaptiveThreshold()
     const arr = [...this.recentValues].sort((a, b) => a - b)
+    const n = arr.length
+    const lo = Math.floor(0.05 * n),
+      hi = Math.ceil(0.95 * n)
+    const trimmed = arr.slice(lo, Math.max(lo + 1, hi)) // ensure non-empty
     const idx = Math.min(
-      arr.length - 1,
-      Math.max(0, Math.floor(p * (arr.length - 1)))
+      trimmed.length - 1,
+      Math.max(0, Math.floor(p * (trimmed.length - 1)))
     )
-    return arr[idx]
+    return trimmed[idx]
   }
 }
 
-export class BanditBouncer<T> implements BergainBouncer {
+export class BanditBouncer<T> implements BerghainBouncer {
   public constraints = new Map<keyof T, Constraint<T>>()
   public totalAdmitted = 0
   public totalRejected = 0
@@ -321,15 +442,20 @@ export class BanditBouncer<T> implements BergainBouncer {
   }
 
   private computeConstraintUrgency(): number {
-    // Aggregate scarcity of unmet constraints; softly capped
-    let urgency = 0
+    let scores: number[] = []
     for (const c of this.getConstraints()) {
       if (!c.isSatisfied()) {
-        urgency += Math.min(3, c.getScarcity(this.remainingSlots))
+        const need = c.getShortfall()
+        const expAvail = Math.max(1e-6, this.remainingSlots * c.frequency)
+        const ratio = need / expAvail // >1 means unlikely to finish
+        scores.push(ratio)
       }
     }
-    // Normalize a bit so it behaves like a small threshold shift
-    return Math.min(2.0, urgency * 0.25)
+    if (scores.length === 0) return 0
+    // Use a softplus-ish squashing so it grows >1 but doesn’t explode
+    const maxRatio = Math.max(...scores)
+    const urgency = Math.log1p(Math.E * maxRatio) // ~1 at ratio≈1, grows gently
+    return Math.min(5.0, urgency)
   }
 
   initializeConstraints() {
@@ -350,14 +476,17 @@ export class BanditBouncer<T> implements BergainBouncer {
 
     const previousGames = await this.getPreviousGameResults()
     const allDecisions = previousGames.flatMap((game) => game.decisions || [])
+    const lastSnapshot = previousGames.at(0)?.snapshot
 
     const featureDim = 10
     // Pass actual capacity instead of hardcoded 10_000
-    this.bandit = new LinearBandit(
-      featureDim,
-      this.config.MAX_CAPACITY,
-      allDecisions
-    )
+    this.bandit = lastSnapshot
+      ? LinearBandit.fromSnapshot(lastSnapshot)
+      : new LinearBandit(featureDim, this.config.MAX_CAPACITY)
+
+    if (!lastSnapshot) {
+      this.bandit.warmStartFromHistory(allDecisions) // optional: decay weights inside as you do now
+    }
   }
 
   get statistics(): Statistics<T> {
@@ -454,28 +583,39 @@ export class BanditBouncer<T> implements BergainBouncer {
   }
 
   private calculateReward(person: Person<T>, admitted: boolean): number {
-    if (!admitted) return -0.5 // <-- NEGATIVE, not positive
+    const used = this.totalAdmitted / this.config.MAX_CAPACITY
+    if (!admitted) return used < 0.2 ? -0.25 : -0.5
 
     let reward = 0
     let usefulCount = 0
-    const capacityUsed = this.totalAdmitted / this.config.MAX_CAPACITY
 
     this.constraints.forEach((constraint) => {
-      if (person[constraint.attribute] && !constraint.isSatisfied()) {
-        usefulCount++
-        let baseReward =
-          String(constraint.attribute) === 'creative'
-            ? 2.5
-            : String(constraint.attribute) === 'berlin_local'
-            ? 1.2
-            : 0.8
-        const scarcityMultiplier = constraint.getScarcity(this.remainingSlots)
-        reward += baseReward * Math.max(0.5, Math.min(2.0, scarcityMultiplier))
+      if (person[constraint.attribute]) {
+        if (!constraint.isSatisfied()) {
+          // 👍 positive reward for helping satisfy this constraint
+          usefulCount++
+          let baseReward =
+            String(constraint.attribute) === 'creative'
+              ? 4.0 // boosted
+              : String(constraint.attribute) === 'berlin_local'
+              ? 2.0 // boosted
+              : 0.8
+          const scarcityMultiplier = constraint.getScarcity(this.remainingSlots)
+          reward +=
+            baseReward * Math.max(0.5, Math.min(2.0, scarcityMultiplier))
+        } else {
+          // 👇 penalty if constraint already satisfied
+          reward -= 1.0
+        }
       }
     })
 
-    if (capacityUsed > 0.6 && usefulCount <= 1) reward -= 1.2
+    // late capacity penalty if admits aren’t very useful
+    if (used > 0.6 && usefulCount <= 1) reward -= 1.2
+
+    // if truly useless, small negative
     reward = usefulCount === 0 ? -0.5 : reward
+
     return Math.max(-2, Math.min(6, reward))
   }
 
@@ -537,16 +677,24 @@ export class BanditBouncer<T> implements BergainBouncer {
 
   getProgress() {
     const admitRate = (this.bandit as any).admitRateEma?.toFixed?.(3)
+    const thrDbg = (this.bandit as any).getThresholdDebug?.() || {}
+    const rv = (this as any).bandit ? (this as any).bandit : null
+    const recent =
+      rv && (rv as any).recentValues ? (rv as any).recentValues : []
+    const sorted = [...recent].sort((a: number, b: number) => a - b)
+    const pick = (p: number) =>
+      sorted.length ? sorted[Math.floor(p * (sorted.length - 1))] : 0
+
     return {
-      attributes: this.getConstraints().map((constraint) => ({
-        attribute: constraint.attribute,
-        admitted: constraint.admitted,
-        required: constraint.minRequired,
-        satisfied: constraint.isSatisfied(),
-        progress: constraint.getProgress(),
-        shortfall: constraint.getShortfall(),
-        frequency: constraint.frequency,
-        scarcity: constraint.getScarcity(this.remainingSlots),
+      attributes: this.getConstraints().map((c) => ({
+        attribute: c.attribute,
+        admitted: c.admitted,
+        required: c.minRequired,
+        satisfied: c.isSatisfied(),
+        progress: c.getProgress(),
+        shortfall: c.getShortfall(),
+        frequency: c.frequency,
+        scarcity: c.getScarcity(this.remainingSlots),
       })),
       remainingSlots: this.remainingSlots,
       banditStats: this.bandit?.getStats(),
@@ -555,6 +703,14 @@ export class BanditBouncer<T> implements BergainBouncer {
       threshold: this.bandit.getLastThreshold(),
       lastRawValue: this.bandit.getLastRawValue(),
       admitRate,
+      // NEW: score distribution + threshold components
+      scoreDist: {
+        n: sorted.length,
+        p10: pick(0.1),
+        p50: pick(0.5),
+        p90: pick(0.9),
+      },
+      thresholdDebug: thrDbg, // med, mad, z, capacityBias, rateAdjustment, urgencyAdj, lo/hi, final
     }
   }
 
@@ -565,12 +721,25 @@ export class BanditBouncer<T> implements BergainBouncer {
       ...this.state,
       timestamp: new Date().toISOString(),
       output: {
-        ...this.getProgress(),
         finished: true,
         finalScore,
         decisions: this.decisions,
+        snapshot: this.bandit.toSnapshot(),
+        ...this.getProgress(),
       },
     }
+
+    // save summary of game
+    const summary = {
+      gameId: this.state.game.gameId,
+      finalScore,
+      totalAdmitted: this.totalAdmitted,
+      totalRejected: this.totalRejected,
+      admitRate: (this.bandit as any).admitRateEma,
+      threshold: this.bandit.getLastThreshold(),
+      thresholdDebug: (this.bandit as any).getThresholdDebug?.(),
+    }
+    Disk.saveJsonFile('summary.json', summary).catch(() => {})
 
     Disk.saveGameState(gameData).catch((e) => {
       console.warn('[bandit-bouncer] failed to save game file:', e)
@@ -601,6 +770,7 @@ export class BanditBouncer<T> implements BergainBouncer {
           timestamp: new Date(game.timestamp || 0),
           constraints: game.game?.constraints || [],
           decisions: game.output?.decisions || [],
+          snapshot: game.output?.snapshot,
         }))
         .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
         .slice(0, 3)

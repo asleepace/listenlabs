@@ -1,7 +1,7 @@
-import type { GameState, ScenarioAttributes } from './types'
-import type { BergainBouncer } from './berghain'
-import { Bouncer } from './bouncer' // Your original working algorithm
-import { LearningDataManager } from './example/learning-data-manager'
+import type { GameState, ScenarioAttributes } from '../types'
+import type { BergainBouncer } from '../berghain'
+import { Bouncer } from '../bouncer' // Your original working algorithm
+import { LearningDataManager } from '../example/learning-data-manager'
 
 interface ParameterSet {
   id: string
