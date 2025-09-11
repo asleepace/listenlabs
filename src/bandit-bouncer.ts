@@ -74,15 +74,15 @@ const CFG = {
     },
     clamp: [-2, 6] as const,
   },
-
-  FINISH: {
-    enableAtUsed: 0.9, // start finishing once ≥90% of capacity is used
-    maxShortfall: 3, // if a constraint is missing ≤3 people
-  },
   // Fill-to-capacity helper when all constraints are satisfied
   FILL: {
     enableAtUsed: 0.9, // once ≥90% capacity used and constraints met -> fill seats
     learn: false, // don't train the bandit on pure fill admits (avoid overshoot penalties)
+  },
+  FINISH: {
+    enableAtUsed: 0.9, // start finishing once ≥90% capacity is used
+    maxShortfall: 10, // admit helpful people when the smallest shortfall ≤ 10
+    ratioMin: 3, // OR when remainingSlots / smallestShortfall ≥ 3
   },
 
   // Learning warmup
@@ -846,26 +846,36 @@ export class BanditBouncer<T> implements BerghainBouncer {
 
     // --- fill-to-capacity: if ALL constraints are satisfied late, just admit ---
     const allSatisfied = this.getConstraints().every((c) => c.isSatisfied())
-    if (allSatisfied && used >= CFG.FILL.enableAtUsed) {
-      // Optional: skip model training to avoid overshoot penalties on satisfied attrs
-      if (CFG.FILL.learn) {
-        const reward = 0 // neutral learning if you want
-        this.bandit.updateModel(features, reward)
+    // handle end-game logic (assist the smallest unmet constraint late)
+    if (used >= CFG.FINISH.enableAtUsed) {
+      const outstanding = this.getConstraints().filter((c) => !c.isSatisfied())
+      if (outstanding.length) {
+        // find the smallest remaining shortfall among unmet constraints
+        let minShort = Infinity
+        let minAttr: keyof T | null = null
+        for (const c of outstanding) {
+          const s = c.getShortfall()
+          if (s > 0 && s < minShort) {
+            minShort = s
+            minAttr = c.attribute
+          }
+        }
+
+        // If we're down to a reasonably small gap (absolute or roomy by ratio) and this person helps it -> admit
+        const roomy =
+          isFinite(minShort) && minShort > 0 && this.remaining() / Math.max(1, minShort) >= CFG.FINISH.ratioMin
+
+        if (minAttr && person[minAttr] && (minShort <= CFG.FINISH.maxShortfall || roomy)) {
+          const reward = this.calculateReward(person, true)
+          this.bandit.updateModel(features, reward)
+          this.getConstraints().forEach((c) => c.update(person, true))
+          this.totalAdmitted++
+          this.bandit.totalAdmitted++
+          this.recordDecision(person, 'admit', reward, this.bandit.getLastRawValue?.() ?? 0, features)
+          this.bandit.updateController(true)
+          return true
+        }
       }
-      // Update state
-      this.getConstraints().forEach((c) => c.update(person, true))
-      this.totalAdmitted++
-      this.bandit.totalAdmitted++
-      // Minimal log/decision record
-      this.recordDecision(
-        person,
-        'admit',
-        0, // neutral reward for record
-        this.bandit.getLastRawValue?.() ?? 0,
-        features
-      )
-      this.bandit.updateController(true)
-      return true
     }
 
     // handle end-game logic
