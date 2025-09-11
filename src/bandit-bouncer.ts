@@ -1,20 +1,16 @@
 /* eslint-disable max-classes-per-file */
 
 import type { BerghainBouncer } from './berghain'
-import type {
-  GameState,
-  GameStatus,
-  GameStatusCompleted,
-  GameStatusFailed,
-  GameStatusRunning,
-  ScenarioAttributes,
-} from './types'
+import type { GameState, GameStatusCompleted, GameStatusFailed, GameStatusRunning, ScenarioAttributes } from './types'
 import { Disk } from './utils/disk'
 
 /* =========================
    ✅ TUNING CONFIG (all knobs)
    ========================= */
 const CFG = {
+  // Included on persisted data to identify models and biases
+  MODEL_VERSION: 1.0,
+
   // Capacity / schedule (flattened target → keeps admit rate steady)
   TARGET_RATE_BASE: { early: 0.18, mid: 0.18, late: 0.18 },
   TARGET_RATE_MIN: 0.12,
@@ -24,8 +20,8 @@ const CFG = {
   PRICE: {
     priorTrue: 2, // Beta prior for frequency (alpha)
     priorTotal: 8, // Beta prior total (alpha+beta)
-    k0: 1.6, // optimism scale at start (UCB), fades with used
-    slope: 8.0, // squashing slope → price jump as need > supply
+    k0: 1.9, // optimism scale at start (UCB), fades with used
+    slope: 9.0, // squashing slope → price jump as need > supply
     synergy: 0.2, // small bonus for covering multiple urgent attrs
     paceSlack: 0.02, // allow a tiny progress lag before braking
     paceBrake: 0.15, // gentle brake when ahead of pace (keeps rate flat)
@@ -51,12 +47,12 @@ const CFG = {
 
   // Thresholding (robust quantile + PI controller)
   THRESH: {
-    sigmaFloor: 0.4, // avoid too-tight thresholds early
+    sigmaFloor: 0.3, // avoid too-tight thresholds early
     warmupDecisions: 300,
     warmupErrCap: 0.25,
     floorBumpBase: 0.2,
     floorBumpSlope: 1.25,
-    capacityBiasScale: { early: 0.4, late: 0.8 }, // * used * sigma
+    capacityBiasScale: { early: 0.25, late: 0.6 }, // * used * sigma
     urgencyMax: 0.0, // disabled; prices handle urgency
     ctrlGains: { kP: 1.1, kI: 0.35, boostEdge: 0.25, boostFactor: 1.15 },
   },
@@ -87,7 +83,7 @@ const CFG = {
   },
 
   // Optional epsilon-admit very early (break stalemates)
-  EXPLORE: { epsAdmit: 0.08, epsUntilUsed: 0.05 },
+  EXPLORE: { epsAdmit: 0.08, epsUntilUsed: 0.04 },
 
   // Debug / logging
   DEBUG: {
@@ -506,9 +502,9 @@ class LinearBandit {
     // global clamp
     for (let i = 0; i < this.weights.length; i++) this.weights[i] = clamp(this.weights[i], CFG.BANDIT.weightClamp)
 
-    // sign hints: capacity <= capacityFloor; scarcity >= scarcityFloor
+    // sign hints: keep capacity weight ≥ capacityFloor (not more negative); scarcity ≥ scarcityFloor
     if (this.capIdx < this.weights.length)
-      this.weights[this.capIdx] = Math.min(CFG.BANDIT.capacityFloor, this.weights[this.capIdx])
+      this.weights[this.capIdx] = Math.max(CFG.BANDIT.capacityFloor, this.weights[this.capIdx])
     if (this.scarIdx < this.weights.length)
       this.weights[this.scarIdx] = Math.max(CFG.BANDIT.scarcityFloor, this.weights[this.scarIdx])
 
@@ -646,7 +642,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
     const rare = all.slice().sort((a, b) => (a.frequency ?? 1) - (b.frequency ?? 1))[0]
     this.rareKey = (rare?.attribute as keyof T) ?? null
     this.indicatorCount = all.length
-    if (this.indicatorCount === 0) this.rareKey = null
+    if (this.indicatorCount === 0) return [Math.pow(this.usedFrac(), 0.8), 0] // no indicators
   }
 
   async initializeLearningData() {
@@ -706,7 +702,6 @@ export class BanditBouncer<T> implements BerghainBouncer {
       const beta = beta0 + Math.max(0, seenTotal - seenTrue)
 
       const mean = alpha / Math.max(1, alpha + beta)
-      const v = (alpha * beta) / (Math.pow(alpha + beta, 2) * Math.max(1, alpha + beta + 1))
       const vRaw = (alpha * beta) / (Math.pow(alpha + beta, 2) * Math.max(1, alpha + beta + 1))
       const sd = Math.sqrt(Math.max(1e-6, vRaw))
       const pUCB = Math.max(0, Math.min(1, mean + k * sd))
@@ -1012,6 +1007,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
       status: lastStatus,
       timestamp: new Date().toISOString(),
       output: {
+        model: CFG.MODEL_VERSION,
         completed: lastStatus.status,
         reason: lastStatus.status === 'failed' ? lastStatus.reason : undefined,
         finished: lastStatus.status === 'completed',
@@ -1022,6 +1018,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
       },
     }
     const summary = {
+      model: CFG.MODEL_VERSION,
       status: lastStatus.status,
       gameId: this.state.game.gameId,
       finalScore,
@@ -1042,6 +1039,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
       const saved = await Disk.getJsonDataFromFiles<GameState<any>>()
       return saved
         .filter((g) => g.output?.decisions && g.output.decisions.length > 50)
+        .filter((g) => g.output?.model === CFG.MODEL_VERSION)
         .map((g) => ({
           gameId: g.game.gameId,
           finalScore: g.output?.finalScore || 20000,
