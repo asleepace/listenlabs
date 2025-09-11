@@ -1,7 +1,14 @@
 /* eslint-disable max-classes-per-file */
 
 import type { BerghainBouncer } from './berghain'
-import type { GameState, GameStatusRunning, ScenarioAttributes } from './types'
+import type {
+  GameState,
+  GameStatus,
+  GameStatusCompleted,
+  GameStatusFailed,
+  GameStatusRunning,
+  ScenarioAttributes,
+} from './types'
 import { Disk } from './utils/disk'
 
 /* =========================
@@ -997,14 +1004,17 @@ export class BanditBouncer<T> implements BerghainBouncer {
     return extra
   }
 
-  getOutput() {
+  getOutput(lastStatus: GameStatusCompleted | GameStatusFailed) {
     const extra = this.estimateExtraRejections()
     const finalScore = this.totalRejected + extra
     const gameData: GameState<any> = {
       ...this.state,
+      status: lastStatus,
       timestamp: new Date().toISOString(),
       output: {
-        finished: true,
+        completed: lastStatus.status,
+        reason: lastStatus.status === 'failed' ? lastStatus.reason : undefined,
+        finished: lastStatus.status === 'completed',
         finalScore,
         decisions: this.decisions,
         snapshot: this.bandit.toSnapshot(),
@@ -1012,6 +1022,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
       },
     }
     const summary = {
+      status: lastStatus.status,
       gameId: this.state.game.gameId,
       finalScore,
       totalAdmitted: this.totalAdmitted,
