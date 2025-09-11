@@ -5,129 +5,110 @@ type Guest<T extends ScenarioAttributes = ScenarioAttributes> = {
   [K in keyof T]: boolean
 }
 
-interface Constraint {
-  attribute: keyof ScenarioAttributes
-  minCount: number
-}
-
 interface State {
   admittedCount: number
   attributeCounts: Record<keyof Guest, number>
   peopleProcessed: number
 }
 
-interface Constraint {
-  attribute: keyof Guest
-  minCount: number
+const Config = {
+  TOTAL_PEOPLE: 10_000,
+  MAX_REJECTIONS: 10_000,
+  MAX_ADMISSIONS: 1_000,
+  BASE_THRESHOLD: 0.51,
+  SCALING: 1.0,
 }
 
-interface State {
-  admittedCount: number
-  attributeCounts: Record<keyof Guest, number>
-  peopleProcessed: number
+/* ==================  HELPERS  ================== */
+
+function average(...values: number[][]): number {
+  const flat = values.flat(1)
+  const size = flat.length
+  if (size === 0) return 0
+  return flat.reduce((a, b) => a + b, 0) / size
 }
 
-// 1. Constraint Urgency Score
-function calculateUrgencyScore(
-  constraint: Constraint,
-  currentCount: number,
-  peopleRemaining: number,
+function round(value: number): number {
+  return Math.round(value * 10_000) / 10_000
+}
+
+function clamp(lower: number, value: number, upper: number): number {
+  return Math.max(lower, Math.min(value, upper))
+}
+
+function match<T>(predicate: boolean, yes: T, no: T): T {
+  return predicate ? yes : no
+}
+
+function isAboveZero(value: number): boolean {
+  return value > 0
+}
+
+function isBelowZero(value: number): boolean {
+  return value < 0
+}
+
+function divide(a: number, b: number): number {
+  if (b === 0) return 0
+  return a / b
+}
+
+function getGuestAttributes(guest: Record<string, boolean>): string[] {
+  return Object.entries(guest)
+    .filter((tuple) => tuple[1] === true)
+    .map((tuple) => tuple[0])
+}
+
+/* ==================  HELPERS  ================== */
+
+interface Quota {
+  readonly attribute: string
+  readonly minCount: number
+  needed: number
+  totalSeen: number
   frequency: number
-): number {
-  const requiredRemaining = Math.max(0, constraint.minCount - currentCount)
-  const expectedFromRemaining = peopleRemaining * frequency
-
-  return expectedFromRemaining > 0 ? requiredRemaining / expectedFromRemaining : 0
-}
-
-// 2. Guest Value Scoring
-function calculateGuestValue(
-  guest: Guest,
-  constraints: Constraint[],
-  state: State,
-  peopleRemaining: number,
-  frequencies: Record<keyof Guest, number>
-): number {
-  let totalValue = 0
-
-  for (const constraint of constraints) {
-    const urgency = calculateUrgencyScore(
-      constraint,
-      state.attributeCounts[constraint.attribute],
-      peopleRemaining,
-      frequencies[constraint.attribute]
-    )
-
-    if (guest[constraint.attribute]) {
-      totalValue += urgency
-    }
-  }
-
-  return totalValue
-}
-
-// 3. Dynamic Admission Threshold
-function calculateThreshold(
-  admissionsUsed: number,
-  maxAdmissions: number,
-  baseThreshold: number = 0.5,
-  scaling: number = 1.0
-): number {
-  const progressRatio = admissionsUsed / maxAdmissions
-  return baseThreshold + progressRatio * scaling
-}
-
-// 4. Correlation-Adjusted Expected Impact
-function calculateExpectedImpact(
-  guest: Guest,
-  correlations: Record<keyof Guest, Record<keyof Guest, number>>,
-  remainingAdmissions: number
-): Record<keyof Guest, number> {
-  const impact: Record<keyof Guest, number> = {
-    techno_lover: 0,
-    well_connected: 0,
-    creative: 0,
-    berlin_local: 0,
-  }
-
-  const guestAttrs = Object.entries(guest)
-    .filter(([_, hasAttr]) => hasAttr)
-    .map(([attr, _]) => attr as keyof Guest)
-
-  for (const targetAttr in impact) {
-    const attr = targetAttr as keyof Guest
-    for (const guestAttr of guestAttrs) {
-      impact[attr] += correlations[guestAttr][attr] * remainingAdmissions
-    }
-  }
-
-  return impact
+  progress(): number
+  isFinished(): boolean
+  rate(): number
 }
 
 function createContext({ game, ...initialState }: GameState) {
   const frequencies = game.attributeStatistics.relativeFrequencies
   const correlations = game.attributeStatistics.correlations
-
-  const quotas = game.constraints.map((constraint) => {
+  const quotas: Quota[] = game.constraints.map((constraint) => {
     return {
-      ...constraint,
-      maxCount: constraint.minCount,
+      attribute: constraint.attribute,
+      minCount: constraint.minCount,
+      needed: constraint.minCount,
       frequency: frequencies[constraint.attribute],
       totalSeen: 0,
-    } as const
+      didAdmit() {
+        this.needed--
+      },
+      isFinished() {
+        return this.needed <= 0
+      },
+      progress() {
+        return divide(this.needed, this.minCount)
+      },
+      rate() {
+        const admitted = this.minCount - this.needed
+        return divide(admitted, this.totalSeen)
+      },
+    }
   })
 
   return {
     ...initialState,
     game,
     quotas,
-    totalPeopleInLine: 10_000,
-    totalAvailableSpots: 1_000,
+    totalPeopleInLine: Config.TOTAL_PEOPLE,
+    totalAvailableSpots: Config.MAX_ADMISSIONS,
     get totalAdmitted(): number {
-      return 1_000 - this.totalAvailableSpots
+      return Config.MAX_ADMISSIONS - this.totalAvailableSpots
     },
     get totalRejected(): number {
-      return 10_000 - this.totalAdmitted
+      return Config.TOTAL_PEOPLE - this.totalAdmitted
     },
     get totalNeededMax(): number {
       return this.quotas.reduce((total, person) => total + person.minCount, 0)
@@ -135,12 +116,94 @@ function createContext({ game, ...initialState }: GameState) {
     get totalQuotasMet(): number {
       return this.quotas.reduce((total, person) => total + Number(person.minCount <= 0), 0)
     },
-    update(status: GameStatusRunning<ScenarioAttributes>) {
+    info: {
+      attributes: [] as string[],
+      score: 0,
+      threshold: 0,
+      admit: false,
+    },
+
+    shouldAdmitPerson(guest: ScenarioAttributes): boolean {
+      this.seen(guest) // update attributes
+
+      const score = this.getGuestScore(guest)
+      const threshold = this.getThreshold()
+      const shouldAdmitGuest = score >= threshold
+
+      this.info = {
+        attributes: getGuestAttributes(guest),
+        admit: shouldAdmitGuest,
+        threshold: round(threshold),
+        score: round(score),
+      }
+
+      if (shouldAdmitGuest) {
+        this.didAdmit(guest)
+      }
+
+      return shouldAdmitGuest
+    },
+    seen(person: ScenarioAttributes) {
       this.totalPeopleInLine--
-      this.status = status
+      this.quotas.forEach((quota) => {
+        if (!person[quota.attribute]) return
+        quota.totalSeen++
+      })
     },
     didAdmit(person: ScenarioAttributes) {
       this.totalAvailableSpots--
+      this.quotas.forEach((quota) => {
+        if (!person[quota.attribute]) return
+        quota.needed--
+      })
+    },
+    getQuota(attribute: string) {
+      const quota = this.quotas.find((quota) => quota.attribute === attribute)
+      if (!quota) throw new Error(`Missing quota: ${attribute}`)
+      return quota
+    },
+    getProgressRatio() {
+      return this.totalAdmitted / Config.MAX_ADMISSIONS
+    },
+    getThreshold() {
+      return Config.BASE_THRESHOLD + this.getProgressRatio() * Config.SCALING
+    },
+    getGuestScore(guest: ScenarioAttributes): number {
+      const impactScores = this.getExpectedImpact(guest)
+
+      const components = this.quotas.map((quota) => {
+        return this.getUrgencyScore(quota) * impactScores[quota.attribute]
+      })
+
+      return average(components)
+    },
+    getUrgencyScore(quota: Quota) {
+      const needed = Math.max(0, quota.minCount)
+      const expecting = this.totalPeopleInLine * quota.frequency
+      if (expecting <= 0) return 0
+      return needed / expecting
+    },
+    getExpectedImpact(guest: ScenarioAttributes) {
+      const impact = {} as Record<string, number>
+      const guestAttrs = getGuestAttributes(guest)
+      for (const attrA in impact) {
+        impact[attrA] ??= 0
+        for (const attrB of guestAttrs) {
+          impact[attrA] += correlations[attrB][attrA] * this.totalAvailableSpots
+        }
+      }
+      return impact
+    },
+    getScarcityOrAbundanceMultiplier(attribute: string) {
+      const quota = this.getQuota(attribute)
+      const ratio = divide(quota.progress(), this.getProgressRatio())
+      const modifer = ratio > 1.0 ? ratio - 1.0 : 1.0 + ratio
+      // should be above 1 if ahead
+      // should be below 1 if behind
+      return clamp(0.01, modifer, 1.99) || 1.0
+    },
+    getInfo() {
+      return this.info
     },
   }
 }
@@ -159,15 +222,32 @@ export function AuctionBouncer(initialState: GameState): BerghainBouncer {
    *  Return an object to be used as the bouncer.s
    */
   return {
-    admit(next) {
-      ctx.update(next)
+    admit({ status, nextPerson }) {
+      if (status !== 'running') return false
+      const guest = nextPerson.attributes
+
+      // update context with person
+      ctx.seen(nextPerson.attributes)
+
+      // calculate
+      const score = ctx.getGuestScore(guest)
+      const threshold = ctx.getThreshold()
+      const isAdmitted = score >= threshold
+
+      // set variables for debugging
+
+      if (!isAdmitted) return false
+      ctx.didAdmit(guest)
       return true
     },
     getProgress() {
       return {
         peopleInLine: ctx.totalPeopleInLine,
+        spotsRemaining: ctx.totalAvailableSpots,
         admitted: ctx.totalAdmitted,
         rejected: ctx.totalRejected,
+        progress: round(ctx.getProgressRatio()),
+        ...ctx.getInfo(),
       }
     },
     getOutput() {

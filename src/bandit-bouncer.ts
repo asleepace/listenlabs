@@ -79,6 +79,11 @@ const CFG = {
     enableAtUsed: 0.9, // start finishing once ≥90% of capacity is used
     maxShortfall: 3, // if a constraint is missing ≤3 people
   },
+  // Fill-to-capacity helper when all constraints are satisfied
+  FILL: {
+    enableAtUsed: 0.9, // once ≥90% capacity used and constraints met -> fill seats
+    learn: false, // don't train the bandit on pure fill admits (avoid overshoot penalties)
+  },
 
   // Learning warmup
   WARMUP: {
@@ -672,7 +677,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
     // indicators (only if unmet)
     cs.forEach((c) => feats.push(person[c.attribute] && !c.isSatisfied() ? 1 : 0))
     // progress (clamped negative weight)
-    cs.forEach((c) => feats.push(c.getProgress()))
+    cs.forEach((c) => feats.push(Math.max(0, 1 - c.getProgress())))
     // capacity
     feats.push(Math.pow(this.usedFrac(), 0.8))
     // creative scarcity feature
@@ -838,6 +843,30 @@ export class BanditBouncer<T> implements BerghainBouncer {
     const person = nextPerson.attributes as Person<T>
     const features = this.extractFeatures(person)
     const used = this.usedFrac()
+
+    // --- fill-to-capacity: if ALL constraints are satisfied late, just admit ---
+    const allSatisfied = this.getConstraints().every((c) => c.isSatisfied())
+    if (allSatisfied && used >= CFG.FILL.enableAtUsed) {
+      // Optional: skip model training to avoid overshoot penalties on satisfied attrs
+      if (CFG.FILL.learn) {
+        const reward = 0 // neutral learning if you want
+        this.bandit.updateModel(features, reward)
+      }
+      // Update state
+      this.getConstraints().forEach((c) => c.update(person, true))
+      this.totalAdmitted++
+      this.bandit.totalAdmitted++
+      // Minimal log/decision record
+      this.recordDecision(
+        person,
+        'admit',
+        0, // neutral reward for record
+        this.bandit.getLastRawValue?.() ?? 0,
+        features
+      )
+      this.bandit.updateController(true)
+      return true
+    }
 
     // handle end-game logic
     if (used >= CFG.FINISH.enableAtUsed) {
