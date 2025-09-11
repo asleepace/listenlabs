@@ -13,7 +13,7 @@ const CFG = {
   MODEL_VERSION: 1.3,
 
   // Capacity / schedule (flattened target → keeps admit rate steady)
-  TARGET_RATE_BASE: { early: 0.18, mid: 0.18, late: 0.18 },
+  TARGET_RATE_BASE: { early: 0.18, mid: 0.18, late: 0.8 },
   TARGET_RATE_MIN: 0.16,
   TARGET_RISK_PULL: { slope: 0.0, max: 0.0 }, // disabled: pacing is learned via prices
 
@@ -25,14 +25,14 @@ const CFG = {
     slope: 14.0, // squashing slope → price jump as need > supply
     synergy: 0.2, // small bonus for covering multiple urgent attrs
     paceSlack: 0.02, // allow a tiny progress lag before braking
-    paceBrake: 0.15, // gentle brake when ahead of pace (keeps rate flat)
+    paceBrake: 0.4, // gentle brake when ahead of pace (keeps rate flat)
     overshootPenaltyMax: 2.0, // cap on overshoot tax per attribute (per-decision)
-    rareScarcityScale: 0.8, // scale for the “rarest attr” scarcity feature
+    rareScarcityScale: 1.0, // scale for the “rarest attr” scarcity feature
   },
 
   // Linear bandit (dimension is determined dynamically)
   BANDIT: {
-    eta: 0.12, // learning rate
+    eta: 0.15, // learning rate
     emaBeta: 0.035, // admit-rate EMA
     iBeta: 0.002, // integral smoothing
     weightClamp: [-5, 5] as const,
@@ -53,7 +53,7 @@ const CFG = {
     warmupErrCap: 0.25,
     floorBumpBase: 0.2,
     floorBumpSlope: 1.25,
-    capacityBiasScale: { early: 0.12, late: 0.5 }, // * used * sigma
+    capacityBiasScale: { early: 0.3, late: 0.6 }, // * used * sigma
     urgencyMax: 0.0, // disabled; prices handle urgency
     ctrlGains: { kP: 1.2, kI: 0.4, boostEdge: 0.25, boostFactor: 1.15 },
   },
@@ -763,14 +763,23 @@ export class BanditBouncer<T> implements BerghainBouncer {
     feats.push(Math.pow(this.usedFrac(), 0.8))
 
     // rare scarcity feature (if rareKey known), proportional to current scarcity of that rare attr
-    let rareScarcity = 0
-    if (this.rareKey) {
-      const rare = this.constraints.get(this.rareKey)
-      if (rare) {
-        rareScarcity = CFG.PRICE.rareScarcityScale * Math.min(3, rare.getScarcity(this.remaining()))
+    // let rareScarcity = 0
+    // if (this.rareKey) {
+    //   const rare = this.constraints.get(this.rareKey)
+    //   if (rare) {
+    //     rareScarcity = CFG.PRICE.rareScarcityScale * Math.min(3, rare.getScarcity(this.remaining()))
+    //   }
+    // }
+    // feats.push(rareScarcity)
+
+    // dynamic scarcity feature: how much this person helps the scarcest *unmet* constraint they cover
+    let scarcityBoost = 0
+    for (const c of this.getConstraints()) {
+      if (!c.isSatisfied() && person[c.attribute]) {
+        scarcityBoost = Math.max(scarcityBoost, c.getScarcity(this.remaining()))
       }
     }
-    feats.push(rareScarcity)
+    feats.push(CFG.PRICE.rareScarcityScale * Math.min(3, scarcityBoost))
 
     return feats
   }
@@ -875,16 +884,34 @@ export class BanditBouncer<T> implements BerghainBouncer {
     dump(
       Object.entries(nextPerson.attributes)
         .filter((t) => t[1])
-        .map((t) => t[0]),
-      prices
+        .map((t) => t[0])
     )
+
+    // just before making the bandit decision, after you computed `used` and `prices`
+    const unmet = this.getConstraints().filter((c) => !c.isSatisfied())
+    if (used > 0.95 && unmet.length) {
+      const helpsUnmet = unmet.some((c) => person[c.attribute])
+      if (!helpsUnmet) {
+        // force a reject unless all constraints are already satisfied
+        const reward = this.calculateReward(person, false)
+        // masked update like your normal rejection path:
+        const masked = features.slice()
+        for (let i = 0; i < this.indicatorCount; i++) masked[i] = 0
+        this.bandit.updateModel(masked, Math.max(CFG.WARMUP.negClampAfter, reward))
+        this.getConstraints().forEach((c) => c.update(person, false))
+        this.totalRejected++
+        this.recordDecision(person, 'reject', reward, 0, features)
+        this.bandit.updateController(false)
+        return false
+      }
+    }
 
     // Build a per-person price label over indicators (0 for attrs they don't have)
     const priceLabel = this.getConstraints().map((c) => {
       return person[c.attribute] ? prices[String(c.attribute)] || 0 : 0
     })
 
-    const hintEta = 0.08
+    const hintEta = 0.12
     if (priceLabel.some((p) => p > 0)) {
       const hint = Array(this.indicatorCount + 2).fill(0) // +2 for capacity+scarcity alignment
       for (let i = 0; i < this.indicatorCount; i++) hint[i] = priceLabel[i]
