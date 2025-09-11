@@ -20,7 +20,7 @@ const CFG = {
   PRICE: {
     priorTrue: 2, // Beta prior for frequency (alpha)
     priorTotal: 8, // Beta prior total (alpha+beta)
-    k0: 2.3, // optimism scale at start (UCB), fades with used
+    k0: 2.5, // optimism scale at start (UCB), fades with used
     slope: 10.0, // squashing slope → price jump as need > supply
     synergy: 0.2, // small bonus for covering multiple urgent attrs
     paceSlack: 0.02, // allow a tiny progress lag before braking
@@ -37,9 +37,9 @@ const CFG = {
     weightClamp: [-5, 5] as const,
     capacityFloor: -0.1, // capacity weight ≤ this
     scarcityFloor: 0.0, // scarcity weight ≥ this
-    initRecentValues: { n: 60, start: 1.6, step: 0.01 },
+    initRecentValues: { n: 60, start: 0.3, step: 0.02 },
     recentCap: 500,
-    earlyNoiseBoostDecisions: 200, // more exploration early
+    earlyNoiseBoostDecisions: 1200, // more exploration early
     indicatorPrior: 1.8, // prior for each constraint indicator
     capacityPrior: -0.8, // prior for capacity feature
     scarcityPrior: 1.2, // prior for rare-attr scarcity feature
@@ -47,12 +47,12 @@ const CFG = {
 
   // Thresholding (robust quantile + PI controller)
   THRESH: {
-    sigmaFloor: 0.25, // avoid too-tight thresholds early
+    sigmaFloor: 0.2, // avoid too-tight thresholds early
     warmupDecisions: 300,
     warmupErrCap: 0.25,
     floorBumpBase: 0.2,
     floorBumpSlope: 1.25,
-    capacityBiasScale: { early: 0.2, late: 0.4 }, // * used * sigma
+    capacityBiasScale: { early: 0.12, late: 0.3 }, // * used * sigma
     urgencyMax: 0.0, // disabled; prices handle urgency
     ctrlGains: { kP: 1.2, kI: 0.4, boostEdge: 0.25, boostFactor: 1.15 },
   },
@@ -83,7 +83,7 @@ const CFG = {
   },
 
   // Optional epsilon-admit very early (break stalemates)
-  EXPLORE: { epsAdmit: 0.08, epsUntilUsed: 0.04 },
+  EXPLORE: { epsAdmit: 0.06, epsUntilUsed: 0.12 },
 
   // Debug / logging
   DEBUG: {
@@ -858,11 +858,14 @@ export class BanditBouncer<T> implements BerghainBouncer {
       return person[c.attribute] ? prices[String(c.attribute)] || 0 : 0
     })
 
-    const hintEta = 0.03
+    const hintEta = 0.05
     if (priceLabel.some((p) => p > 0)) {
       const hint = Array(this.indicatorCount + 2).fill(0) // +2 for capacity+scarcity alignment
       for (let i = 0; i < this.indicatorCount; i++) hint[i] = priceLabel[i] > 0 ? 1 : 0
-      const hintReward = priceLabel.reduce((a, b) => a + b, 0)
+      const hintReward = Math.min(
+        3,
+        priceLabel.reduce((a, b) => a + b, 0)
+      ) // new clamp
       this.bandit.updateModel(hint, hintEta * hintReward)
     }
 
@@ -957,7 +960,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
     const base = {
       model: CFG.MODEL_VERSION,
       pretrained: this.pretrained,
-      progress: (Math.round((this.totalAdmitted / 1_000) * 100) / 100).toFixed(2) + '%',
+      progress: (Math.round(this.totalAdmitted * 1000) / 100).toFixed(2) + '%',
       attributes: this.getConstraints().map((c) => ({
         total: `${c.admitted}/${c.minRequired} (${Math.round((c.admitted / c.minRequired) * 1000) / 10}%)`,
         attribute: c.attribute,
