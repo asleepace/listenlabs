@@ -677,7 +677,8 @@ export class BanditBouncer<T> implements BerghainBouncer {
     // indicators (only if unmet)
     cs.forEach((c) => feats.push(person[c.attribute] && !c.isSatisfied() ? 1 : 0))
     // progress (clamped negative weight)
-    cs.forEach((c) => feats.push(Math.max(0, 1 - c.getProgress())))
+    // cs.forEach((c) => feats.push(Math.max(0, 1 - c.getProgress())))
+    cs.forEach((c) => feats.push(c.getProgress()))
     // capacity
     feats.push(Math.pow(this.usedFrac(), 0.8))
     // creative scarcity feature
@@ -835,6 +836,60 @@ export class BanditBouncer<T> implements BerghainBouncer {
     return clamp(reward, CFG.REWARD.clamp[0], CFG.REWARD.clamp[1])
   }
 
+  // --- force-finish helper (late-game admit if a person helps close any small gap)
+  /** Late-game helper: if we're nearly done and this person helps any eligible unmet constraint, admit. */
+  private tryForceFinish(person: Person<T>, features: number[]): boolean {
+    const used = this.usedFrac()
+    if (used < CFG.FINISH.enableAtUsed) return false
+
+    const unmet = this.getConstraints().filter((c) => !c.isSatisfied())
+    if (!unmet.length) return false
+
+    const remaining = this.remaining()
+
+    // Compute eligibility for each unmet constraint
+    const info = unmet.map((c) => {
+      const short = c.getShortfall()
+      const roomy = remaining / Math.max(1, short) >= CFG.FINISH.ratioMin
+      const eligible = short > 0 && (short <= CFG.FINISH.maxShortfall || roomy)
+      return { c, short, roomy, eligible }
+    })
+
+    // If there is exactly one unmet constraint, be more decisive
+    if (info.length === 1) {
+      const { c } = info[0]
+      if (person[c.attribute]) {
+        const reward = this.calculateReward(person, true)
+        this.bandit.updateModel(features, reward)
+        this.getConstraints().forEach((k) => k.update(person, true))
+        this.totalAdmitted++
+        this.bandit.totalAdmitted++
+        this.recordDecision(person, 'admit', reward, this.bandit.getLastRawValue?.() ?? 0, features)
+        this.bandit.updateController(true)
+        return true
+      }
+      return false
+    }
+
+    // Consider ANY eligible unmet constraint; prefer the smallest shortfall
+    const eligible = info.filter((x) => x.eligible).sort((a, b) => a.short - b.short)
+
+    for (const e of eligible) {
+      if (person[e.c.attribute]) {
+        const reward = this.calculateReward(person, true)
+        this.bandit.updateModel(features, reward)
+        this.getConstraints().forEach((k) => k.update(person, true))
+        this.totalAdmitted++
+        this.bandit.totalAdmitted++
+        this.recordDecision(person, 'admit', reward, this.bandit.getLastRawValue?.() ?? 0, features)
+        this.bandit.updateController(true)
+        return true
+      }
+    }
+
+    return false
+  }
+
   /* --- bouncer API --- */
   admit({ status, nextPerson }: GameStatusRunning<ScenarioAttributes>): boolean {
     if (status !== 'running') return false
@@ -848,84 +903,21 @@ export class BanditBouncer<T> implements BerghainBouncer {
     const allSatisfied = this.getConstraints().every((c) => c.isSatisfied())
     if (allSatisfied && used >= CFG.FILL.enableAtUsed) {
       if (CFG.FILL.learn) {
-        const reward = 0 // neutral
+        const reward = 0
         this.bandit.updateModel(features, reward)
-        this.bandit.updateController(true) // only if learning
+        // this.bandit.updateController(true) // only if learning
       }
-      // Update state (no learning / no controller if learn=false)
+      // Always reflect the admit in the EMA
+      this.bandit.updateController(true)
       this.getConstraints().forEach((c) => c.update(person, true))
       this.totalAdmitted++
       this.bandit.totalAdmitted++
-      this.recordDecision(
-        person,
-        'admit',
-        0, // neutral
-        this.bandit.getLastRawValue?.() ?? 0,
-        features
-      )
+      this.recordDecision(person, 'admit', 0, this.bandit.getLastRawValue?.() ?? 0, features)
       return true
     }
 
-    // handle end-game logic (assist the smallest unmet constraint late)
-    if (used >= CFG.FINISH.enableAtUsed) {
-      const outstanding = this.getConstraints().filter((c) => !c.isSatisfied())
-      if (outstanding.length) {
-        // find the smallest remaining shortfall among unmet constraints
-        let minShort = Infinity
-        let minAttr: keyof T | null = null
-        for (const c of outstanding) {
-          const s = c.getShortfall()
-          if (s > 0 && s < minShort) {
-            minShort = s
-            minAttr = c.attribute
-          }
-        }
-
-        // If we're down to a reasonably small gap (absolute or roomy by ratio) and this person helps it -> admit
-        const roomy =
-          isFinite(minShort) && minShort > 0 && this.remaining() / Math.max(1, minShort) >= CFG.FINISH.ratioMin
-
-        if (minAttr && person[minAttr] && (minShort <= CFG.FINISH.maxShortfall || roomy)) {
-          const reward = this.calculateReward(person, true)
-          this.bandit.updateModel(features, reward)
-          this.getConstraints().forEach((c) => c.update(person, true))
-          this.totalAdmitted++
-          this.bandit.totalAdmitted++
-          this.recordDecision(person, 'admit', reward, this.bandit.getLastRawValue?.() ?? 0, features)
-          this.bandit.updateController(true)
-          return true
-        }
-      }
-    }
-
-    // handle end-game logic
-    if (used >= CFG.FINISH.enableAtUsed) {
-      const outstanding = this.getConstraints().filter((c) => !c.isSatisfied())
-      if (outstanding.length) {
-        // find the smallest remaining shortfall among unmet constraints
-        let minShort = Infinity
-        let minAttr: keyof T | null = null
-        for (const c of outstanding) {
-          const s = c.getShortfall()
-          if (s > 0 && s < minShort) {
-            minShort = s
-            minAttr = c.attribute
-          }
-        }
-
-        // If we're down to a tiny shortfall and this person helps it -> admit
-        if (minAttr && minShort <= CFG.FINISH.maxShortfall && person[minAttr]) {
-          const reward = this.calculateReward(person, true)
-          this.bandit.updateModel(features, reward)
-          this.getConstraints().forEach((c) => c.update(person, true))
-          this.totalAdmitted++
-          this.bandit.totalAdmitted++
-          this.recordDecision(person, 'admit', reward, this.bandit.getLastRawValue?.() ?? 0, features)
-          this.bandit.updateController(true)
-          return true
-        }
-      }
-    }
+    // Handle endgame where we just need to finish
+    if (this.tryForceFinish(person, features)) return true
 
     // Optional epsilon-admit very early to break stalemates
     if (used < CFG.EXPLORE.epsUntilUsed) {

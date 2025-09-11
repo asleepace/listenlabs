@@ -1,13 +1,10 @@
 import type { GameState, PersonAttributes, ScenarioAttributes } from './types'
-import type { BergainBouncer } from './berghain'
+import type { BerghainBouncer } from './berghain'
 import { BASE_CONFIG, type GameConfig } from './conf/game-config'
 import { Stats } from './math/statistics'
 import { Metrics, type AttributeRisk } from './math/metrics'
 import { Score } from './math/score'
-import {
-  DeflationPIDController,
-  PID_PRESETS,
-} from './math/deflation-controller'
+import { DeflationPIDController, PID_PRESETS } from './math/deflation-controller'
 
 interface GameQuota {
   attribute: keyof ScenarioAttributes
@@ -65,10 +62,8 @@ const TUNED_CONFIG: Partial<GameConfig> = {
   TARGET_RANGE: 4000,
 }
 
-export class Bouncer<
-  Attributes extends PersonAttributes,
-  Keys extends keyof Attributes = keyof Attributes
-> implements BergainBouncer
+export class Bouncer<Attributes extends PersonAttributes, Keys extends keyof Attributes = keyof Attributes>
+  implements BerghainBouncer
 {
   static CONFIG = { ...BASE_CONFIG, ...TUNED_CONFIG }
 
@@ -79,10 +74,7 @@ export class Bouncer<
    * @param overrideConfig
    * @returns {Bouncer}
    */
-  static createWithConfig(
-    initialState: GameState,
-    overrideConfig: Partial<GameConfig>
-  ) {
+  static createWithConfig(initialState: GameState, overrideConfig: Partial<GameConfig>) {
     return new Bouncer(initialState, overrideConfig)
   }
 
@@ -103,21 +95,14 @@ export class Bouncer<
   public deflationController: DeflationPIDController
   public config: GameConfig
 
-  constructor(
-    public initialData: GameState,
-    public overrideConfig: Partial<GameConfig>
-  ) {
+  constructor(public initialData: GameState, public overrideConfig: Partial<GameConfig>) {
     this.config = { ...BASE_CONFIG, ...TUNED_CONFIG, ...overrideConfig } // set the config
-    this.deflationController = new DeflationPIDController(
-      PID_PRESETS.RESPONSIVE
-    )
+    this.deflationController = new DeflationPIDController(PID_PRESETS.RESPONSIVE)
     this.deflationController.reset()
     this.metrics = new Metrics(initialData.game)
     this.state = initialData
     this.progress = this.getProgress()
-    this.riskAssessment = this.metrics.getRiskAssessment(
-      this.estimatedPeopleInLineLeft
-    )
+    this.riskAssessment = this.metrics.getRiskAssessment(this.estimatedPeopleInLineLeft)
   }
 
   private get totalSpotsLeft(): number {
@@ -146,22 +131,15 @@ export class Bouncer<
    * e.g. should be 0.25 or 25% for 4000 rejections out of 10,000 people
    */
   get targetRate() {
-    return (
-      this.config.TARGET_RATE ??
-      this.config.TARGET_RANGE / this.config.TOTAL_PEOPLE
-    )
+    return this.config.TARGET_RATE ?? this.config.TARGET_RANGE / this.config.TOTAL_PEOPLE
   }
 
   private getScoreDeflationFactor(): number {
     if (FEATURE_FLAGS.USE_PID_DEFLATION) {
       const targetRate = this.targetRate
-      const currentRate =
-        this.admittedCount / (this.admittedCount + this.rejectedCount)
+      const currentRate = this.admittedCount / (this.admittedCount + this.rejectedCount)
 
-      return this.deflationController.getDeflationFactor(
-        targetRate,
-        currentRate
-      )
+      return this.deflationController.getDeflationFactor(targetRate, currentRate)
     }
 
     // see scoring module for alternatives
@@ -209,8 +187,7 @@ export class Bouncer<
       // Lower thresholds for critical detection
       const isCapacityCritical = urgencyRatio > 0.12
       const isScarcityCritical = scarcityRatio > 0.85
-      const isRareAndBehind =
-        frequency < 0.15 && this.metrics.getProgress(attr) < 0.7
+      const isRareAndBehind = frequency < 0.15 && this.metrics.getProgress(attr) < 0.7
 
       if (isCapacityCritical || isScarcityCritical || isRareAndBehind) {
         // Higher multipliers for more aggressive admission
@@ -233,11 +210,7 @@ export class Bouncer<
     return criticalAttributes
   }
 
-  private updateCounts(
-    attributes: Attributes,
-    score: number,
-    shouldAdmit: boolean
-  ) {
+  private updateCounts(attributes: Attributes, score: number, shouldAdmit: boolean) {
     if (!shouldAdmit) return
 
     this.totalAdmittedScores.push(score)
@@ -245,9 +218,7 @@ export class Bouncer<
 
     // Use metrics to update counts
     this.metrics.updateCounts(attributes)
-    this.riskAssessment = this.metrics.getRiskAssessment(
-      this.estimatedPeopleInLineLeft
-    )
+    this.riskAssessment = this.metrics.getRiskAssessment(this.estimatedPeopleInLineLeft)
   }
 
   private getDynamicThresholdAdjustment(): number {
@@ -270,10 +241,7 @@ export class Bouncer<
    */
   private getProgressThreshold(): number {
     const totalProcessed = this.admittedCount + this.rejectedCount
-    const naturalProgress = Math.min(
-      totalProcessed / Bouncer.CONFIG.TARGET_RANGE!,
-      1.0
-    )
+    const naturalProgress = Math.min(totalProcessed / Bouncer.CONFIG.TARGET_RANGE!, 1.0)
 
     // Use actual quota progress for target, not admission rate
     const targetQuotaProgress = Math.min(naturalProgress * 1.1, 1.0)
@@ -316,10 +284,7 @@ export class Bouncer<
 
     if (peoplePerNeed < 5 && spotsLeft < 100) {
       // Less than 5 people per needed quota
-      const usefulAttributes = this.metrics.getUsefulAttributes(
-        attributes as Attributes,
-        this.isEndgame()
-      )
+      const usefulAttributes = this.metrics.getUsefulAttributes(attributes as Attributes, this.isEndgame())
       return usefulAttributes.length > 0
     }
 
@@ -391,15 +356,9 @@ export class Bouncer<
     const threshold = this.getProgressThreshold()
     const effectiveThreshold = threshold
 
-    const hasEveryAttribute = this.metrics.hasAllAttributes(
-      personAttributes as any
-    )
-    const hasEveryCriticalAttribute =
-      criticalKeys.length > 0 &&
-      criticalKeys.every((attr) => personAttributes[attr]!)
-    const hasSomeCriticalAttribute =
-      criticalKeys.length > 0 &&
-      criticalKeys.some((attr) => personAttributes[attr]!)
+    const hasEveryAttribute = this.metrics.hasAllAttributes(personAttributes as any)
+    const hasEveryCriticalAttribute = criticalKeys.length > 0 && criticalKeys.every((attr) => personAttributes[attr]!)
+    const hasSomeCriticalAttribute = criticalKeys.length > 0 && criticalKeys.some((attr) => personAttributes[attr]!)
 
     if (hasEveryAttribute) this.totalUnicorns++
 
@@ -423,17 +382,14 @@ export class Bouncer<
     this.info['critical_attrs'] = criticalKeys.length
     this.info['has_critical'] = hasEveryCriticalAttribute
     this.info['has_some_critical'] = hasSomeCriticalAttribute
-    this.info['emergency_eligible'] =
-      this.shouldEmergencyAdmit(personAttributes)
+    this.info['emergency_eligible'] = this.shouldEmergencyAdmit(personAttributes)
 
     this.updateCounts(personAttributes as any, score, shouldAdmit)
     return shouldAdmit
   }
 
   // Simplified estimation using metrics
-  public getEstimatedPeopleWithAttributeLeftInLine(
-    attribute: keyof ScenarioAttributes
-  ): number {
+  public getEstimatedPeopleWithAttributeLeftInLine(attribute: keyof ScenarioAttributes): number {
     const frequency = this.metrics.frequencies[attribute]!
     const peopleLeft = this.estimatedPeopleInLineLeft
     return peopleLeft * frequency
@@ -444,9 +400,7 @@ export class Bouncer<
     const totalNeeded = incomplete.reduce((sum, q) => sum + q.needed, 0)
 
     // Check for rare attributes that need early endgame
-    const rareIncomplete = incomplete.filter(
-      (c) => this.metrics.getFrequency(c.attribute) < 0.15
-    )
+    const rareIncomplete = incomplete.filter((c) => this.metrics.getFrequency(c.attribute) < 0.15)
 
     // Multiple endgame triggers
     return (
@@ -457,25 +411,20 @@ export class Bouncer<
   }
 
   getDebugInfo(): any {
-    const criticalProgress = Object.entries(this.criticalAttributes).map(
-      ([attr, info]) => ({
-        attribute: attr,
-        needed: info?.needed || 0,
-        modifier: info?.modifier || 1,
-        frequency: this.metrics.frequencies[attr],
-        estimated_remaining:
-          this.estimatedPeopleInLineLeft *
-          (this.metrics.frequencies[attr] || 0),
-      })
-    )
+    const criticalProgress = Object.entries(this.criticalAttributes).map(([attr, info]) => ({
+      attribute: attr,
+      needed: info?.needed || 0,
+      modifier: info?.modifier || 1,
+      frequency: this.metrics.frequencies[attr],
+      estimated_remaining: this.estimatedPeopleInLineLeft * (this.metrics.frequencies[attr] || 0),
+    }))
 
     const rateAnalysis = this.getAdmissionRateAnalysis()
     const currentRejections = this.rejectedCount
     const targetRejections = 3000
     const rejectionGap = currentRejections - targetRejections
 
-    const currentRate =
-      this.admittedCount / (this.admittedCount + this.rejectedCount)
+    const currentRate = this.admittedCount / (this.admittedCount + this.rejectedCount)
 
     return {
       ...this.info,
@@ -490,24 +439,19 @@ export class Bouncer<
         rejection_gap: rejectionGap,
         on_track: Math.abs(rejectionGap) < 200,
       },
-      pid_debug: this.deflationController.getDebugInfo(
-        currentRate,
-        this.targetRate
-      ),
+      pid_debug: this.deflationController.getDebugInfo(currentRate, this.targetRate),
     }
   }
 
   // Get current total progress
   public getProgress(): GameProgress {
-    const incompleteQuotas = this.metrics
-      .getIncompleteConstraints()
-      .map((cp) => ({
-        attribute: cp.attribute,
-        needed: cp.needed,
-      }))
+    const incompleteQuotas = this.metrics.getIncompleteConstraints().map((cp) => ({
+      attribute: cp.attribute,
+      needed: cp.needed,
+    }))
 
-    const criticalAttributes = Object.entries(this.criticalAttributes).map(
-      ([key, value]) => (value?.required ? `⚠️:${key}` : key)
+    const criticalAttributes = Object.entries(this.criticalAttributes).map(([key, value]) =>
+      value?.required ? `⚠️:${key}` : key
     )
 
     // Enhanced info with metrics insights
@@ -525,8 +469,7 @@ export class Bouncer<
       critical: criticalAttributes,
       config: Bouncer.CONFIG,
       quotas: incompleteQuotas.sort((a, b) => a.needed - b.needed) as any,
-      admissionRate:
-        this.admittedCount / (this.admittedCount + this.rejectedCount),
+      admissionRate: this.admittedCount / (this.admittedCount + this.rejectedCount),
       admitted: this.admittedCount,
       rejected: this.rejectedCount,
       ...this.getDebugInfo(),
@@ -537,10 +480,7 @@ export class Bouncer<
     const analysis = this.metrics.getDetailedAnalysis()
     return {
       ...this.getProgress(),
-      accuracy: Stats.percent(
-        Math.abs(Bouncer.CONFIG.TARGET_RANGE - this.rejectedCount) /
-          Bouncer.CONFIG.TARGET_RANGE
-      ),
+      accuracy: Stats.percent(Math.abs(Bouncer.CONFIG.TARGET_RANGE - this.rejectedCount) / Bouncer.CONFIG.TARGET_RANGE),
       scores: this.totalScores,
       metrics_analysis: analysis,
       final_summary: this.metrics.getSummary(),
@@ -554,8 +494,7 @@ export class Bouncer<
     status: 'too_high' | 'too_low' | 'optimal'
     recommendation: string
   } {
-    const currentRate =
-      this.admittedCount / (this.admittedCount + this.rejectedCount)
+    const currentRate = this.admittedCount / (this.admittedCount + this.rejectedCount)
     const deviation = currentRate - this.targetRate
 
     let status: 'too_high' | 'too_low' | 'optimal'
@@ -572,8 +511,7 @@ export class Bouncer<
     } else if (deviation < -0.05) {
       // More than 5% under
       status = 'too_low'
-      recommendation =
-        'Consider lowering thresholds or increasing score bonuses'
+      recommendation = 'Consider lowering thresholds or increasing score bonuses'
     } else {
       status = deviation > 0 ? 'too_high' : 'too_low'
       recommendation = 'Minor adjustment needed'

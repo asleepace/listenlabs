@@ -1,13 +1,7 @@
 import https from 'https'
 import http from 'http'
 
-import type {
-  GameStatus,
-  Game,
-  GameState,
-  GameStatusRunning,
-  ScenarioAttributes,
-} from './types'
+import type { GameStatus, Game, GameState, GameStatusRunning, ScenarioAttributes } from './types'
 import axios from 'axios'
 
 export type ListenLabsConfig = {
@@ -36,9 +30,7 @@ class MissingBouncer extends Error {
 
 class NetworkRequestFailed extends Error {
   constructor(response: Response, url: URL) {
-    super(
-      `NETWORK REQUEST FAILED (${response.status}): ${response.statusText} for ${url.href}`
-    )
+    super(`NETWORK REQUEST FAILED (${response.status}): ${response.statusText} for ${url.href}`)
   }
 }
 
@@ -78,9 +70,7 @@ export async function saveGameFile<T extends {}>(state: GameState) {
   await file.write(JSON.stringify(state, null, 2))
 }
 
-export async function loadGameFile(props: {
-  file: string
-}): Promise<GameState> {
+export async function loadGameFile(props: { file: string }): Promise<GameState> {
   const file = Bun.file(props.file, { type: 'json' })
   return await file.json()
 }
@@ -97,9 +87,7 @@ export class Berghain {
 
   // instance variables
 
-  private createBouncer?: (
-    initialState: GameState
-  ) => BerghainBouncer | Promise<BerghainBouncer>
+  private createBouncer?: (initialState: GameState) => BerghainBouncer | Promise<BerghainBouncer>
   private bouncer?: BerghainBouncer
   private current?: GameState
   private maxRetries = 1
@@ -125,11 +113,7 @@ export class Berghain {
   /**
    * Set the bouncer strategy to be used in the game.
    */
-  withBouncer(
-    initializer: (
-      state: GameState
-    ) => BerghainBouncer | Promise<BerghainBouncer>
-  ): this {
+  withBouncer(initializer: (state: GameState) => BerghainBouncer | Promise<BerghainBouncer>): this {
     this.createBouncer = initializer
     return this
   }
@@ -201,7 +185,7 @@ export class Berghain {
       if (this.current.status.status === 'failed') {
         console.warn('====================== ❌ ======================')
         prettyPrint(this.bouncer.getOutput())
-        prettyPrint(this.bouncer.getProgress())
+        console.log(this.bouncer.getProgress())
         prettyPrint(this.current.status)
         return this
       }
@@ -209,13 +193,16 @@ export class Berghain {
       if (this.current.status.status === 'completed') {
         console.warn('====================== ✅ ======================')
         prettyPrint(this.bouncer.getOutput())
-        prettyPrint(this.bouncer.getProgress())
+        console.log(this.bouncer.getProgress())
         prettyPrint(this.current.status)
         return this
       }
     } catch (e) {
       console.warn('====================== ⚠️ ======================')
       console.warn(e)
+      if (e && typeof e === 'object' && 'data' in e) {
+        console.warn(e.data)
+      }
     } finally {
       return this
     }
@@ -227,10 +214,7 @@ export class Berghain {
    *
    *  @url /decide-and-next?gameId=uuid&personIndex=0&accept=true
    */
-  private async acceptOrRejectThenGetNext(props: {
-    index: number
-    accept: boolean
-  }): Promise<GameStatus> {
+  private async acceptOrRejectThenGetNext(props: { index: number; accept: boolean }): Promise<GameStatus> {
     try {
       if (!this.current?.game.gameId) throw new Error('Missing game id!')
       const endpoint = new URL('/decide-and-next', this.config.baseUrl)
@@ -262,10 +246,7 @@ export class Berghain {
 
     resp.data
     if (resp.status >= 300 || resp.status < 200) {
-      throw new NetworkRequestFailed(
-        { status: resp.status, statusText: resp.statusText } as any,
-        url
-      )
+      throw new NetworkRequestFailed({ status: resp.status, statusText: resp.statusText } as any, url)
     } else {
       return resp.data as T
     }
