@@ -846,7 +846,25 @@ export class BanditBouncer<T> implements BerghainBouncer {
 
     // --- fill-to-capacity: if ALL constraints are satisfied late, just admit ---
     const allSatisfied = this.getConstraints().every((c) => c.isSatisfied())
-    if (allSatisfied) return true
+    if (allSatisfied && used >= CFG.FILL.enableAtUsed) {
+      if (CFG.FILL.learn) {
+        const reward = 0 // neutral
+        this.bandit.updateModel(features, reward)
+        this.bandit.updateController(true) // only if learning
+      }
+      // Update state (no learning / no controller if learn=false)
+      this.getConstraints().forEach((c) => c.update(person, true))
+      this.totalAdmitted++
+      this.bandit.totalAdmitted++
+      this.recordDecision(
+        person,
+        'admit',
+        0, // neutral
+        this.bandit.getLastRawValue?.() ?? 0,
+        features
+      )
+      return true
+    }
 
     // handle end-game logic (assist the smallest unmet constraint late)
     if (used >= CFG.FINISH.enableAtUsed) {
