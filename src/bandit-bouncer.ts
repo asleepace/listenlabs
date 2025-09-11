@@ -13,15 +13,15 @@ const CFG = {
 
   // Capacity / schedule (flattened target → keeps admit rate steady)
   TARGET_RATE_BASE: { early: 0.18, mid: 0.18, late: 0.18 },
-  TARGET_RATE_MIN: 0.12,
+  TARGET_RATE_MIN: 0.16,
   TARGET_RISK_PULL: { slope: 0.0, max: 0.0 }, // disabled: pacing is learned via prices
 
   // Price model (shadow prices)
   PRICE: {
     priorTrue: 2, // Beta prior for frequency (alpha)
     priorTotal: 8, // Beta prior total (alpha+beta)
-    k0: 1.9, // optimism scale at start (UCB), fades with used
-    slope: 9.0, // squashing slope → price jump as need > supply
+    k0: 2.3, // optimism scale at start (UCB), fades with used
+    slope: 10.0, // squashing slope → price jump as need > supply
     synergy: 0.2, // small bonus for covering multiple urgent attrs
     paceSlack: 0.02, // allow a tiny progress lag before braking
     paceBrake: 0.15, // gentle brake when ahead of pace (keeps rate flat)
@@ -40,21 +40,21 @@ const CFG = {
     initRecentValues: { n: 60, start: 1.6, step: 0.01 },
     recentCap: 500,
     earlyNoiseBoostDecisions: 200, // more exploration early
-    indicatorPrior: 1.2, // prior for each constraint indicator
+    indicatorPrior: 1.8, // prior for each constraint indicator
     capacityPrior: -0.8, // prior for capacity feature
     scarcityPrior: 1.2, // prior for rare-attr scarcity feature
   },
 
   // Thresholding (robust quantile + PI controller)
   THRESH: {
-    sigmaFloor: 0.3, // avoid too-tight thresholds early
+    sigmaFloor: 0.25, // avoid too-tight thresholds early
     warmupDecisions: 300,
     warmupErrCap: 0.25,
     floorBumpBase: 0.2,
     floorBumpSlope: 1.25,
-    capacityBiasScale: { early: 0.25, late: 0.6 }, // * used * sigma
+    capacityBiasScale: { early: 0.2, late: 0.4 }, // * used * sigma
     urgencyMax: 0.0, // disabled; prices handle urgency
-    ctrlGains: { kP: 1.1, kI: 0.35, boostEdge: 0.25, boostFactor: 1.15 },
+    ctrlGains: { kP: 1.2, kI: 0.4, boostEdge: 0.25, boostFactor: 1.15 },
   },
 
   // Reward clamp (final safety)
@@ -502,11 +502,14 @@ class LinearBandit {
     // global clamp
     for (let i = 0; i < this.weights.length; i++) this.weights[i] = clamp(this.weights[i], CFG.BANDIT.weightClamp)
 
-    // sign hints: keep capacity weight ≥ capacityFloor (not more negative); scarcity ≥ scarcityFloor
-    if (this.capIdx < this.weights.length)
-      this.weights[this.capIdx] = Math.max(CFG.BANDIT.capacityFloor, this.weights[this.capIdx])
-    if (this.scarIdx < this.weights.length)
+    // keep capacity weight ≤ capacityFloor (cap at -0.1 so it can't drift positive)
+    if (this.capIdx < this.weights.length) {
+      // was: Math.max(CFG.BANDIT.capacityFloor, this.weights[this.capIdx])
+      this.weights[this.capIdx] = Math.min(this.weights[this.capIdx], CFG.BANDIT.capacityFloor)
+    }
+    if (this.scarIdx < this.weights.length) {
       this.weights[this.scarIdx] = Math.max(CFG.BANDIT.scarcityFloor, this.weights[this.scarIdx])
+    }
 
     // warmup: prevent indicators from going negative early
     const used = this.totalAdmitted / Math.max(1, this.maxCapacity)
@@ -632,7 +635,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
   }
 
   /* --- initialization --- */
-  initializeConstraints() {
+  initializeConstraints(): void {
     for (const gc of this.state.game.constraints) {
       const attribute = gc.attribute as keyof T
       this.constraints.set(attribute, new Constraint(attribute, gc.minCount, this.getFrequency(attribute), this.config))
@@ -642,7 +645,9 @@ export class BanditBouncer<T> implements BerghainBouncer {
     const rare = all.slice().sort((a, b) => (a.frequency ?? 1) - (b.frequency ?? 1))[0]
     this.rareKey = (rare?.attribute as keyof T) ?? null
     this.indicatorCount = all.length
-    if (this.indicatorCount === 0) return [Math.pow(this.usedFrac(), 0.8), 0] // no indicators
+    if (this.indicatorCount === 0) {
+      this.rareKey = null
+    }
   }
 
   async initializeLearningData() {
@@ -842,7 +847,21 @@ export class BanditBouncer<T> implements BerghainBouncer {
 
     const person = nextPerson.attributes as Person<T>
     const features = this.extractFeatures(person)
+    const prices = this.computeShadowPrices()
     const used = this.usedFrac()
+
+    // Build a per-person price label over indicators (0 for attrs they don't have)
+    const priceLabel = this.getConstraints().map((c, i) => {
+      return person[c.attribute] ? prices[String(c.attribute)] || 0 : 0
+    })
+
+    const hintEta = 0.03
+    if (priceLabel.some((p) => p > 0)) {
+      const hint = Array(this.indicatorCount + 2).fill(0) // +2 for capacity+scarcity alignment
+      for (let i = 0; i < this.indicatorCount; i++) hint[i] = priceLabel[i] > 0 ? 1 : 0
+      const hintReward = priceLabel.reduce((a, b) => a + b, 0)
+      this.bandit.updateModel(hint, hintEta * hintReward)
+    }
 
     // --- fill-to-capacity: if ALL constraints are satisfied late, just admit ---
     const allSatisfied = this.getConstraints().every((c) => c.isSatisfied())
@@ -887,7 +906,11 @@ export class BanditBouncer<T> implements BerghainBouncer {
     if (shouldAdmit) {
       this.bandit.updateModel(features, reward)
     } else if (!inWarmup) {
-      this.bandit.updateModel(features, Math.max(CFG.WARMUP.negClampAfter, reward))
+      const r = Math.max(CFG.WARMUP.negClampAfter, reward) // <= 0
+      // mask all indicator features on rejection; keep non-indicators for controller learning
+      const masked = features.slice()
+      for (let i = 0; i < this.indicatorCount; i++) masked[i] = 0
+      this.bandit.updateModel(masked, r)
     } // else: no learning from early rejections
 
     // state
