@@ -570,6 +570,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
   private logs: string[] = []
   private indicatorCount = 0 // number of constraint indicators used in features
   private rareKey: keyof T | null = null // rarest attribute key
+  private pretrained = false
 
   constructor(public state: GameState, public config: Config) {
     this.initializeConstraints()
@@ -660,8 +661,10 @@ export class BanditBouncer<T> implements BerghainBouncer {
 
     if (snap && snap.featureDim === dim) {
       this.bandit = LinearBandit.fromSnapshot(snap, this.indicatorCount)
+      this.pretrained = true
     } else {
       this.bandit = new LinearBandit(dim, this.config.MAX_CAPACITY, this.indicatorCount, priors)
+      this.pretrained = false
     }
     if (!snap || snap.featureDim !== dim) {
       // warm start from recent decisions only when we rebuilt
@@ -952,6 +955,8 @@ export class BanditBouncer<T> implements BerghainBouncer {
     }
 
     const base = {
+      model: CFG.MODEL_VERSION,
+      pretrained: this.pretrained,
       attributes: this.getConstraints().map((c) => ({
         attribute: c.attribute,
         admitted: c.admitted,
@@ -1030,7 +1035,6 @@ export class BanditBouncer<T> implements BerghainBouncer {
       status: lastStatus,
       timestamp: new Date().toISOString(),
       output: {
-        model: CFG.MODEL_VERSION,
         completed: lastStatus.status,
         reason: lastStatus.status === 'failed' ? lastStatus.reason : undefined,
         finished: lastStatus.status === 'completed',
