@@ -466,11 +466,14 @@ class LinearBandit {
     const clamp = (v: number, lo: number, hi: number) =>
       Math.max(lo, Math.min(hi, v))
 
+    // in updateWeights()
     for (let i = 0; i < this.weights.length; i++) {
       this.weights[i] = clamp(this.weights[i], -5, 5)
     }
-    for (let i = 4; i <= 7; i++) this.weights[i] = Math.min(0, this.weights[i])
-    this.weights[8] = Math.min(0, this.weights[8])
+    // keep some negative bite on progress features
+    for (let i = 4; i <= 7; i++)
+      this.weights[i] = Math.min(-0.15, this.weights[i]) // 👈 was Math.min(0, ...)
+    this.weights[8] = Math.min(-0.1, this.weights[8]) // capacity should stay slightly negative
     this.weights[9] = Math.max(0, this.weights[9])
   }
 
@@ -584,6 +587,19 @@ export class BanditBouncer<T> implements BerghainBouncer {
     }
   }
 
+  private computeReserves() {
+    const list = this.getConstraints()
+      .filter((c) => !c.isSatisfied())
+      .map((c) => {
+        const f = c.getEmpiricalFrequency() || c.frequency
+        const need = c.getShortfall()
+        const drawsNeeded = need / Math.max(1e-6, f) // expected arrivals needed
+        return { attr: c.attribute, drawsNeeded }
+      })
+    const total = list.reduce((a, r) => a + r.drawsNeeded, 0)
+    return { list, total }
+  }
+
   async initializeLearningData() {
     console.log('Initializing Simple Linear Bandit...')
 
@@ -647,6 +663,63 @@ export class BanditBouncer<T> implements BerghainBouncer {
 
     // ---- Feasibility gate (phase-dependent cutoff; no bandit training on gate) ----
     const feas = this.getFeasibilityRatios()
+
+    const reserves = this.computeReserves()
+    const reserveLock = reserves.total > this.remainingSlots * 0.95 // 5% buffer
+
+    if (reserveLock) {
+      const hitsReserve = reserves.list.some(
+        (r) => r.drawsNeeded > 0.5 && person[r.attr as keyof T] // only count meaningful deficits
+      )
+      if (!hitsReserve) {
+        const reward = -2
+        this.decisions.push({
+          context: this.buildContext(),
+          action: 'reject',
+          person,
+          reward,
+          features,
+          banditValue: 0,
+          heuristicValue: 0,
+        })
+        this.constraints.forEach((c) => c.update(person, false))
+        this.totalRejected++
+        this.logDecision(person, 'reject', reward, 0, features)
+        this.bandit.updateController(false)
+        return false
+      }
+    }
+
+    // sort by ratio (desc)
+    const sorted = [...feas.ratios].sort((a, b) => b.ratio - a.ratio)
+    const top1 = sorted[0],
+      top2 = sorted[1]
+
+    // turn on a strict mode if the top1 need is clearly dominant
+    const mustHaveTop1 =
+      used > 0.7 && // kick in fairly late
+      top1 &&
+      top1.ratio >= 1.6 && // clearly at-risk
+      (!top2 || top1.ratio >= 1.3 * top2.ratio) // much worse than #2
+
+    if (mustHaveTop1 && !person[top1.attr as keyof T]) {
+      const reward = -2
+      this.decisions.push({
+        context: this.buildContext(),
+        action: 'reject',
+        person,
+        reward,
+        features,
+        banditValue: 0,
+        heuristicValue: 0,
+      })
+      this.constraints.forEach((c) => c.update(person, false))
+      this.totalRejected++
+      this.logDecision(person, 'reject', reward, 0, features)
+      this.bandit.updateController(false)
+      return false
+    }
+
     if (used > 0.82 && feas.max > 1.2 && feas.mostCritical) {
       const hasCritical = person[feas.mostCritical as keyof T] ? 1 : 0
       const helpsAtRisk = feas.ratios.filter(
@@ -773,6 +846,10 @@ export class BanditBouncer<T> implements BerghainBouncer {
   }
 
   private calculateReward(person: Person<T>, admitted: boolean): number {
+    // at top of calculateReward()
+    const feasNow = this.getFeasibilityRatios()
+    const mostCriticalAttr = feasNow.mostCritical
+
     const used = this.totalAdmitted / this.config.MAX_CAPACITY
     const { max } = this.getFeasibilityRatios()
 
@@ -829,12 +906,16 @@ export class BanditBouncer<T> implements BerghainBouncer {
         const expAvail = Math.max(1e-6, this.remainingSlots * f)
         const feasRatio = need / expAvail
         const feasBoost = Math.min(2.2, 0.75 + 0.65 * feasRatio)
-
         const scarcity = constraint.getScarcity(this.remainingSlots)
         const scarcityBoost = clamp(scarcity, 0.5, 2.0)
 
-        // 👉 apply pace adjustment multiplicatively
-        reward += base * feasBoost * scarcityBoost * paceAdj
+        // extra multiplicative push for the single most-critical attr
+        const mcBoost =
+          String(constraint.attribute) === String(mostCriticalAttr)
+            ? Math.min(2.2, 1.0 + 0.5 * Math.max(0, feasRatio - 1)) // 1..~2.2
+            : 1.0
+
+        reward += base * feasBoost * scarcityBoost * paceAdj * mcBoost
       } else {
         // stronger overshoot penalty
         const overshoot =
