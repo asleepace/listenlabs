@@ -9,7 +9,7 @@ import { Disk } from './utils/disk'
    ========================= */
 const CFG = {
   // Included on persisted data to identify models and biases
-  MODEL_VERSION: 1.0,
+  MODEL_VERSION: 1.1,
 
   // Capacity / schedule (flattened target → keeps admit rate steady)
   TARGET_RATE_BASE: { early: 0.18, mid: 0.18, late: 0.18 },
