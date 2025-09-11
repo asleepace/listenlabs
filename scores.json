@@ -1,0 +1,13 @@
+{
+  "best": 6147,
+  "games": [
+    {
+      "gameId": "5305e793-bc5d-4cb9-8591-bdee652c4046",
+      "finalScore": 6147,
+      "totalAdmitted": 962,
+      "totalRejected": 6147,
+      "admitRate": 0.3509705864297782,
+      "threshold": 3.525071635281196
+    }
+  ]
+}

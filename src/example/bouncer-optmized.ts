@@ -1,5 +1,5 @@
 import type { GameState, PersonAttributes, ScenarioAttributes } from '../types'
-import type { BergainBouncer } from '../core/berghain'
+import type { BergainBouncer } from '../berghain'
 
 interface ConstraintInfo {
   attribute: keyof ScenarioAttributes

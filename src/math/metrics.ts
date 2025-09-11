@@ -293,21 +293,21 @@ export class Metrics {
     return this._correlations[attr1]?.[attr2] ?? 0
   }
 
-  getOverfillThreshold(frequency: number): number {
-    if (frequency < 0.05) return 0.95  // Very rare - allow near completion
-    if (frequency < 0.1) return 0.92   // Rare - allow high completion
-    
-    // Your existing logic for common attributes
-    const baseThreshold = 0.78
-    const frequencyMultiplier = 0.4
-    const minThreshold = 0.85
-    const maxThreshold = 0.98
-    
-    return Math.max(
-      minThreshold,
-      Math.min(maxThreshold, baseThreshold + frequency * frequencyMultiplier)
-    )
-  }
+  // getOverfillThreshold(frequency: number): number {
+  //   if (frequency < 0.05) return 0.95  // Very rare - allow near completion
+  //   if (frequency < 0.1) return 0.92   // Rare - allow high completion
+
+  //   // Your existing logic for common attributes
+  //   const baseThreshold = 0.78
+  //   const frequencyMultiplier = 0.4
+  //   const minThreshold = 0.85
+  //   const maxThreshold = 0.98
+
+  //   return Math.max(
+  //     minThreshold,
+  //     Math.min(maxThreshold, baseThreshold + frequency * frequencyMultiplier)
+  //   )
+  // }
 
   // Utility methods for person evaluation
   getUsefulAttributes(
@@ -325,9 +325,8 @@ export class Metrics {
         const progress = this.getProgress(attr)
         const frequency = this.frequencies[attr] || 0
         // Dynamic overfill threshold based on rarity
-        // const overfillThreshold = Math.min(0.95, 0.85 + frequency * 0.2)
-        // More aggressive separation
-        const overfillThreshold = this.getOverfillThreshold(frequency)
+        const overfillThreshold = Math.min(0.95, 0.85 + frequency * 0.2)
+
         return progress < overfillThreshold
       })
       .map(([attr, _]) => attr as keyof ScenarioAttributes)

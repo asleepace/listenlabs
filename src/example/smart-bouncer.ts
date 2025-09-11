@@ -29,7 +29,7 @@
  * Ready to test this learning portfolio approach?
  */
 
-import type { BergainBouncer } from '../core/berghain'
+import type { BergainBouncer } from '../berghain'
 import type { GameState, ScenarioAttributes } from '../types'
 
 interface LearningData {
