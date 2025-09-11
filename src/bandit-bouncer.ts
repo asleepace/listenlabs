@@ -9,7 +9,7 @@ import { Disk } from './utils/disk'
    ========================= */
 const CFG = {
   // Included on persisted data to identify models and biases
-  MODEL_VERSION: 1.1,
+  MODEL_VERSION: 1.2,
 
   // Capacity / schedule (flattened target → keeps admit rate steady)
   TARGET_RATE_BASE: { early: 0.18, mid: 0.18, late: 0.18 },
@@ -25,7 +25,7 @@ const CFG = {
     synergy: 0.2, // small bonus for covering multiple urgent attrs
     paceSlack: 0.02, // allow a tiny progress lag before braking
     paceBrake: 0.15, // gentle brake when ahead of pace (keeps rate flat)
-    overshootPenaltyMax: 2.0, // cap on overshoot tax per attribute
+    overshootPenaltyMax: 2.0, // cap on overshoot tax per attribute (per-decision)
     rareScarcityScale: 0.8, // scale for the “rarest attr” scarcity feature
   },
 
@@ -35,7 +35,7 @@ const CFG = {
     emaBeta: 0.035, // admit-rate EMA
     iBeta: 0.002, // integral smoothing
     weightClamp: [-5, 5] as const,
-    capacityFloor: -0.1, // capacity weight ≤ this
+    capacityFloor: -0.1, // capacity weight ≤ this (cap at -0.1 so it can't drift positive)
     scarcityFloor: 0.0, // scarcity weight ≥ this
     initRecentValues: { n: 60, start: 0.3, step: 0.02 },
     recentCap: 500,
@@ -91,6 +91,7 @@ const CFG = {
     includeThresholdBlock: false,
   },
 
+  // Final score shaping (global)
   SCORE: {
     overshootSlack: 10, // free buffer per attribute (ignores small drift)
     overshootL1: 0.5, // linear cost per extra admit beyond the slack
@@ -156,8 +157,10 @@ interface Statistics<T> {
   Helpers
    ================== */
 
-function percentage(n: number, base = 100) {
-  return Math.round(n * base) / base
+// Format a fraction in [0,1] as a percentage 0–100 with rounding.
+function pct(n: number, decimals = 1): number {
+  const v = Math.max(0, Math.min(100, 100 * n))
+  return +v.toFixed(decimals)
 }
 
 /* ==================
@@ -519,7 +522,6 @@ class LinearBandit {
 
     // keep capacity weight ≤ capacityFloor (cap at -0.1 so it can't drift positive)
     if (this.capIdx < this.weights.length) {
-      // was: Math.max(CFG.BANDIT.capacityFloor, this.weights[this.capIdx])
       this.weights[this.capIdx] = Math.min(this.weights[this.capIdx], CFG.BANDIT.capacityFloor)
     }
     if (this.scarIdx < this.weights.length) {
@@ -745,7 +747,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
   }
 
   /* --- features (simple & stable) ---
-     [ one-hot indicators per constraint (unmet attr present → 1)
+     [ one-hot indicators per constraint (unrelated to unmet; keeps stationarity)
        capacity used^0.8
        scarcity feature for rarest attribute ]
   */
@@ -753,7 +755,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
     const cs = this.getConstraints()
     const feats: number[] = []
 
-    // indicators (1 if person has attr; else 0) — using unmet-only made it nonstationary; keep simple.
+    // indicators (1 if person has attr; else 0)
     cs.forEach((c) => feats.push(person[c.attribute] ? 1 : 0))
 
     // capacity
@@ -795,7 +797,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
       for (let i = 0; i < pairs; i++) reward += CFG.PRICE.synergy * Math.min(pr[0], pr[i + 1])
     }
 
-    // gentle overshoot tax
+    // gentle overshoot tax (per-decision) if this person contributes to an already-satisfied attribute
     for (const c of this.getConstraints()) {
       if (person[c.attribute] && c.isSatisfied()) {
         const over = (c.admitted - c.minRequired) / Math.max(1, c.minRequired)
@@ -869,7 +871,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
     const used = this.usedFrac()
 
     // Build a per-person price label over indicators (0 for attrs they don't have)
-    const priceLabel = this.getConstraints().map((c, i) => {
+    const priceLabel = this.getConstraints().map((c) => {
       return person[c.attribute] ? prices[String(c.attribute)] || 0 : 0
     })
 
@@ -880,7 +882,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
       const hintReward = Math.min(
         3,
         priceLabel.reduce((a, b) => a + b, 0)
-      ) // new clamp
+      ) // clamp to keep stable
       this.bandit.updateModel(hint, hintEta * hintReward)
     }
 
@@ -975,9 +977,9 @@ export class BanditBouncer<T> implements BerghainBouncer {
     const base = {
       model: CFG.MODEL_VERSION,
       pretrained: this.pretrained,
-      progress: percentage(this.totalAdmitted / 1_000).toFixed(2) + '%',
+      progress: pct(this.totalAdmitted / 1_000, 2) + '%',
       attributes: this.getConstraints().map((c) => ({
-        total: `${c.admitted}/${c.minRequired} (${percentage(c.admitted / c.minRequired)}%)`,
+        total: `${c.admitted}/${c.minRequired} (${pct(c.admitted / c.minRequired, 1)}%)`,
         attribute: c.attribute,
         admitted: c.admitted,
         required: c.minRequired,
@@ -1079,7 +1081,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
         finalScore,
         decisions: this.decisions,
         snapshot: this.bandit.toSnapshot(),
-        ...this.getProgress(),
+        ...this.getProgress(), // MODEL_VERSION is in progress.
       },
     }
     const summary = {
