@@ -37,9 +37,7 @@ function calculateUrgencyScore(
   const requiredRemaining = Math.max(0, constraint.minCount - currentCount)
   const expectedFromRemaining = peopleRemaining * frequency
 
-  return expectedFromRemaining > 0
-    ? requiredRemaining / expectedFromRemaining
-    : 0
+  return expectedFromRemaining > 0 ? requiredRemaining / expectedFromRemaining : 0
 }
 
 // 2. Guest Value Scoring
@@ -106,12 +104,43 @@ function calculateExpectedImpact(
   return impact
 }
 
-function createContext(initialState: GameState) {
+function createContext({ game, ...initialState }: GameState) {
+  const frequencies = game.attributeStatistics.relativeFrequencies
+  const correlations = game.attributeStatistics.correlations
+
+  const quotas = game.constraints.map((constraint) => {
+    return {
+      ...constraint,
+      maxCount: constraint.minCount,
+      frequency: frequencies[constraint.attribute],
+      totalSeen: 0,
+    } as const
+  })
+
   return {
     ...initialState,
-
+    game,
+    quotas,
+    totalPeopleInLine: 10_000,
+    totalAvailableSpots: 1_000,
+    get totalAdmitted(): number {
+      return 1_000 - this.totalAvailableSpots
+    },
+    get totalRejected(): number {
+      return 10_000 - this.totalAdmitted
+    },
+    get totalNeededMax(): number {
+      return this.quotas.reduce((total, person) => total + person.minCount, 0)
+    },
+    get totalQuotasMet(): number {
+      return this.quotas.reduce((total, person) => total + Number(person.minCount <= 0), 0)
+    },
     update(status: GameStatusRunning<ScenarioAttributes>) {
+      this.totalPeopleInLine--
       this.status = status
+    },
+    didAdmit(person: ScenarioAttributes) {
+      this.totalAvailableSpots--
     },
   }
 }
@@ -135,7 +164,11 @@ export function AuctionBouncer(initialState: GameState): BerghainBouncer {
       return true
     },
     getProgress() {
-      return {}
+      return {
+        peopleInLine: ctx.totalPeopleInLine,
+        admitted: ctx.totalAdmitted,
+        rejected: ctx.totalRejected,
+      }
     },
     getOutput() {
       return {

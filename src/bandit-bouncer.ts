@@ -75,6 +75,11 @@ const CFG = {
     clamp: [-2, 6] as const,
   },
 
+  FINISH: {
+    enableAtUsed: 0.9, // start finishing once ≥90% of capacity is used
+    maxShortfall: 3, // if a constraint is missing ≤3 people
+  },
+
   // Learning warmup
   WARMUP: {
     usedMax: 0.15,
@@ -763,6 +768,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
   /* --- reward --- */
   private calculateReward(person: Person<T>, admitted: boolean): number {
     const used = this.usedFrac()
+
     const feasNow = this.getFeasibilityRatios()
     const mostCriticalAttr = feasNow.mostCritical
     const max = feasNow.max
@@ -832,6 +838,35 @@ export class BanditBouncer<T> implements BerghainBouncer {
     const person = nextPerson.attributes as Person<T>
     const features = this.extractFeatures(person)
     const used = this.usedFrac()
+
+    // handle end-game logic
+    if (used >= CFG.FINISH.enableAtUsed) {
+      const outstanding = this.getConstraints().filter((c) => !c.isSatisfied())
+      if (outstanding.length) {
+        // find the smallest remaining shortfall among unmet constraints
+        let minShort = Infinity
+        let minAttr: keyof T | null = null
+        for (const c of outstanding) {
+          const s = c.getShortfall()
+          if (s > 0 && s < minShort) {
+            minShort = s
+            minAttr = c.attribute
+          }
+        }
+
+        // If we're down to a tiny shortfall and this person helps it -> admit
+        if (minAttr && minShort <= CFG.FINISH.maxShortfall && person[minAttr]) {
+          const reward = this.calculateReward(person, true)
+          this.bandit.updateModel(features, reward)
+          this.getConstraints().forEach((c) => c.update(person, true))
+          this.totalAdmitted++
+          this.bandit.totalAdmitted++
+          this.recordDecision(person, 'admit', reward, this.bandit.getLastRawValue?.() ?? 0, features)
+          this.bandit.updateController(true)
+          return true
+        }
+      }
+    }
 
     // Optional epsilon-admit very early to break stalemates
     if (used < CFG.EXPLORE.epsUntilUsed) {
