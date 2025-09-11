@@ -153,6 +153,14 @@ interface Statistics<T> {
 }
 
 /* ==================
+  Helpers
+   ================== */
+
+function percentage(n: number, base = 100) {
+  return Math.round(n * base) / base
+}
+
+/* ==================
    Constraint (with EF)
    ================== */
 class Constraint<T> {
@@ -967,9 +975,9 @@ export class BanditBouncer<T> implements BerghainBouncer {
     const base = {
       model: CFG.MODEL_VERSION,
       pretrained: this.pretrained,
-      progress: (Math.round(this.totalAdmitted * 1000) / 100).toFixed(2) + '%',
+      progress: percentage(this.totalAdmitted / 1_000).toFixed(2) + '%',
       attributes: this.getConstraints().map((c) => ({
-        total: `${c.admitted}/${c.minRequired} (${Math.round((c.admitted / c.minRequired) * 1000) / 10}%)`,
+        total: `${c.admitted}/${c.minRequired} (${percentage(c.admitted / c.minRequired)}%)`,
         attribute: c.attribute,
         admitted: c.admitted,
         required: c.minRequired,
