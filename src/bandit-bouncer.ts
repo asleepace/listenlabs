@@ -36,7 +36,7 @@ const CFG = {
     warmupErrCap: 0.25, // max err used in floor bump during warmup
     floorBumpBase: 0.2,
     floorBumpSlope: 1.25,
-    capacityBiasScale: { early: 0.5, late: 0.9 }, // * used * sigma
+    capacityBiasScale: { early: 0.4, late: 0.8 }, // * used * sigma
     urgencyMax: 2.5,
     ctrlGains: { kP: 1.6, kI: 0.6, boostEdge: 0.2, boostFactor: 1.35 },
   },
@@ -846,6 +846,8 @@ export class BanditBouncer<T> implements BerghainBouncer {
 
     // --- fill-to-capacity: if ALL constraints are satisfied late, just admit ---
     const allSatisfied = this.getConstraints().every((c) => c.isSatisfied())
+    if (allSatisfied) return true
+
     // handle end-game logic (assist the smallest unmet constraint late)
     if (used >= CFG.FINISH.enableAtUsed) {
       const outstanding = this.getConstraints().filter((c) => !c.isSatisfied())
@@ -993,8 +995,8 @@ export class BanditBouncer<T> implements BerghainBouncer {
       feasibility: {
         maxRatio: feas.max,
         mostCritical: feas.mostCritical,
-        top: feas.ratios.slice(0, 3),
       },
+      top: feas.ratios.slice(0, 3),
       controller: {
         targetRate: +targetRate.toFixed(3),
         error: +error.toFixed(3),
