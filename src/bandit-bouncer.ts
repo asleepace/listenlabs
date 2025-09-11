@@ -90,6 +90,13 @@ const CFG = {
     keepLastLogs: 2,
     includeThresholdBlock: false,
   },
+
+  SCORE: {
+    overshootSlack: 10, // free buffer per attribute (ignores small drift)
+    overshootL1: 0.5, // linear cost per extra admit beyond the slack
+    overshootL2: 0.02, // gentle quadratic kicker (keeps huge overshoots costly)
+    weightByScarcity: true, // weight overshoot by current scarcity of that attribute
+  },
 }
 
 /* ================
@@ -996,6 +1003,23 @@ export class BanditBouncer<T> implements BerghainBouncer {
     return { ...base, thresholdDebug: this.bandit.getThresholdDebug() }
   }
 
+  private computeOvershootPenalty(): number {
+    const rem = this.remaining()
+    let cost = 0
+    for (const c of this.getConstraints()) {
+      const over = Math.max(0, c.admitted - c.minRequired)
+      const extra = Math.max(0, over - CFG.SCORE.overshootSlack)
+      if (!extra) continue
+
+      // Optionally weight by how “valuable” that attr was at the end
+      const w = CFG.SCORE.weightByScarcity ? 1 + c.getScarcity(rem) : 1
+
+      const base = CFG.SCORE.overshootL1 * extra + CFG.SCORE.overshootL2 * extra * extra
+      cost += w * base
+    }
+    return Math.round(cost)
+  }
+
   private estimateExtraRejections(): number {
     const unmet = this.getConstraints().filter((c) => !c.isSatisfied())
     if (!unmet.length) return 0
@@ -1033,8 +1057,9 @@ export class BanditBouncer<T> implements BerghainBouncer {
   }
 
   getOutput(lastStatus: GameStatusCompleted | GameStatusFailed) {
-    const extra = this.estimateExtraRejections()
-    const finalScore = this.totalRejected + extra
+    const extraPenalty = this.estimateExtraRejections()
+    const overshootPenalty = this.computeOvershootPenalty()
+    const finalScore = this.totalRejected + extraPenalty + overshootPenalty
     const gameData: GameState<any> = {
       ...this.state,
       status: lastStatus,
