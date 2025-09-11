@@ -3,13 +3,14 @@
 import type { BerghainBouncer } from './berghain'
 import type { GameState, GameStatusCompleted, GameStatusFailed, GameStatusRunning, ScenarioAttributes } from './types'
 import { Disk } from './utils/disk'
+import { dump } from './utils/dump'
 
 /* =========================
    ✅ TUNING CONFIG (all knobs)
    ========================= */
 const CFG = {
   // Included on persisted data to identify models and biases
-  MODEL_VERSION: 1.2,
+  MODEL_VERSION: 1.3,
 
   // Capacity / schedule (flattened target → keeps admit rate steady)
   TARGET_RATE_BASE: { early: 0.18, mid: 0.18, late: 0.18 },
@@ -20,8 +21,8 @@ const CFG = {
   PRICE: {
     priorTrue: 2, // Beta prior for frequency (alpha)
     priorTotal: 8, // Beta prior total (alpha+beta)
-    k0: 2.5, // optimism scale at start (UCB), fades with used
-    slope: 10.0, // squashing slope → price jump as need > supply
+    k0: 0.8, // optimism scale at start (UCB), fades with used (range 0.6–1.2)
+    slope: 14.0, // squashing slope → price jump as need > supply
     synergy: 0.2, // small bonus for covering multiple urgent attrs
     paceSlack: 0.02, // allow a tiny progress lag before braking
     paceBrake: 0.15, // gentle brake when ahead of pace (keeps rate flat)
@@ -52,7 +53,7 @@ const CFG = {
     warmupErrCap: 0.25,
     floorBumpBase: 0.2,
     floorBumpSlope: 1.25,
-    capacityBiasScale: { early: 0.12, late: 0.3 }, // * used * sigma
+    capacityBiasScale: { early: 0.12, late: 0.5 }, // * used * sigma
     urgencyMax: 0.0, // disabled; prices handle urgency
     ctrlGains: { kP: 1.2, kI: 0.4, boostEdge: 0.25, boostFactor: 1.15 },
   },
@@ -870,15 +871,23 @@ export class BanditBouncer<T> implements BerghainBouncer {
     const prices = this.computeShadowPrices()
     const used = this.usedFrac()
 
+    // Send output to remote debug feed to view people in real time
+    dump(
+      Object.entries(nextPerson.attributes)
+        .filter((t) => t[1])
+        .map((t) => t[0]),
+      prices
+    )
+
     // Build a per-person price label over indicators (0 for attrs they don't have)
     const priceLabel = this.getConstraints().map((c) => {
       return person[c.attribute] ? prices[String(c.attribute)] || 0 : 0
     })
 
-    const hintEta = 0.05
+    const hintEta = 0.08
     if (priceLabel.some((p) => p > 0)) {
       const hint = Array(this.indicatorCount + 2).fill(0) // +2 for capacity+scarcity alignment
-      for (let i = 0; i < this.indicatorCount; i++) hint[i] = priceLabel[i] > 0 ? 1 : 0
+      for (let i = 0; i < this.indicatorCount; i++) hint[i] = priceLabel[i]
       const hintReward = Math.min(
         3,
         priceLabel.reduce((a, b) => a + b, 0)
