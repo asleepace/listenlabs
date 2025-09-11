@@ -8,81 +8,68 @@ import { Disk } from './utils/disk'
    ✅ TUNING CONFIG (all knobs)
    ========================= */
 const CFG = {
-  // Capacity / schedule
-  TARGET_RATE_BASE: { early: 0.24, mid: 0.16, late: 0.1 },
-  TARGET_RATE_MIN: 0.08, // min admit rate
-  TARGET_RISK_PULL: { slope: 0.025, max: 0.04 },
+  // Capacity / schedule (flattened target → keeps admit rate steady)
+  TARGET_RATE_BASE: { early: 0.18, mid: 0.18, late: 0.18 },
+  TARGET_RATE_MIN: 0.12,
+  TARGET_RISK_PULL: { slope: 0.0, max: 0.0 }, // disabled: pacing is learned via prices
 
-  // Linear bandit
+  // Price model (shadow prices)
+  PRICE: {
+    priorTrue: 2, // Beta prior for frequency (alpha)
+    priorTotal: 8, // Beta prior total (alpha+beta)
+    k0: 1.6, // optimism scale at start (UCB), fades with used
+    slope: 8.0, // squashing slope → price jump as need > supply
+    synergy: 0.2, // small bonus for covering multiple urgent attrs
+    paceSlack: 0.02, // allow a tiny progress lag before braking
+    paceBrake: 0.15, // gentle brake when ahead of pace (keeps rate flat)
+    overshootPenaltyMax: 2.0, // cap on overshoot tax per attribute
+    rareScarcityScale: 0.8, // scale for the “rarest attr” scarcity feature
+  },
+
+  // Linear bandit (dimension is determined dynamically)
   BANDIT: {
-    featureDim: 10,
-    eta: 0.12,
-    emaBeta: 0.035,
-    iBeta: 0.002,
-    priorWeights: [1.2, 1.0, 1.8, 1.0, -0.8, -0.8, -1.4, -0.8, -1.6, 1.2],
+    eta: 0.12, // learning rate
+    emaBeta: 0.035, // admit-rate EMA
+    iBeta: 0.002, // integral smoothing
     weightClamp: [-5, 5] as const,
-    progressFloor: -0.15, // indices 4..7 ≤ this
-    capacityFloor: -0.1, // index 8 ≤ this
-    scarcityFloor: 0, // index 9 ≥ this
+    capacityFloor: -0.1, // capacity weight ≤ this
+    scarcityFloor: 0.0, // scarcity weight ≥ this
     initRecentValues: { n: 60, start: 1.6, step: 0.01 },
     recentCap: 500,
     earlyNoiseBoostDecisions: 200, // more exploration early
+    indicatorPrior: 1.2, // prior for each constraint indicator
+    capacityPrior: -0.8, // prior for capacity feature
+    scarcityPrior: 1.2, // prior for rare-attr scarcity feature
   },
 
-  // Thresholding (robust quantile + controller)
+  // Thresholding (robust quantile + PI controller)
   THRESH: {
-    sigmaFloor: 0.4, // slightly higher to avoid too-tight thresholds early
+    sigmaFloor: 0.4, // avoid too-tight thresholds early
     warmupDecisions: 300,
-    warmupErrCap: 0.25, // max err used in floor bump during warmup
+    warmupErrCap: 0.25,
     floorBumpBase: 0.2,
     floorBumpSlope: 1.25,
     capacityBiasScale: { early: 0.4, late: 0.8 }, // * used * sigma
-    urgencyMax: 2.5,
-    ctrlGains: { kP: 1.6, kI: 0.6, boostEdge: 0.2, boostFactor: 1.35 },
+    urgencyMax: 0.0, // disabled; prices handle urgency
+    ctrlGains: { kP: 1.1, kI: 0.35, boostEdge: 0.25, boostFactor: 1.15 },
   },
 
-  // Gates (policy, no learning updates)
-  GATES: {
-    pace: { minUsed: 0.35, gap: 0.16, penalty: -1.5 }, // later & gentler
-    infeasibleCutoff: {
-      earlyOffUntil: 0.35, // no infeasible gating before 35% used
-      mid: 2.2, // 0.35–0.66
-      late1: 1.6, // 0.66–0.85
-      late2: 1.2, // >0.85
-    },
-    reserve: { minUsed: 0.75, buffer: 0.95, penalty: -2 }, // late-only
-    top1MustHave: { minUsed: 0.7, minRatio: 1.6, dominance: 1.3, penalty: -2 },
-    lateFeas: { minUsed: 0.82, maxRatio: 1.2, helpAtRiskMin: 2, penalty: -2 },
-  },
-
-  // Reward calculation
+  // Reward clamp (final safety)
   REWARD: {
-    baseCreative: 3.4,
-    baseLocal: 2.0,
-    baseDefault: 0.8,
-    feasBoost: { slope: 0.65, base: 0.75, max: 2.2 },
-    scarcityClamp: [0.5, 2.0] as const,
-    mcBoost: { slope: 0.5, max: 2.2 }, // only for most-critical attr
-    pace: { margin: 0.04, kUnder: 2.2, kOver: 1.6, clamp: [0.2, 2.0] as const },
-    lateGuardrail: { minUsed: 0.5, penaltyIfUsefulLE1: 1.4 },
-    rejectPenalty: {
-      early: -0.15, // friendlier early
-      late: -0.5,
-      step: 0.12, // a bit softer
-      extraLate: 0.08,
-      min: -1.0, // cap early sting
-    },
     clamp: [-2, 6] as const,
   },
+
   // Fill-to-capacity helper when all constraints are satisfied
   FILL: {
-    enableAtUsed: 0.9, // once ≥90% capacity used and constraints met -> fill seats
-    learn: false, // don't train the bandit on pure fill admits (avoid overshoot penalties)
+    enableAtUsed: 0.9, // once ≥90% used and constraints met -> just admit
+    learn: false, // don't train on pure fill admits
   },
+
+  // Small endgame helper (only “gate” we keep)
   FINISH: {
-    enableAtUsed: 0.9, // start finishing once ≥90% capacity is used
-    maxShortfall: 10, // admit helpful people when the smallest shortfall ≤ 10
-    ratioMin: 3, // OR when remainingSlots / smallestShortfall ≥ 3
+    enableAtUsed: 0.9,
+    maxShortfall: 10, // admit helpful people when smallest gap ≤ 10
+    ratioMin: 3, // OR remainingSlots / smallestShortfall ≥ 3
   },
 
   // Learning warmup
@@ -92,12 +79,12 @@ const CFG = {
     negClampAfter: -0.3, // clamp negative reward updates after warmup
   },
 
-  // Optional epsilon-admit very early (helps break stalemates)
+  // Optional epsilon-admit very early (break stalemates)
   EXPLORE: { epsAdmit: 0.08, epsUntilUsed: 0.05 },
 
   // Debug / logging
   DEBUG: {
-    keepLastLogs: 2, // less noise
+    keepLastLogs: 2,
     includeThresholdBlock: false,
   },
 }
@@ -147,6 +134,7 @@ type BanditSnapshot = {
   recentValues: number[]
   featureDim: number
   maxCapacity: number
+  indicatorCount?: number // for compatibility with older snapshots
 }
 
 interface Statistics<T> {
@@ -179,16 +167,24 @@ class Constraint<T> {
     }
   }
 
+  // Expose counters for Beta posterior
+  getSeenTrue(): number {
+    return this.seenTrue
+  }
+  getSeenTotal(): number {
+    return this.seenTotal
+  }
+
   getEmpiricalFrequency(): number {
-    const priorTrue = 2,
-      priorTotal = 8
+    const priorTrue = CFG.PRICE.priorTrue
+    const priorTotal = CFG.PRICE.priorTotal
     const num = this.seenTrue + priorTrue
     const den = this.seenTotal + priorTotal
     return Math.max(1e-6, num / Math.max(1, den))
   }
 
   getProgress(): number {
-    return Math.min(1.0, this.admitted / this.minRequired)
+    return Math.min(1.0, this.admitted / Math.max(1, this.minRequired))
   }
 
   getShortfall(): number {
@@ -216,8 +212,9 @@ class LinearBandit {
     return Array.from({ length: n }, (_, i) => start + step * i)
   }
 
-  static fromSnapshot(s: BanditSnapshot) {
-    const lb = new LinearBandit(s.featureDim, s.maxCapacity)
+  static fromSnapshot(s: BanditSnapshot, indicatorCountGuess: number) {
+    const ic = s.indicatorCount ?? Math.max(1, Math.min(s.featureDim - 2, indicatorCountGuess))
+    const lb = new LinearBandit(s.featureDim, s.maxCapacity, ic, undefined, s.weights)
     lb.A = s.A
     lb.b = s.b
     lb.weights = s.weights
@@ -230,18 +227,22 @@ class LinearBandit {
   private A!: number[][]
   private b!: number[]
   private featureDim: number
+  private indicatorCount: number
+  private capIdx: number
+  private scarIdx: number
+
   private decisionCount = 0
   private lastThreshold = 9
   private lastRawValue = 9
 
   public totalAdmitted = 0
   public maxCapacity: number
-  public maxFeasRatio = 0
+  public maxFeasRatio = 0 // unused now, kept for compatibility
 
   private recentValues: number[] = []
   private recentCap = CFG.BANDIT.recentCap
 
-  public targetAdmitRate = 0.21
+  public targetAdmitRate = 0.18
   private eta = CFG.BANDIT.eta
   public admitRateEma = this.targetAdmitRate
   private emaBeta = CFG.BANDIT.emaBeta
@@ -266,27 +267,56 @@ class LinearBandit {
     tail: 0,
   }
 
-  constructor(featureDimension: number, maxCapacity: number, previousData: DecisionRecord[] = []) {
+  constructor(
+    featureDimension: number,
+    maxCapacity: number,
+    indicatorCount: number,
+    priorWeights?: number[],
+    snapshotWeights?: number[]
+  ) {
     this.featureDim = featureDimension
     this.maxCapacity = maxCapacity
-    this.reset()
-    this.initializeFromHistory(previousData)
+    this.indicatorCount = indicatorCount
+    this.capIdx = indicatorCount
+    this.scarIdx = indicatorCount + 1
+    this.reset(priorWeights, snapshotWeights)
   }
 
   /** allow warm start without exposing a private method */
   public warmStartFromHistory(decisions: DecisionRecord[]) {
-    this.initializeFromHistory(decisions)
+    const valid = decisions.filter((d) => d.features?.length === this.featureDim).slice(-100)
+    valid.forEach((d, idx) => {
+      const age = valid.length - idx
+      const w = Math.pow(0.9, age)
+      this.updateModel(d.features, d.reward * w)
+    })
+    if (valid.length) this.updateWeights()
   }
 
-  private reset() {
+  private makeDefaultPriors(dim: number, indicatorCount: number): number[] {
+    const p: number[] = []
+    for (let i = 0; i < indicatorCount; i++) p.push(CFG.BANDIT.indicatorPrior)
+    p.push(CFG.BANDIT.capacityPrior) // capacity
+    p.push(CFG.BANDIT.scarcityPrior) // rare scarcity
+    while (p.length < dim) p.push(0) // defensive
+    return p.slice(0, dim)
+  }
+
+  private reset(priorWeights?: number[], snapshotWeights?: number[]) {
     const lambda = 0.1
     this.A = Array.from({ length: this.featureDim }, (_, i) =>
       Array.from({ length: this.featureDim }, (_, j) => (i === j ? lambda : 0))
     )
-    this.b = CFG.BANDIT.priorWeights.map((w) => lambda * w)
-    this.weights = [...CFG.BANDIT.priorWeights]
+    const priors =
+      snapshotWeights && snapshotWeights.length === this.featureDim
+        ? snapshotWeights
+        : priorWeights && priorWeights.length === this.featureDim
+        ? priorWeights
+        : this.makeDefaultPriors(this.featureDim, this.indicatorCount)
+
+    this.b = priors.map((w) => lambda * w)
+    this.weights = [...priors]
     this.recentValues = LinearBandit.randomInitialValues()
-    // Initialize controller EMA to current target to avoid initial overshoot
     this.admitRateEma = this.getTargetAdmitRate()
   }
 
@@ -299,18 +329,15 @@ class LinearBandit {
       recentValues: this.recentValues.slice(-this.recentCap),
       featureDim: this.featureDim,
       maxCapacity: this.maxCapacity,
+      indicatorCount: this.indicatorCount,
     }
   }
 
   public getTargetAdmitRate(): number {
-    const used = this.totalAdmitted / this.maxCapacity
+    const used = this.totalAdmitted / Math.max(1, this.maxCapacity)
     const base =
       used < 0.33 ? CFG.TARGET_RATE_BASE.early : used < 0.66 ? CFG.TARGET_RATE_BASE.mid : CFG.TARGET_RATE_BASE.late
-    const riskPull = Math.min(
-      CFG.TARGET_RISK_PULL.max,
-      CFG.TARGET_RISK_PULL.slope * Math.max(0, (this.maxFeasRatio ?? 1) - 1)
-    )
-    return Math.max(CFG.TARGET_RATE_MIN, base - riskPull)
+    return Math.max(CFG.TARGET_RATE_MIN, base)
   }
 
   getScoreSummary() {
@@ -321,16 +348,6 @@ class LinearBandit {
 
   updateController(admitted: boolean) {
     this.admitRateEma = this.admitRateEma * (1 - this.emaBeta) + (admitted ? 1 : 0) * this.emaBeta
-  }
-
-  private initializeFromHistory(decisions: DecisionRecord[]) {
-    const valid = decisions.filter((d) => d.features?.length === this.featureDim).slice(-100)
-    valid.forEach((d, idx) => {
-      const age = valid.length - idx
-      const w = Math.pow(0.9, age)
-      this.updateModel(d.features, d.reward * w)
-    })
-    if (valid.length) this.updateWeights()
   }
 
   private median(xs: number[]): number {
@@ -347,7 +364,7 @@ class LinearBandit {
     return Math.max(mad, 1e-6)
   }
 
-  // Inverse normal CDF approximation (A&S 26.2.23): FIXED tail formulas
+  // Inverse normal CDF approximation (A&S 26.2.23)
   private invNorm(p: number): number {
     const pp = Math.max(1e-9, Math.min(1 - 1e-9, p))
     const a1 = -39.69683028665376,
@@ -378,10 +395,7 @@ class LinearBandit {
       return (((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) / ((((d1 * q + d2) * q + d3) * q + d4) * q + 1)
     } else if (pp > 1 - 0.02425) {
       q = Math.sqrt(-2 * Math.log(1 - pp))
-      return -(
-        (((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) /
-        ((((d1 * q + d2) * q + d3) * q + d4) * q + 1)
-      )
+      return -(((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6) / ((((d1 * q + d2) * q + d3) * q + d4) * q + 1)
     }
     q = pp - 0.5
     r = q * q
@@ -394,7 +408,7 @@ class LinearBandit {
     return this.invNorm(tail)
   }
 
-  private calculateAdaptiveThreshold(constraintUrgency = 0): number {
+  private calculateAdaptiveThreshold(): number {
     const arr = this.recentValues.length ? this.recentValues : [0]
     const med = this.median(arr)
     const mad = this.mad(arr, med)
@@ -406,12 +420,9 @@ class LinearBandit {
     const z = this.zForTail(tail)
     const quantileEstimate = med + z * sigma
 
-    const used = this.totalAdmitted / this.maxCapacity
+    const used = this.totalAdmitted / Math.max(1, this.maxCapacity)
     const capK = used < 0.5 ? CFG.THRESH.capacityBiasScale.early : CFG.THRESH.capacityBiasScale.late
     const capacityBias = capK * used * sigma
-
-    const urgencyScale = Math.pow(Math.max(0, used - 0.3) / 0.6, 1.2)
-    const urgencyAdj = Math.min(CFG.THRESH.urgencyMax, Math.max(0, constraintUrgency)) * urgencyScale
 
     // PI controller
     const { kP, kI, boostEdge, boostFactor } = CFG.THRESH.ctrlGains
@@ -419,7 +430,7 @@ class LinearBandit {
     const boost = err > boostEdge ? boostFactor : 1
     const rateAdjustment = kP * boost * err + kI * boost * this.rateErrI
 
-    let thr = quantileEstimate + capacityBias + rateAdjustment - urgencyAdj
+    let thr = quantileEstimate + capacityBias + rateAdjustment
 
     // floor vs err (more rejections if over target)
     if (err > 0) {
@@ -442,7 +453,7 @@ class LinearBandit {
       quantileEstimate,
       capacityBias,
       rateAdjustment,
-      urgencyAdj,
+      urgencyAdj: 0,
       lo,
       hi,
       final,
@@ -453,12 +464,12 @@ class LinearBandit {
     return final
   }
 
-  selectAction(features: number[], constraintUrgency = 0) {
+  selectAction(features: number[]) {
     this.decisionCount++
     this.updateWeights()
     const rawValue = this.predictValue(features)
     this.pushRaw(rawValue)
-    const threshold = this.calculateAdaptiveThreshold(constraintUrgency)
+    const threshold = this.calculateAdaptiveThreshold()
     this.lastThreshold = threshold
     this.lastRawValue = rawValue
 
@@ -474,44 +485,50 @@ class LinearBandit {
 
   private predictValue(features: number[]): number {
     let v = 0
-    for (let i = 0; i < Math.min(features.length, this.weights.length); i++) v += this.weights[i] * features[i]
+    const n = Math.min(features.length, this.weights.length)
+    for (let i = 0; i < n; i++) v += this.weights[i] * features[i]
     return v
   }
 
   private updateWeights() {
+    // diagonal-only update → weights[i] = b[i]/A[i][i]
     for (let i = 0; i < this.featureDim; i++) if (this.A[i][i] > 1e-6) this.weights[i] = this.b[i] / this.A[i][i]
+
     const clamp = (x: number, [lo, hi]: readonly [number, number]) => Math.max(lo, Math.min(hi, x))
 
     // global clamp
     for (let i = 0; i < this.weights.length; i++) this.weights[i] = clamp(this.weights[i], CFG.BANDIT.weightClamp)
 
-    // keep progress negative, cap/capacity/scarcity signs
-    for (let i = 4; i <= 7; i++) this.weights[i] = Math.min(CFG.BANDIT.progressFloor, this.weights[i])
-    this.weights[8] = Math.min(CFG.BANDIT.capacityFloor, this.weights[8])
-    this.weights[9] = Math.max(CFG.BANDIT.scarcityFloor, this.weights[9])
+    // sign hints: capacity <= capacityFloor; scarcity >= scarcityFloor
+    if (this.capIdx < this.weights.length)
+      this.weights[this.capIdx] = Math.min(CFG.BANDIT.capacityFloor, this.weights[this.capIdx])
+    if (this.scarIdx < this.weights.length)
+      this.weights[this.scarIdx] = Math.max(CFG.BANDIT.scarcityFloor, this.weights[this.scarIdx])
 
-    // optional: during warmup, prevent indicators [0..3] from going negative
+    // warmup: prevent indicators from going negative early
     const used = this.totalAdmitted / Math.max(1, this.maxCapacity)
     const warmup = used < CFG.WARMUP.usedMax || this.admitRateEma < CFG.WARMUP.minEma
     if (warmup) {
-      for (let i = 0; i < 4; i++) this.weights[i] = Math.max(0, this.weights[i])
+      for (let i = 0; i < this.indicatorCount; i++) this.weights[i] = Math.max(0, this.weights[i])
     }
   }
 
   updateModel(features: number[], reward: number) {
     const r = Math.max(-50, Math.min(50, reward))
-    for (let i = 0; i < features.length; i++) {
-      this.A[i][i] += this.eta * (features[i] * features[i])
-      this.b[i] += this.eta * (r * features[i])
+    const n = Math.min(features.length, this.weights.length)
+    for (let i = 0; i < n; i++) {
+      const f = features[i]
+      this.A[i][i] += this.eta * (f * f)
+      this.b[i] += this.eta * (r * f)
     }
   }
 
   getStats() {
-    const absAvg = this.weights.reduce((a, b) => a + Math.abs(b), 0) / this.weights.length
+    const absAvg = this.weights.reduce((a, b) => a + Math.abs(b), 0) / Math.max(1, this.weights.length)
     return {
-      weights: this.weights.slice(0, 6),
+      weights: this.weights.slice(0, Math.min(6, this.weights.length)),
       decisionCount: this.decisionCount,
-      capacityUsed: +(this.totalAdmitted / this.maxCapacity).toFixed(3),
+      capacityUsed: +(this.totalAdmitted / Math.max(1, this.maxCapacity)).toFixed(3),
       threshold: +this.lastThreshold.toFixed(2),
       avgWeight: +absAvg.toFixed(2),
     }
@@ -545,6 +562,8 @@ export class BanditBouncer<T> implements BerghainBouncer {
   private bandit!: LinearBandit
   private decisions: DecisionRecord[] = []
   private logs: string[] = []
+  private indicatorCount = 0 // number of constraint indicators used in features
+  private rareKey: keyof T | null = null // rarest attribute key
 
   constructor(public state: GameState, public config: Config) {
     this.initializeConstraints()
@@ -562,13 +581,14 @@ export class BanditBouncer<T> implements BerghainBouncer {
   }
 
   private getFeasibilityRatios() {
+    const remaining = this.remaining()
     const ratios = this.getConstraints()
       .filter((c) => !c.isSatisfied())
       .map((c) => {
         const f = c.getEmpiricalFrequency() || c.frequency
         return {
           attr: String(c.attribute),
-          ratio: c.getShortfall() / Math.max(1e-6, this.remaining() * f),
+          ratio: c.getShortfall() / Math.max(1e-6, remaining * f),
           shortfall: c.getShortfall(),
           freq: f,
         }
@@ -576,44 +596,6 @@ export class BanditBouncer<T> implements BerghainBouncer {
     const max = ratios.reduce((m, r) => Math.max(m, r.ratio), 0)
     const most = ratios.slice().sort((a, b) => b.ratio - a.ratio)[0]?.attr
     return { max, mostCritical: most, ratios }
-  }
-
-  private computeConstraintUrgency(): number {
-    const scores: number[] = []
-    for (const c of this.getConstraints()) {
-      if (!c.isSatisfied()) {
-        const f = c.getEmpiricalFrequency() || c.frequency
-        const ratio = c.getShortfall() / Math.max(1e-6, this.remaining() * f)
-        scores.push(ratio)
-      }
-    }
-    if (!scores.length) return 0
-    const maxRatio = Math.max(...scores)
-    return Math.min(CFG.THRESH.urgencyMax, Math.log1p(Math.E * maxRatio))
-  }
-
-  private mostBehindConstraint(): { attr: keyof T; gap: number } | null {
-    const used = this.usedFrac()
-    let best: { attr: keyof T; gap: number } | null = null
-    for (const c of this.getConstraints()) {
-      const gap = used - c.getProgress()
-      if (!best || gap > best.gap) best = { attr: c.attribute, gap }
-    }
-    return best
-  }
-
-  private computeReserves() {
-    const list = this.getConstraints()
-      .filter((c) => !c.isSatisfied())
-      .map((c) => {
-        const f = c.getEmpiricalFrequency() || c.frequency
-        return {
-          attr: c.attribute,
-          drawsNeeded: c.getShortfall() / Math.max(1e-6, f),
-        }
-      })
-    const total = list.reduce((a, r) => a + r.drawsNeeded, 0)
-    return { list, total }
   }
 
   /* --- small utilities --- */
@@ -652,192 +634,155 @@ export class BanditBouncer<T> implements BerghainBouncer {
       const attribute = gc.attribute as keyof T
       this.constraints.set(attribute, new Constraint(attribute, gc.minCount, this.getFrequency(attribute), this.config))
     }
+    // identify rarest attribute by prior frequency (fallback to first)
+    const all = this.getConstraints()
+    const rare = all.slice().sort((a, b) => (a.frequency ?? 1) - (b.frequency ?? 1))[0]
+    this.rareKey = (rare?.attribute as keyof T) ?? null
+    this.indicatorCount = all.length
+    if (this.indicatorCount === 0) this.rareKey = null
   }
 
   async initializeLearningData() {
     const prev = await this.getPreviousGameResults()
     const all = prev.flatMap((g) => g.decisions || [])
     const snap = prev.at(0)?.snapshot
-    const dim = CFG.BANDIT.featureDim
-    this.bandit = snap ? LinearBandit.fromSnapshot(snap) : new LinearBandit(dim, this.config.MAX_CAPACITY)
-    if (!snap) this.bandit.warmStartFromHistory(all)
+
+    const dim = this.indicatorCount + 2 // [indicators] + capacity + rare-scarcity
+    const priors = this.buildPriorWeights(dim, this.indicatorCount)
+
+    if (snap && snap.featureDim === dim) {
+      this.bandit = LinearBandit.fromSnapshot(snap, this.indicatorCount)
+    } else {
+      this.bandit = new LinearBandit(dim, this.config.MAX_CAPACITY, this.indicatorCount, priors)
+    }
+    if (!snap || snap.featureDim !== dim) {
+      // warm start from recent decisions only when we rebuilt
+      this.bandit.warmStartFromHistory(all)
+    }
+  }
+
+  private buildPriorWeights(dim: number, indicatorCount: number): number[] {
+    const p: number[] = []
+    for (let i = 0; i < indicatorCount; i++) p.push(CFG.BANDIT.indicatorPrior)
+    p.push(CFG.BANDIT.capacityPrior)
+    p.push(CFG.BANDIT.scarcityPrior)
+    while (p.length < dim) p.push(0)
+    return p.slice(0, dim)
   }
 
   get statistics(): Statistics<T> {
     return this.state.game.attributeStatistics as any
   }
   getFrequency(attribute: keyof T): number {
-    return this.statistics.relativeFrequencies[attribute] as number
+    return (this.statistics?.relativeFrequencies?.[attribute] as number) ?? 0.001
   }
 
-  /* --- features --- */
+  /* --- shadow prices --- */
+  private computeShadowPrices() {
+    const used = this.usedFrac()
+    const remaining = Math.max(1, this.remaining()) // avoid div/0 if ever called at the edge
+    const k = CFG.PRICE.k0 * (1 - used)
+    const prices: Record<string, number> = {}
+
+    for (const c of this.getConstraints()) {
+      if (c.isSatisfied()) {
+        prices[String(c.attribute)] = 0
+        continue
+      }
+      const short = c.getShortfall()
+      const seenTrue = c.getSeenTrue()
+      const seenTotal = c.getSeenTotal()
+
+      const alpha0 = CFG.PRICE.priorTrue
+      const beta0 = Math.max(0, CFG.PRICE.priorTotal - CFG.PRICE.priorTrue)
+      const alpha = alpha0 + seenTrue
+      const beta = beta0 + Math.max(0, seenTotal - seenTrue)
+
+      const mean = alpha / Math.max(1, alpha + beta)
+      const v = (alpha * beta) / (Math.pow(alpha + beta, 2) * Math.max(1, alpha + beta + 1))
+      const vRaw = (alpha * beta) / (Math.pow(alpha + beta, 2) * Math.max(1, alpha + beta + 1))
+      const sd = Math.sqrt(Math.max(1e-6, vRaw))
+      const pUCB = Math.max(0, Math.min(1, mean + k * sd))
+
+      const needRate = short / Math.max(1, remaining)
+      const gap = Math.max(0, needRate - pUCB) // 0 if optimistic supply meets need
+
+      // Ahead-of-pace soft brake (keeps flat rate; reduces price when already ahead)
+      const paceDeficit = Math.max(0, c.getProgress() - used - CFG.PRICE.paceSlack)
+      const paceBrake = CFG.PRICE.paceBrake * paceDeficit
+
+      const S = (x: number) => 1 / (1 + Math.exp(-CFG.PRICE.slope * x))
+      const price = Math.max(0, S(gap) - paceBrake)
+
+      prices[String(c.attribute)] = price
+    }
+    return prices
+  }
+
+  /* --- features (simple & stable) ---
+     [ one-hot indicators per constraint (unmet attr present → 1)
+       capacity used^0.8
+       scarcity feature for rarest attribute ]
+  */
   private extractFeatures(person: Person<T>): number[] {
     const cs = this.getConstraints()
     const feats: number[] = []
-    // indicators (only if unmet)
-    cs.forEach((c) => feats.push(person[c.attribute] && !c.isSatisfied() ? 1 : 0))
-    // progress (clamped negative weight)
-    // cs.forEach((c) => feats.push(Math.max(0, 1 - c.getProgress())))
-    cs.forEach((c) => feats.push(c.getProgress()))
+
+    // indicators (1 if person has attr; else 0) — using unmet-only made it nonstationary; keep simple.
+    cs.forEach((c) => feats.push(person[c.attribute] ? 1 : 0))
+
     // capacity
     feats.push(Math.pow(this.usedFrac(), 0.8))
-    // creative scarcity feature
-    const creative = cs.find((c) => String(c.attribute) === 'creative')
-    feats.push(creative ? 0.5 * Math.min(3, creative.getScarcity(this.remaining())) : 0)
+
+    // rare scarcity feature (if rareKey known), proportional to current scarcity of that rare attr
+    let rareScarcity = 0
+    if (this.rareKey) {
+      const rare = this.constraints.get(this.rareKey)
+      if (rare) {
+        rareScarcity = CFG.PRICE.rareScarcityScale * Math.min(3, rare.getScarcity(this.remaining()))
+      }
+    }
+    feats.push(rareScarcity)
+
     return feats
   }
 
-  /* --- policy gate (no learning updates) --- */
-  private policyGate(person: Person<T>, features: number[]): { blocked: boolean } {
-    const used = this.usedFrac()
-    const pace = this.mostBehindConstraint()
-    if (pace && used > CFG.GATES.pace.minUsed && pace.gap > CFG.GATES.pace.gap) {
-      if (!person[pace.attr]) {
-        this.recordDecision(person, 'reject', CFG.GATES.pace.penalty, 0, features)
-        this.getConstraints().forEach((c) => c.update(person, false))
-        this.totalRejected++
-        this.bandit.updateController(false)
-        return { blocked: true }
-      }
-    }
-
-    const feas = this.getFeasibilityRatios()
-
-    // reserve lock (late only)
-    const reserves = this.computeReserves()
-    if (used > CFG.GATES.reserve.minUsed && reserves.total > this.remaining() * CFG.GATES.reserve.buffer) {
-      const hitsReserve = reserves.list.some((r) => r.drawsNeeded > 0.5 && person[r.attr as keyof T])
-      if (!hitsReserve) {
-        this.recordDecision(person, 'reject', CFG.GATES.reserve.penalty, 0, features)
-        this.getConstraints().forEach((c) => c.update(person, false))
-        this.totalRejected++
-        this.bandit.updateController(false)
-        return { blocked: true }
-      }
-    }
-
-    // top1 must-have
-    const sorted = [...feas.ratios].sort((a, b) => b.ratio - a.ratio)
-    const top1 = sorted[0],
-      top2 = sorted[1]
-    if (
-      used > CFG.GATES.top1MustHave.minUsed &&
-      top1 &&
-      top1.ratio >= CFG.GATES.top1MustHave.minRatio &&
-      (!top2 || top1.ratio >= CFG.GATES.top1MustHave.dominance * top2.ratio)
-    ) {
-      if (!person[top1.attr as keyof T]) {
-        this.recordDecision(person, 'reject', CFG.GATES.top1MustHave.penalty, 0, features)
-        this.getConstraints().forEach((c) => c.update(person, false))
-        this.totalRejected++
-        this.bandit.updateController(false)
-        return { blocked: true }
-      }
-    }
-
-    // late feasibility
-    if (used > CFG.GATES.lateFeas.minUsed && feas.max > CFG.GATES.lateFeas.maxRatio && feas.mostCritical) {
-      const hasCritical = person[feas.mostCritical as keyof T] ? 1 : 0
-      const helpsAtRisk = feas.ratios.filter((r) => r.ratio > 1.0 && person[r.attr as keyof T]).length
-      if (!hasCritical && helpsAtRisk < CFG.GATES.lateFeas.helpAtRiskMin) {
-        this.recordDecision(person, 'reject', CFG.GATES.lateFeas.penalty, 0, features)
-        this.getConstraints().forEach((c) => c.update(person, false))
-        this.totalRejected++
-        this.bandit.updateController(false)
-        return { blocked: true }
-      }
-    }
-
-    // infeasible cutoff by phase (off before earlyOffUntil)
-    let cutoff = Infinity
-    if (used >= CFG.GATES.infeasibleCutoff.earlyOffUntil && used < 0.66) cutoff = CFG.GATES.infeasibleCutoff.mid
-    else if (used >= 0.66 && used < 0.85) cutoff = CFG.GATES.infeasibleCutoff.late1
-    else if (used >= 0.85) cutoff = CFG.GATES.infeasibleCutoff.late2
-
-    if (feas.max > cutoff) {
-      this.bandit.maxFeasRatio = feas.max
-      const helpsAny = feas.ratios.some((r) => r.ratio > cutoff && person[r.attr as keyof T])
-      if (!helpsAny) {
-        this.recordDecision(person, 'reject', -2, 0, features)
-        this.getConstraints().forEach((c) => c.update(person, false))
-        this.totalRejected++
-        this.bandit.updateController(false)
-        return { blocked: true }
-      }
-    }
-
-    // let bandit decide
-    this.bandit.maxFeasRatio = feas.max
-    return { blocked: false }
-  }
-
-  /* --- reward --- */
+  /* --- price-driven reward (no policy gates) --- */
   private calculateReward(person: Person<T>, admitted: boolean): number {
-    const used = this.usedFrac()
-
-    const feasNow = this.getFeasibilityRatios()
-    const mostCriticalAttr = feasNow.mostCritical
-    const max = feasNow.max
-
+    const prices = this.computeShadowPrices()
     const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x))
-    const R = CFG.REWARD
 
     if (!admitted) {
-      const base = used < 0.2 ? R.rejectPenalty.early : R.rejectPenalty.late
-      const extra = -(R.rejectPenalty.step + (used > 0.6 ? R.rejectPenalty.extraLate : 0)) * Math.min(5, max)
-      return Math.max(R.rejectPenalty.min, base + extra)
+      const maxPrice = Math.max(0, ...Object.values(prices))
+      // mild rejection penalty scaled by global urgency (keeps learning signal without spikes)
+      return clamp(-0.15 - 0.5 * maxPrice, -1.0, 0)
     }
 
-    let reward = 0
-    let useful = 0
+    // coverage value
+    const attrs = this.getConstraints().map((c) => String(c.attribute))
+    const covers = attrs.filter((a) => person[a as keyof T])
+    let reward = covers.reduce((s, a) => s + (prices[a] || 0), 0)
 
+    // small synergy for multi-urgent coverage
+    if (covers.length >= 2) {
+      const pr = covers.map((a) => prices[a] || 0).sort((x, y) => y - x)
+      const pairs = Math.min(3, pr.length - 1)
+      for (let i = 0; i < pairs; i++) reward += CFG.PRICE.synergy * Math.min(pr[0], pr[i + 1])
+    }
+
+    // gentle overshoot tax
     for (const c of this.getConstraints()) {
-      if (!person[c.attribute]) continue
-      const prog = c.getProgress()
-      const paceGap = used - prog
-      const absGap = Math.abs(paceGap)
-      let paceAdj = 1
-      if (absGap > R.pace.margin) {
-        paceAdj =
-          paceGap > 0 ? 1 + R.pace.kUnder * (paceGap - R.pace.margin) : 1 - R.pace.kOver * (absGap - R.pace.margin)
-      }
-      paceAdj = clamp(paceAdj, R.pace.clamp[0], R.pace.clamp[1])
-
-      if (!c.isSatisfied()) {
-        useful++
-        const base =
-          String(c.attribute) === 'creative'
-            ? R.baseCreative
-            : String(c.attribute) === 'berlin_local'
-            ? R.baseLocal
-            : R.baseDefault
-
-        const f = c.getEmpiricalFrequency() || c.frequency
-        const feasRatio = c.getShortfall() / Math.max(1e-6, this.remaining() * f)
-        const feasBoost = Math.min(R.feasBoost.max, R.feasBoost.base + R.feasBoost.slope * feasRatio)
-        const scarcityBoost = clamp(c.getScarcity(this.remaining()), R.scarcityClamp[0], R.scarcityClamp[1])
-        const mcBoost =
-          String(c.attribute) === String(mostCriticalAttr)
-            ? Math.min(R.mcBoost.max, 1.0 + R.mcBoost.slope * Math.max(0, feasRatio - 1))
-            : 1.0
-
-        reward += base * feasBoost * scarcityBoost * paceAdj * mcBoost
-      } else {
-        const overshoot = (c.admitted - c.minRequired) / Math.max(1, c.minRequired)
-        reward -= Math.min(2.2, 1.2 + Math.max(0, overshoot))
+      if (person[c.attribute] && c.isSatisfied()) {
+        const over = (c.admitted - c.minRequired) / Math.max(1, c.minRequired)
+        reward -= Math.min(CFG.PRICE.overshootPenaltyMax, 1.0 + Math.max(0, over))
       }
     }
-
-    if (max > 1.0 && useful === 0) return -2
-    if (useful > 1) reward *= Math.min(1.4, 1.0 + 0.15 * Math.log2(1 + useful))
-    if (used > CFG.REWARD.lateGuardrail.minUsed && useful <= 1) reward -= CFG.REWARD.lateGuardrail.penaltyIfUsefulLE1
-    if (useful === 0) reward = Math.min(reward, -0.5)
 
     return clamp(reward, CFG.REWARD.clamp[0], CFG.REWARD.clamp[1])
   }
 
   // --- force-finish helper (late-game admit if a person helps close any small gap)
-  /** Late-game helper: if we're nearly done and this person helps any eligible unmet constraint, admit. */
+  /** If we're nearly done and this person helps any eligible unmet constraint, admit. */
   private tryForceFinish(person: Person<T>, features: number[]): boolean {
     const used = this.usedFrac()
     if (used < CFG.FINISH.enableAtUsed) return false
@@ -855,7 +800,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
       return { c, short, roomy, eligible }
     })
 
-    // If there is exactly one unmet constraint, be more decisive
+    // If exactly one unmet, be decisive
     if (info.length === 1) {
       const { c } = info[0]
       if (person[c.attribute]) {
@@ -871,9 +816,8 @@ export class BanditBouncer<T> implements BerghainBouncer {
       return false
     }
 
-    // Consider ANY eligible unmet constraint; prefer the smallest shortfall
+    // Otherwise any eligible → admit the first that helps (smallest shortfall first)
     const eligible = info.filter((x) => x.eligible).sort((a, b) => a.short - b.short)
-
     for (const e of eligible) {
       if (person[e.c.attribute]) {
         const reward = this.calculateReward(person, true)
@@ -886,7 +830,6 @@ export class BanditBouncer<T> implements BerghainBouncer {
         return true
       }
     }
-
     return false
   }
 
@@ -903,11 +846,9 @@ export class BanditBouncer<T> implements BerghainBouncer {
     const allSatisfied = this.getConstraints().every((c) => c.isSatisfied())
     if (allSatisfied && used >= CFG.FILL.enableAtUsed) {
       if (CFG.FILL.learn) {
-        const reward = 0
-        this.bandit.updateModel(features, reward)
-        // this.bandit.updateController(true) // only if learning
+        this.bandit.updateModel(features, 0)
       }
-      // Always reflect the admit in the EMA
+      // Always reflect admit into EMA to keep rate flat
       this.bandit.updateController(true)
       this.getConstraints().forEach((c) => c.update(person, true))
       this.totalAdmitted++
@@ -916,13 +857,13 @@ export class BanditBouncer<T> implements BerghainBouncer {
       return true
     }
 
-    // Handle endgame where we just need to finish
+    // Small endgame helper only
     if (this.tryForceFinish(person, features)) return true
 
-    // Optional epsilon-admit very early to break stalemates
+    // Optional epsilon-admit very early
     if (used < CFG.EXPLORE.epsUntilUsed) {
-      const helpsAny = this.getConstraints().some((c) => person[c.attribute] && !c.isSatisfied())
-      if (helpsAny && Math.random() < CFG.EXPLORE.epsAdmit) {
+      const hasAny = this.getConstraints().some((c) => person[c.attribute])
+      if (hasAny && Math.random() < CFG.EXPLORE.epsAdmit) {
         const reward = this.calculateReward(person, true)
         this.bandit.updateModel(features, reward)
         this.getConstraints().forEach((c) => c.update(person, true))
@@ -934,13 +875,8 @@ export class BanditBouncer<T> implements BerghainBouncer {
       }
     }
 
-    // policy gate (does not train the bandit)
-    const gate = this.policyGate(person, features)
-    if (gate.blocked) return false
-
-    // bandit decision
-    const urgency = this.computeConstraintUrgency()
-    const { action, value } = this.bandit.selectAction(features, urgency)
+    // Bandit decision (no gates)
+    const { action, value } = this.bandit.selectAction(features)
     const shouldAdmit = action === 'admit'
 
     // learning with warmup rules
@@ -982,6 +918,14 @@ export class BanditBouncer<T> implements BerghainBouncer {
     const targetRate = this.bandit.getTargetAdmitRate?.() ?? this.bandit.targetAdmitRate
     const error = this.bandit.admitRateEma - targetRate
 
+    if (this.totalAdmitted % 200 === 0) {
+      const p = this.computeShadowPrices()
+      const peek = Object.entries(p)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+      this.log(`prices=${peek.map(([k, v]) => `${k}:${v.toFixed(2)}`).join(',')}`)
+    }
+
     const base = {
       attributes: this.getConstraints().map((c) => ({
         attribute: c.attribute,
@@ -1006,7 +950,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
         maxRatio: feas.max,
         mostCritical: feas.mostCritical,
       },
-      top: feas.ratios.slice(0, 3),
+      top: feas.ratios.sort((a, b) => b.ratio - a.ratio).slice(0, 3),
       controller: {
         targetRate: +targetRate.toFixed(3),
         error: +error.toFixed(3),
@@ -1017,8 +961,45 @@ export class BanditBouncer<T> implements BerghainBouncer {
     return { ...base, thresholdDebug: this.bandit.getThresholdDebug() }
   }
 
+  private estimateExtraRejections(): number {
+    const unmet = this.getConstraints().filter((c) => !c.isSatisfied())
+    if (!unmet.length) return 0
+
+    // d_i = shortfall / p_i (using empirical freq with a tiny floor)
+    const eps = 1e-6
+    const di = unmet.map((c) => c.getShortfall() / Math.max(eps, c.getEmpiricalFrequency()))
+
+    const sum = di.reduce((a, b) => a + b, 0)
+    const maxv = di.reduce((a, b) => Math.max(a, b), 0)
+
+    // derive gamma from positive correlations among unmet attrs (fallback 0.3)
+    let gamma = 0.3
+    try {
+      const keys = unmet.map((c) => String(c.attribute))
+      const corr = (this.state.game.attributeStatistics?.correlations || {}) as Record<string, Record<string, number>>
+      const pos: number[] = []
+      for (let i = 0; i < keys.length; i++)
+        for (let j = i + 1; j < keys.length; j++) {
+          const v = corr[keys[i]]?.[keys[j]]
+          if (typeof v === 'number' && v > 0) pos.push(v)
+        }
+      if (pos.length) {
+        const avgPos = pos.reduce((a, b) => a + b, 0) / pos.length
+        // map avgPos∈[0,1] to gamma∈[0.2,0.7]
+        gamma = Math.min(0.7, Math.max(0.2, 0.2 + 0.6 * avgPos))
+      }
+    } catch {
+      /* keep default gamma */
+    }
+
+    const drawsNeeded = (1 - gamma) * sum + gamma * maxv
+    const extra = Math.max(0, Math.ceil(drawsNeeded - this.remaining()))
+    return extra
+  }
+
   getOutput() {
-    const finalScore = this.totalRejected
+    const extra = this.estimateExtraRejections()
+    const finalScore = this.totalRejected + extra
     const gameData: GameState<any> = {
       ...this.state,
       timestamp: new Date().toISOString(),

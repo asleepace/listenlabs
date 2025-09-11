@@ -1,7 +1,15 @@
 import https from 'https'
 import http from 'http'
 
-import type { GameStatus, Game, GameState, GameStatusRunning, ScenarioAttributes } from './types'
+import type {
+  GameStatus,
+  Game,
+  GameState,
+  GameStatusRunning,
+  ScenarioAttributes,
+  GameStatusCompleted,
+  GameStatusFailed,
+} from './types'
 import axios from 'axios'
 
 export type ListenLabsConfig = {
@@ -14,6 +22,7 @@ export interface BerghainBouncer {
   admit(next: GameStatusRunning<ScenarioAttributes>): boolean
   getProgress(): any
   getOutput(): any | Promise<any>
+  getOutput(lastStatus: GameStatusCompleted | GameStatusFailed): Promise<any>
 }
 
 class MissingCurrentState extends Error {
@@ -184,7 +193,7 @@ export class Berghain {
 
       if (this.current.status.status === 'failed') {
         console.warn('====================== ❌ ======================')
-        prettyPrint(this.bouncer.getOutput())
+        console.log(this.bouncer.getOutput(this.current.status))
         console.log(this.bouncer.getProgress())
         prettyPrint(this.current.status)
         return this
@@ -192,7 +201,7 @@ export class Berghain {
 
       if (this.current.status.status === 'completed') {
         console.warn('====================== ✅ ======================')
-        prettyPrint(this.bouncer.getOutput())
+        console.log(this.bouncer.getOutput(this.current.status))
         console.log(this.bouncer.getProgress())
         prettyPrint(this.current.status)
         return this
