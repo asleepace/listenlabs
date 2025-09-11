@@ -957,7 +957,9 @@ export class BanditBouncer<T> implements BerghainBouncer {
     const base = {
       model: CFG.MODEL_VERSION,
       pretrained: this.pretrained,
+      progress: (Math.round((this.totalAdmitted / 1_000) * 100) / 100).toFixed(2) + '%',
       attributes: this.getConstraints().map((c) => ({
+        total: `${c.admitted}/${c.minRequired} (${Math.round((c.admitted / c.minRequired) * 1000) / 10}%)`,
         attribute: c.attribute,
         admitted: c.admitted,
         required: c.minRequired,
