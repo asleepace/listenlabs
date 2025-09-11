@@ -1,8 +1,8 @@
 {
-  "gameId": "8a4f2fd5-13b4-4fbd-a8eb-91c1691249b6",
-  "finalScore": 5868,
+  "gameId": "bfdd7190-ed8a-48b0-99e3-31d1f43fcb90",
+  "finalScore": 6308,
   "totalAdmitted": 999,
-  "totalRejected": 5868,
-  "admitRate": 0.20054347814786813,
-  "threshold": 0.6012946302399858
+  "totalRejected": 6308,
+  "admitRate": 0.8543946292534899,
+  "threshold": 2.9366017978674845
 }
