@@ -10,10 +10,10 @@ import { dump } from './utils/dump'
    ========================= */
 const CFG = {
   // Included on persisted data to identify models and biases
-  MODEL_VERSION: 1.3,
+  MODEL_VERSION: 1.4,
 
   // Capacity / schedule (flattened target → keeps admit rate steady)
-  TARGET_RATE_BASE: { early: 0.18, mid: 0.18, late: 0.8 },
+  TARGET_RATE_BASE: { early: 0.18, mid: 0.18, late: 0.18 },
   TARGET_RATE_MIN: 0.16,
   TARGET_RISK_PULL: { slope: 0.0, max: 0.0 }, // disabled: pacing is learned via prices
 
@@ -33,6 +33,7 @@ const CFG = {
   // Linear bandit (dimension is determined dynamically)
   BANDIT: {
     eta: 0.15, // learning rate
+    hintEta: 0.12,
     emaBeta: 0.035, // admit-rate EMA
     iBeta: 0.002, // integral smoothing
     weightClamp: [-5, 5] as const,
@@ -51,9 +52,9 @@ const CFG = {
     sigmaFloor: 0.2, // avoid too-tight thresholds early
     warmupDecisions: 300,
     warmupErrCap: 0.25,
-    floorBumpBase: 0.2,
+    floorBumpBase: 0.25,
     floorBumpSlope: 1.25,
-    capacityBiasScale: { early: 0.3, late: 0.6 }, // * used * sigma
+    capacityBiasScale: { early: 0.3, late: 0.8 }, // * used * sigma
     urgencyMax: 0.0, // disabled; prices handle urgency
     ctrlGains: { kP: 1.2, kI: 0.4, boostEdge: 0.25, boostFactor: 1.15 },
   },
@@ -911,7 +912,6 @@ export class BanditBouncer<T> implements BerghainBouncer {
       return person[c.attribute] ? prices[String(c.attribute)] || 0 : 0
     })
 
-    const hintEta = 0.12
     if (priceLabel.some((p) => p > 0)) {
       const hint = Array(this.indicatorCount + 2).fill(0) // +2 for capacity+scarcity alignment
       for (let i = 0; i < this.indicatorCount; i++) hint[i] = priceLabel[i]
@@ -919,7 +919,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
         3,
         priceLabel.reduce((a, b) => a + b, 0)
       ) // clamp to keep stable
-      this.bandit.updateModel(hint, hintEta * hintReward)
+      this.bandit.updateModel(hint, CFG.BANDIT.hintEta * hintReward)
     }
 
     // --- fill-to-capacity: if ALL constraints are satisfied late, just admit ---
