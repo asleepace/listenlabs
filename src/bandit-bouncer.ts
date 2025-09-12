@@ -10,7 +10,7 @@ import { dump } from './utils/dump'
    ========================= */
 const CFG = {
   // Included on persisted data to identify models and biases
-  MODEL_VERSION: 1.6,
+  MODEL_VERSION: 1.7,
 
   // Capacity / schedule (flattened target → keeps admit rate steady)
   TARGET_RATE_BASE: { early: 0.18, mid: 0.18, late: 0.18 },
@@ -52,9 +52,9 @@ const CFG = {
     sigmaFloor: 0.2, // avoid too-tight thresholds early
     warmupDecisions: 300,
     warmupErrCap: 0.25,
-    floorBumpBase: 0.25,
+    floorBumpBase: 0.2,
     floorBumpSlope: 1.25,
-    capacityBiasScale: { early: 0.4, late: 0.9 }, // * used * sigma
+    capacityBiasScale: { early: 0.21, late: 0.51 }, // * used * sigma
     urgencyMax: 0.0, // disabled; prices handle urgency
     ctrlGains: { kP: 1.2, kI: 0.4, boostEdge: 0.25, boostFactor: 1.15 },
   },
@@ -763,16 +763,6 @@ export class BanditBouncer<T> implements BerghainBouncer {
     // capacity
     feats.push(Math.pow(this.usedFrac(), 0.8))
 
-    // rare scarcity feature (if rareKey known), proportional to current scarcity of that rare attr
-    // let rareScarcity = 0
-    // if (this.rareKey) {
-    //   const rare = this.constraints.get(this.rareKey)
-    //   if (rare) {
-    //     rareScarcity = CFG.PRICE.rareScarcityScale * Math.min(3, rare.getScarcity(this.remaining()))
-    //   }
-    // }
-    // feats.push(rareScarcity)
-
     // dynamic scarcity feature: how much this person helps the scarcest *unmet* constraint they cover
     let scarcityBoost = 0
     for (const c of this.getConstraints()) {
@@ -780,18 +770,18 @@ export class BanditBouncer<T> implements BerghainBouncer {
         scarcityBoost = Math.max(scarcityBoost, c.getScarcity(this.remaining()))
       }
     }
-    feats.push(CFG.PRICE.rareScarcityScale * Math.min(3, scarcityBoost))
+    feats.push(CFG.PRICE.rareScarcityScale * Math.min(2.5, scarcityBoost))
 
     return feats
   }
 
   /* --- price-driven reward (no policy gates) --- */
-  private calculateReward(person: Person<T>, admitted: boolean): number {
-    const prices = this.computeShadowPrices()
+  private calculateReward(person: Person<T>, admitted: boolean, prices?: Record<string, number>): number {
+    const p = prices ?? this.computeShadowPrices()
     const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x))
 
     if (!admitted) {
-      const maxPrice = Math.max(0, ...Object.values(prices))
+      const maxPrice = Math.max(0, ...Object.values(p))
       // mild rejection penalty scaled by global urgency (keeps learning signal without spikes)
       return clamp(-0.15 - 0.5 * maxPrice, -1.0, 0)
     }
@@ -799,11 +789,11 @@ export class BanditBouncer<T> implements BerghainBouncer {
     // coverage value
     const attrs = this.getConstraints().map((c) => String(c.attribute))
     const covers = attrs.filter((a) => person[a as keyof T])
-    let reward = covers.reduce((s, a) => s + (prices[a] || 0), 0)
+    let reward = covers.reduce((s, a) => s + (p[a] || 0), 0)
 
     // small synergy for multi-urgent coverage
     if (covers.length >= 2) {
-      const pr = covers.map((a) => prices[a] || 0).sort((x, y) => y - x)
+      const pr = covers.map((a) => p[a] || 0).sort((x, y) => y - x)
       const pairs = Math.min(3, pr.length - 1)
       for (let i = 0; i < pairs; i++) reward += CFG.PRICE.synergy * Math.min(pr[0], pr[i + 1])
     }
@@ -821,7 +811,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
 
   // --- force-finish helper (late-game admit if a person helps close any small gap)
   /** If we're nearly done and this person helps any eligible unmet constraint, admit. */
-  private tryForceFinish(person: Person<T>, features: number[]): boolean {
+  private tryForceFinish(person: Person<T>, features: number[], prices: Record<string, number>): boolean {
     const used = this.usedFrac()
     if (used < CFG.FINISH.enableAtUsed) return false
 
@@ -842,7 +832,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
     if (info.length === 1) {
       const { c } = info[0]
       if (person[c.attribute]) {
-        const reward = this.calculateReward(person, true)
+        const reward = this.calculateReward(person, true, prices)
         this.bandit.updateModel(features, reward)
         this.getConstraints().forEach((k) => k.update(person, true))
         this.totalAdmitted++
@@ -858,7 +848,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
     const eligible = info.filter((x) => x.eligible).sort((a, b) => a.short - b.short)
     for (const e of eligible) {
       if (person[e.c.attribute]) {
-        const reward = this.calculateReward(person, true)
+        const reward = this.calculateReward(person, true, prices)
         this.bandit.updateModel(features, reward)
         this.getConstraints().forEach((k) => k.update(person, true))
         this.totalAdmitted++
@@ -897,8 +887,13 @@ export class BanditBouncer<T> implements BerghainBouncer {
       // Start the gate earlier when scarcity is severe
       const gateStart = feas.max > 300 ? 0.7 : feas.max > 150 ? 0.8 : feas.max > 60 ? 0.9 : 0.95
 
-      if (this.usedFrac() > gateStart && !helpsUnmet) {
-        const reward = this.calculateReward(person, false)
+      if (used > gateStart && !helpsUnmet) {
+        this.log(
+          `gate: used=${used.toFixed(2)} maxR=${feas.max.toFixed(1)} start=${gateStart.toFixed(
+            2
+          )} admitHelp=${helpsUnmet}`
+        )
+        const reward = this.calculateReward(person, false, prices)
         const masked = features.slice()
         for (let i = 0; i < this.indicatorCount; i++) masked[i] = 0
         this.bandit.updateModel(masked, Math.max(CFG.WARMUP.negClampAfter, reward))
@@ -916,9 +911,11 @@ export class BanditBouncer<T> implements BerghainBouncer {
       const most = ratios.sort((a, b) => b.ratio - a.ratio)[0] // { attr, ratio, shortfall, freq }
       const R = most.ratio
       // Only kick in when we’re clearly infeasible on current trajectory
-      const severe = R >= 2.0 || (R >= 1.2 && this.usedFrac() >= 0.75)
-      if (severe && person[most.attr as keyof T]) {
-        const reward = this.calculateReward(person, true)
+      const severe = R >= 2.0 || (R >= 1.2 && used >= 0.75)
+      const helpsCount = unmet.reduce((k, c) => k + (person[c.attribute] ? 1 : 0), 0)
+      const multiHelp = helpsCount >= 2
+      if ((severe || multiHelp) && person[most.attr as keyof T]) {
+        const reward = this.calculateReward(person, true, prices)
         this.bandit.updateModel(features, reward)
         this.getConstraints().forEach((c) => c.update(person, true))
         this.totalAdmitted++
@@ -926,23 +923,6 @@ export class BanditBouncer<T> implements BerghainBouncer {
         this.recordDecision(person, 'admit', reward, this.bandit.getLastRawValue?.() ?? 0, features)
         this.bandit.updateController(true)
         return true
-      }
-    }
-
-    if (used > 0.95 && unmet.length) {
-      const helpsUnmet = unmet.some((c) => person[c.attribute])
-      if (!helpsUnmet) {
-        // force a reject unless all constraints are already satisfied
-        const reward = this.calculateReward(person, false)
-        // masked update like your normal rejection path:
-        const masked = features.slice()
-        for (let i = 0; i < this.indicatorCount; i++) masked[i] = 0
-        this.bandit.updateModel(masked, Math.max(CFG.WARMUP.negClampAfter, reward))
-        this.getConstraints().forEach((c) => c.update(person, false))
-        this.totalRejected++
-        this.recordDecision(person, 'reject', reward, 0, features)
-        this.bandit.updateController(false)
-        return false
       }
     }
 
@@ -977,13 +957,13 @@ export class BanditBouncer<T> implements BerghainBouncer {
     }
 
     // Small endgame helper only
-    if (this.tryForceFinish(person, features)) return true
+    if (this.tryForceFinish(person, features, prices)) return true
 
     // Optional epsilon-admit very early
     if (used < CFG.EXPLORE.epsUntilUsed) {
       const hasAny = this.getConstraints().some((c) => person[c.attribute])
       if (hasAny && Math.random() < CFG.EXPLORE.epsAdmit) {
-        const reward = this.calculateReward(person, true)
+        const reward = this.calculateReward(person, true, prices)
         this.bandit.updateModel(features, reward)
         this.getConstraints().forEach((c) => c.update(person, true))
         this.totalAdmitted++
@@ -1000,7 +980,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
 
     // learning with warmup rules
     const inWarmup = used < CFG.WARMUP.usedMax || this.bandit.admitRateEma < CFG.WARMUP.minEma
-    const reward = this.calculateReward(person, shouldAdmit)
+    const reward = this.calculateReward(person, shouldAdmit, prices)
     if (shouldAdmit) {
       this.bandit.updateModel(features, reward)
     } else if (!inWarmup) {
