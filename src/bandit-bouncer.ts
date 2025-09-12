@@ -943,6 +943,19 @@ export class BanditBouncer<T> implements BerghainBouncer {
       const hintReward = Math.min(3, sum)
       if (sum > 1e-6) for (let i = 0; i < this.indicatorCount; i++) hint[i] *= hintReward / sum
       this.bandit.updateModel(hint, CFG.BANDIT.hintEta)
+      const ahead = Array(this.indicatorCount + 2).fill(0)
+      let anyAhead = false
+      const used = this.usedFrac()
+      this.getConstraints().forEach((c, i) => {
+        if (!person[c.attribute]) return
+        // satisfied OR ahead of pace relative to capacity
+        const paceLead = Math.max(0, c.getProgress() - used - CFG.PRICE.paceSlack)
+        if (c.isSatisfied() || paceLead > 0) {
+          ahead[i] = -Math.min(0.5, 0.5 * (c.isSatisfied() ? 1 : paceLead)) // small, bounded
+          anyAhead = true
+        }
+      })
+      if (anyAhead) this.bandit.updateModel(ahead, 0.5 * CFG.BANDIT.hintEta)
     }
 
     // --- fill-to-capacity: if ALL constraints are satisfied late, just admit ---
