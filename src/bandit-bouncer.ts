@@ -10,7 +10,7 @@ import { dump } from './utils/dump'
    ========================= */
 const CFG = {
   // Included on persisted data to identify models and biases
-  MODEL_VERSION: 2.1,
+  MODEL_VERSION: 2.2,
 
   // Display / reporting
   UI: {
@@ -47,7 +47,7 @@ const CFG = {
       { ratio: 0.0, start: 0.95 },
     ],
     helperBonus: 0.35, // raw-value bonus if helps worst-lag attr
-    nonHelperMalus: 0.25, // raw-value malus if doesn’t help worst-lag attr late
+    nonHelperMalus: 0.35, // raw-value malus if doesn’t help worst-lag attr late
     lateCutoverUsed: 0.7, // start applying helper/malus around here
     gateLagSlack: 0.02, // consider "helps lagging" if progress < used - slack
     scarcityCap: 6.0, // cap for scarcity/ratio to avoid runaway prices
@@ -75,6 +75,7 @@ const CFG = {
     warmStartDecay: 0.9, // decay for history warm start
     updateClamp: [-50, 50] as const, // clamp for per-update reward
     softClip: 8, // tanh soft clip for decision series
+    priorScale: { min: 0.3, max: 1.4 }, // clamps how much we scale up/down priors
   },
 
   // Thresholding (robust quantile + PI controller)
@@ -122,6 +123,7 @@ const CFG = {
   HINTS: {
     synergyPairCap: 3, // pairs to include for synergy
     antiHintScale: 0.6, // strength for ahead-of-pace anti-hint
+    abundance: { scale: 0.25, max: 0.6 }, // mild nudge against over-abundant attrs
   },
 
   STATS: {
@@ -143,7 +145,7 @@ const CFG = {
 
   // Learning warmup
   WARMUP: {
-    usedMax: 0.15,
+    usedMax: 0.1,
     minEma: 0.02,
     negClampAfter: -0.3, // clamp negative reward updates after warmup
   },
@@ -260,6 +262,15 @@ class Constraint<T> {
   }
   getSeenTotal(): number {
     return this.seenTotal
+  }
+
+  // in Constraint<T>
+  getTargetShare(): number {
+    return this.minRequired / this.config.MAX_CAPACITY
+  }
+  getSupplySkew(): number {
+    const ef = this.getEmpiricalFrequency() || this.frequency || 1e-6
+    return ef / Math.max(1e-6, this.getTargetShare()) // >1 means over-abundant
   }
 
   getEmpiricalFrequency(): number {
@@ -768,7 +779,14 @@ export class BanditBouncer<T> implements BerghainBouncer {
 
   private buildPriorWeights(dim: number, indicatorCount: number): number[] {
     const p: number[] = []
-    for (let i = 0; i < indicatorCount; i++) p.push(CFG.BANDIT.indicatorPrior)
+    const cs = this.getConstraints()
+    for (let i = 0; i < indicatorCount; i++) {
+      const c = cs[i]
+      const skew = c?.getSupplySkew?.() ?? 1
+      // if skew > 1 (over-abundant), scale prior down; if < 1, scale up a bit
+      const scale = Math.max(CFG.BANDIT.priorScale.min, Math.min(CFG.BANDIT.priorScale.max, 1 / skew))
+      p.push(CFG.BANDIT.indicatorPrior * scale)
+    }
     p.push(CFG.BANDIT.capacityPrior)
     p.push(CFG.BANDIT.scarcityPrior)
     while (p.length < dim) p.push(0)
@@ -1067,12 +1085,28 @@ export class BanditBouncer<T> implements BerghainBouncer {
       if (sum > 1e-6) for (let i = 0; i < this.indicatorCount; i++) hint[i] *= hintReward / sum
       this.bandit.updateModel(hint, CFG.BANDIT.hintEta)
 
+      const abundance = Array(this.indicatorCount + 2).fill(0)
+      let any = false
+      this.getConstraints().forEach((c, i) => {
+        if (!person[c.attribute]) return
+        const skew = c.getSupplySkew?.() ?? 1
+        const lagging = c.getProgress() < usedNow - CFG.PACE.lagSlack
+        if (skew > 1 && !lagging) {
+          const d = Math.min(CFG.HINTS.abundance.max, CFG.HINTS.abundance.scale * (skew - 1))
+          abundance[i] = -d
+          any = true
+        }
+      })
+      if (any) this.bandit.updateModel(abundance, CFG.BANDIT.hintEta)
+
       // ahead-of-pace anti-hint
       const ahead = Array(this.indicatorCount + 2).fill(0)
       let anyAhead = false
       this.getConstraints().forEach((c, i) => {
         if (!person[c.attribute]) return
-        const paceLead = Math.max(0, c.getProgress() - used - CFG.PRICE.paceSlack)
+        const skew = c.getSupplySkew?.() ?? 1
+        const slackAdj = Math.max(0, CFG.PRICE.paceSlack - 0.5 * Math.max(0, skew - 1) * CFG.PRICE.paceSlack)
+        const paceLead = Math.max(0, c.getProgress() - used - slackAdj)
         if (c.isSatisfied() || paceLead > 0) {
           ahead[i] = -Math.min(0.5, 0.5 * (c.isSatisfied() ? 1 : paceLead))
           anyAhead = true
