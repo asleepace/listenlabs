@@ -10,7 +10,7 @@ import { dump } from './utils/dump'
    ========================= */
 const CFG = {
   // Included on persisted data to identify models and biases
-  MODEL_VERSION: 1.4,
+  MODEL_VERSION: 1.6,
 
   // Capacity / schedule (flattened target → keeps admit rate steady)
   TARGET_RATE_BASE: { early: 0.18, mid: 0.18, late: 0.18 },
@@ -22,18 +22,18 @@ const CFG = {
     priorTrue: 2, // Beta prior for frequency (alpha)
     priorTotal: 8, // Beta prior total (alpha+beta)
     k0: 0.8, // optimism scale at start (UCB), fades with used (range 0.6–1.2)
-    slope: 14.0, // squashing slope → price jump as need > supply
-    synergy: 0.2, // small bonus for covering multiple urgent attrs
+    slope: 20.0, // squashing slope → price jump as need > supply
+    synergy: 0.25, // small bonus for covering multiple urgent attrs
     paceSlack: 0.02, // allow a tiny progress lag before braking
-    paceBrake: 0.4, // gentle brake when ahead of pace (keeps rate flat)
-    overshootPenaltyMax: 2.0, // cap on overshoot tax per attribute (per-decision)
-    rareScarcityScale: 1.0, // scale for the “rarest attr” scarcity feature
+    paceBrake: 0.6, // gentle brake when ahead of pace (keeps rate flat)
+    overshootPenaltyMax: 4.0, // cap on overshoot tax per attribute (per-decision)
+    rareScarcityScale: 1.5, // scale for the “rarest attr” scarcity feature
   },
 
   // Linear bandit (dimension is determined dynamically)
   BANDIT: {
     eta: 0.15, // learning rate
-    hintEta: 0.12,
+    hintEta: 0.18,
     emaBeta: 0.035, // admit-rate EMA
     iBeta: 0.002, // integral smoothing
     weightClamp: [-5, 5] as const,
@@ -54,7 +54,7 @@ const CFG = {
     warmupErrCap: 0.25,
     floorBumpBase: 0.25,
     floorBumpSlope: 1.25,
-    capacityBiasScale: { early: 0.3, late: 0.8 }, // * used * sigma
+    capacityBiasScale: { early: 0.4, late: 0.9 }, // * used * sigma
     urgencyMax: 0.0, // disabled; prices handle urgency
     ctrlGains: { kP: 1.2, kI: 0.4, boostEdge: 0.25, boostFactor: 1.15 },
   },
@@ -888,8 +888,47 @@ export class BanditBouncer<T> implements BerghainBouncer {
         .map((t) => t[0])
     )
 
-    // just before making the bandit decision, after you computed `used` and `prices`
+    // inside admit(), right after you computed `used`, `prices` and have `person`
+    const feas = this.getFeasibilityRatios()
     const unmet = this.getConstraints().filter((c) => !c.isSatisfied())
+    if (unmet.length) {
+      const helpsUnmet = unmet.some((c) => person[c.attribute])
+
+      // Start the gate earlier when scarcity is severe
+      const gateStart = feas.max > 300 ? 0.7 : feas.max > 150 ? 0.8 : feas.max > 60 ? 0.9 : 0.95
+
+      if (this.usedFrac() > gateStart && !helpsUnmet) {
+        const reward = this.calculateReward(person, false)
+        const masked = features.slice()
+        for (let i = 0; i < this.indicatorCount; i++) masked[i] = 0
+        this.bandit.updateModel(masked, Math.max(CFG.WARMUP.negClampAfter, reward))
+        this.getConstraints().forEach((c) => c.update(person, false))
+        this.totalRejected++
+        this.recordDecision(person, 'reject', reward, 0, features)
+        this.bandit.updateController(false)
+        return false
+      }
+    }
+
+    if (unmet.length) {
+      const { ratios } = feas
+      // ratios are already shortfall / (remaining * freq)
+      const most = ratios.sort((a, b) => b.ratio - a.ratio)[0] // { attr, ratio, shortfall, freq }
+      const R = most.ratio
+      // Only kick in when we’re clearly infeasible on current trajectory
+      const severe = R >= 2.0 || (R >= 1.2 && this.usedFrac() >= 0.75)
+      if (severe && person[most.attr as keyof T]) {
+        const reward = this.calculateReward(person, true)
+        this.bandit.updateModel(features, reward)
+        this.getConstraints().forEach((c) => c.update(person, true))
+        this.totalAdmitted++
+        this.bandit.totalAdmitted++
+        this.recordDecision(person, 'admit', reward, this.bandit.getLastRawValue?.() ?? 0, features)
+        this.bandit.updateController(true)
+        return true
+      }
+    }
+
     if (used > 0.95 && unmet.length) {
       const helpsUnmet = unmet.some((c) => person[c.attribute])
       if (!helpsUnmet) {
