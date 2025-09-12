@@ -810,6 +810,13 @@ export class BanditBouncer<T> implements BerghainBouncer {
       if (person[c.attribute] && c.isSatisfied()) {
         const over = (c.admitted - c.minRequired) / Math.max(1, c.minRequired)
         reward -= Math.min(CFG.PRICE.overshootPenaltyMax, 1.0 + Math.max(0, over))
+      } else if (person[c.attribute]) {
+        const usedNow = this.usedFrac()
+        const paceLead = Math.max(0, c.getProgress() - usedNow - CFG.PRICE.paceSlack)
+        if (paceLead > 0) {
+          // small, bounded nudge against ahead-of-pace even before “satisfied”
+          reward -= Math.min(0.75, 0.5 * paceLead)
+        }
       }
     }
 
