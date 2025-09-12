@@ -10,7 +10,7 @@ import { dump } from './utils/dump'
    ========================= */
 const CFG = {
   // Included on persisted data to identify models and biases
-  MODEL_VERSION: 1.7,
+  MODEL_VERSION: 1.8,
 
   // Capacity / schedule (flattened target → keeps admit rate steady)
   TARGET_RATE_BASE: { early: 0.18, mid: 0.18, late: 0.18 },
@@ -33,7 +33,7 @@ const CFG = {
   // Linear bandit (dimension is determined dynamically)
   BANDIT: {
     eta: 0.15, // learning rate
-    hintEta: 0.18,
+    hintEta: 0.14,
     emaBeta: 0.035, // admit-rate EMA
     iBeta: 0.002, // integral smoothing
     weightClamp: [-5, 5] as const,
@@ -52,7 +52,7 @@ const CFG = {
     sigmaFloor: 0.2, // avoid too-tight thresholds early
     warmupDecisions: 300,
     warmupErrCap: 0.25,
-    floorBumpBase: 0.2,
+    floorBumpBase: 0.25,
     floorBumpSlope: 1.25,
     capacityBiasScale: { early: 0.21, late: 0.51 }, // * used * sigma
     urgencyMax: 0.0, // disabled; prices handle urgency
@@ -490,17 +490,20 @@ class LinearBandit {
   selectAction(features: number[]) {
     this.decisionCount++
     this.updateWeights()
-    const rawValue = this.predictValue(features)
-    this.pushRaw(rawValue)
-    const threshold = this.calculateAdaptiveThreshold()
-    this.lastThreshold = threshold
-    this.lastRawValue = rawValue
 
     // slightly larger noise early to encourage exploration
+    const rawValue = this.predictValue(features)
     const base = 0.2
     const decay = Math.min(1, this.decisionCount / 400)
     const boost = this.decisionCount < CFG.BANDIT.earlyNoiseBoostDecisions ? 1.5 : 1.0
     const noise = (Math.random() - 0.5) * (base * boost * (1 - 0.5 * decay))
+    const decisionVar = rawValue + noise
+    this.pushRaw(decisionVar)
+    const threshold = this.calculateAdaptiveThreshold()
+
+    // set these for debugging purposes
+    this.lastThreshold = threshold
+    this.lastRawValue = rawValue
 
     const action = rawValue + noise > threshold ? 'admit' : 'reject'
     return { action, value: rawValue } as const
@@ -934,11 +937,12 @@ export class BanditBouncer<T> implements BerghainBouncer {
     if (priceLabel.some((p) => p > 0)) {
       const hint = Array(this.indicatorCount + 2).fill(0) // +2 for capacity+scarcity alignment
       for (let i = 0; i < this.indicatorCount; i++) hint[i] = priceLabel[i]
-      const hintReward = Math.min(
-        3,
-        priceLabel.reduce((a, b) => a + b, 0)
-      ) // clamp to keep stable
-      this.bandit.updateModel(hint, CFG.BANDIT.hintEta * hintReward)
+
+      // Normalize hint so L1 equals the clamped sum (keeps updates stable)
+      const sum = priceLabel.reduce((a, b) => a + b, 0)
+      const hintReward = Math.min(3, sum)
+      if (sum > 1e-6) for (let i = 0; i < this.indicatorCount; i++) hint[i] *= hintReward / sum
+      this.bandit.updateModel(hint, CFG.BANDIT.hintEta)
     }
 
     // --- fill-to-capacity: if ALL constraints are satisfied late, just admit ---
