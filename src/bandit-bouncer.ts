@@ -27,9 +27,8 @@ const CFG = {
     priorTrue: 2, // Beta prior for frequency (alpha)
     priorTotal: 8, // Beta prior total (alpha+beta)
     k0: 0.8, // optimism scale at start (UCB), fades with used (range 0.6–1.2)
-    slope: 20.0, // squashing slope → price jump as need > supply
+    slope: 16.0, // squashing slope → price jump as need > supply
     synergy: 0.25, // small bonus for covering multiple urgent attrs
-    synergyPairsMax: 3, // pairs considered for synergy bump
     paceSlack: 0.02, // allow a tiny progress gap before any pace nudges
     paceBrake: 0.6, // reduce price when ahead of pace (keeps rate flat)
     paceBoost: 0.7, // increase price when behind pace (keeps bars together)
@@ -56,9 +55,12 @@ const CFG = {
 
   // Linear bandit (dimension is determined dynamically)
   BANDIT: {
+    warmStartN: 100, // was hardcoded slice(-100)
+    noiseBase: 0.2, // exploration noise base
+    noiseDecaySteps: 400, // steps until half-decayed
+
     eta: 0.15, // learning rate
     hintEta: 0.14, // positive hint learning rate
-    antiHintScale: 0.6, // multiplier for negative (ahead-of-pace) hints
     emaBeta: 0.035, // admit-rate EMA
     iBeta: 0.002, // integral smoothing
     weightClamp: [-5, 5] as const,
@@ -79,6 +81,7 @@ const CFG = {
   THRESH: {
     sigmaFloor: 0.2, // avoid too-tight thresholds early
     madToSigma: 1.4826, // MAD→sigma constant
+    clipSigma: 3.0, // bound thresholds within ±clipSigma σ
     warmupDecisions: 300,
     warmupErrCap: 0.25,
     floorBumpBase: 0.25,
@@ -123,7 +126,6 @@ const CFG = {
 
   STATS: {
     softClipS: 8, // tanh soft clip scale for recentValues
-    madToSigma: 1.4826, // MAD→σ constant
   },
 
   // Fill-to-capacity helper when all constraints are satisfied
@@ -369,7 +371,7 @@ class LinearBandit {
 
   /** allow warm start without exposing a private method */
   public warmStartFromHistory(decisions: DecisionRecord[]) {
-    const valid = decisions.filter((d) => d.features?.length === this.featureDim).slice(-100)
+    const valid = decisions.filter((d) => d.features?.length === this.featureDim).slice(-CFG.BANDIT.warmStartN)
     valid.forEach((d, idx) => {
       const age = valid.length - idx
       const w = Math.pow(CFG.BANDIT.warmStartDecay, age)
@@ -525,8 +527,8 @@ class LinearBandit {
       thr = Math.max(thr, med + bump * sigma)
     }
 
-    const lo = med - 3 * sigma,
-      hi = med + 3 * sigma
+    const lo = med - CFG.THRESH.clipSigma * sigma
+    const hi = med + CFG.THRESH.clipSigma * sigma
     if (!Number.isFinite(thr)) thr = med
     const final = Math.max(lo, Math.min(hi, thr))
 
@@ -549,14 +551,21 @@ class LinearBandit {
     return final
   }
 
+  private assertFeatureDim(f: number[]) {
+    if (f.length !== this.indicatorCount + 2) {
+      throw new Error(`Feature length ${f.length} != expected ${this.indicatorCount + 2}`)
+    }
+  }
+
   // in class LinearBandit
   selectAction(features: number[], bias = 0) {
+    this.assertFeatureDim(features)
     this.decisionCount++
     this.updateWeights()
 
     const rawValue = this.predictValue(features) + bias // <-- add bias here
-    const base = 0.2
-    const decay = Math.min(1, this.decisionCount / 400)
+    const base = CFG.BANDIT.noiseBase
+    const decay = Math.min(1, this.decisionCount / CFG.BANDIT.noiseDecaySteps)
     const boost = this.decisionCount < CFG.BANDIT.earlyNoiseBoostDecisions ? 1.5 : 1.0
     const noise = (Math.random() - 0.5) * (base * boost * (1 - 0.5 * decay))
     const decisionVar = rawValue + noise
@@ -603,6 +612,7 @@ class LinearBandit {
   }
 
   updateModel(features: number[], reward: number) {
+    this.assertFeatureDim(features)
     const [lo, hi] = CFG.BANDIT.updateClamp
     const r = Math.max(lo, Math.min(hi, reward))
     const n = Math.min(features.length, this.weights.length)
@@ -653,7 +663,6 @@ export class BanditBouncer<T> implements BerghainBouncer {
   private decisions: DecisionRecord[] = []
   private logs: string[] = []
   private indicatorCount = 0 // number of constraint indicators used in features
-  private rareKey: keyof T | null = null // rarest attribute key (unused but kept for compatibility)
   private pretrained = false
 
   constructor(public state: GameState, public config: Config) {
@@ -672,20 +681,25 @@ export class BanditBouncer<T> implements BerghainBouncer {
   }
 
   private getFeasibilityRatios() {
+    const used = this.usedFrac()
     const remaining = this.remaining()
     const ratios = this.getConstraints()
       .filter((c) => !c.isSatisfied())
       .map((c) => {
-        const f = c.getEmpiricalFrequency() || c.frequency
+        const ef = c.getEmpiricalFrequency() || c.frequency || 1e-6
+        const expect = Math.max(1e-6, remaining * ef)
+        const lag = this.paceLag(c, used) // ← pace lag (target - admitted at current used)
         return {
           attr: String(c.attribute),
-          ratio: c.getShortfall() / Math.max(1e-6, remaining * f),
-          shortfall: c.getShortfall(),
-          freq: f,
+          ratio: lag / expect, // pace-based ratio
+          lag, // absolute lag (people)
+          freq: ef,
         }
       })
-    const max = ratios.reduce((m, r) => Math.max(m, r.ratio), 0)
-    const most = ratios.slice().sort((a, b) => b.ratio - a.ratio)[0]?.attr
+      .sort((a, b) => b.ratio - a.ratio)
+
+    const max = ratios.length ? ratios[0].ratio : 0
+    const most = ratios.length ? (ratios[0].attr as string) : undefined
     return { max, mostCritical: most, ratios }
   }
 
@@ -728,11 +742,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
     // identify rarest attribute by prior frequency (fallback to first)
     const all = this.getConstraints()
     const rare = all.slice().sort((a, b) => (a.frequency ?? 1) - (b.frequency ?? 1))[0]
-    this.rareKey = (rare?.attribute as keyof T) ?? null
     this.indicatorCount = all.length
-    if (this.indicatorCount === 0) {
-      this.rareKey = null
-    }
   }
 
   async initializeLearningData() {
@@ -1173,6 +1183,9 @@ export class BanditBouncer<T> implements BerghainBouncer {
         .sort((a, b) => b[1] - a[1])
         .slice(0, CFG.UI.TOPK_ATTRS)
       this.log(`prices=${peek.map(([k, v]) => `${k}:${v.toFixed(2)}`).join(',')}`)
+
+      const { attr: wlAttr, ratio: wlR, lag: wlLag } = this.worstLagInfo()
+      this.log(`worstLag=${String(wlAttr)} r=${wlR.toFixed(2)} lag=${wlLag}`)
     }
 
     const base = {
@@ -1203,7 +1216,12 @@ export class BanditBouncer<T> implements BerghainBouncer {
         maxRatio: feas.max,
         mostCritical: feas.mostCritical,
       },
-      top: feas.ratios.sort((a, b) => b.ratio - a.ratio).slice(0, CFG.UI.TOPK_ATTRS),
+      top: feas.ratios.slice(0, CFG.UI.TOPK_ATTRS).map((r) => ({
+        attr: r.attr,
+        ratio: r.ratio,
+        lag: r.lag,
+        freq: r.freq,
+      })),
       controller: {
         targetRate: +targetRate.toFixed(3),
         error: +error.toFixed(3),
