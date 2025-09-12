@@ -10,7 +10,7 @@ import { dump } from './utils/dump'
    ========================= */
 const CFG = {
   // Included on persisted data to identify models and biases
-  MODEL_VERSION: 1.8,
+  MODEL_VERSION: 1.9,
 
   // Capacity / schedule (flattened target → keeps admit rate steady)
   TARGET_RATE_BASE: { early: 0.18, mid: 0.18, late: 0.18 },
@@ -26,6 +26,7 @@ const CFG = {
     synergy: 0.25, // small bonus for covering multiple urgent attrs
     paceSlack: 0.02, // allow a tiny progress lag before braking
     paceBrake: 0.6, // gentle brake when ahead of pace (keeps rate flat)
+    paceBoost: 0.7, // NEW: how hard to boost when behind pace
     overshootPenaltyMax: 4.0, // cap on overshoot tax per attribute (per-decision)
     rareScarcityScale: 1.5, // scale for the “rarest attr” scarcity feature
   },
@@ -54,7 +55,7 @@ const CFG = {
     warmupErrCap: 0.25,
     floorBumpBase: 0.25,
     floorBumpSlope: 1.25,
-    capacityBiasScale: { early: 0.21, late: 0.51 }, // * used * sigma
+    capacityBiasScale: { early: 0.32, late: 0.51 }, // * used * sigma
     urgencyMax: 0.0, // disabled; prices handle urgency
     ctrlGains: { kP: 1.2, kI: 0.4, boostEdge: 0.25, boostFactor: 1.15 },
   },
@@ -743,8 +744,11 @@ export class BanditBouncer<T> implements BerghainBouncer {
       const paceDeficit = Math.max(0, c.getProgress() - used - CFG.PRICE.paceSlack)
       const paceBrake = CFG.PRICE.paceBrake * paceDeficit
 
+      const paceLag = Math.max(0, used - c.getProgress() - CFG.PRICE.paceSlack)
+      const paceBoost = CFG.PRICE.paceBoost * paceLag
+
       const S = (x: number) => 1 / (1 + Math.exp(-CFG.PRICE.slope * x))
-      const price = Math.max(0, S(gap) - paceBrake)
+      const price = Math.max(0, Math.min(1, S(gap) - paceBrake + paceBoost))
 
       prices[String(c.attribute)] = price
     }
@@ -889,8 +893,8 @@ export class BanditBouncer<T> implements BerghainBouncer {
 
       // Start the gate earlier when scarcity is severe
       const gateStart = feas.max > 300 ? 0.7 : feas.max > 150 ? 0.8 : feas.max > 60 ? 0.9 : 0.95
-
-      if (used > gateStart && !helpsUnmet) {
+      const helpsLagging = unmet.some((c) => person[c.attribute] && c.getProgress() < used - 0.02)
+      if (used > gateStart && !(helpsUnmet && helpsLagging)) {
         this.log(
           `gate: used=${used.toFixed(2)} maxR=${feas.max.toFixed(1)} start=${gateStart.toFixed(
             2
@@ -911,7 +915,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
     if (unmet.length) {
       const { ratios } = feas
       // ratios are already shortfall / (remaining * freq)
-      const most = ratios.sort((a, b) => b.ratio - a.ratio)[0] // { attr, ratio, shortfall, freq }
+      const most = ratios.slice().sort((a, b) => b.ratio - a.ratio)[0]
       const R = most.ratio
       // Only kick in when we’re clearly infeasible on current trajectory
       const severe = R >= 2.0 || (R >= 1.2 && used >= 0.75)
@@ -936,16 +940,23 @@ export class BanditBouncer<T> implements BerghainBouncer {
 
     if (priceLabel.some((p) => p > 0)) {
       const hint = Array(this.indicatorCount + 2).fill(0) // +2 for capacity+scarcity alignment
-      for (let i = 0; i < this.indicatorCount; i++) hint[i] = priceLabel[i]
+      // Scale by pace lag (progress behind used)
+      const usedNow = this.usedFrac()
+      const scaled = priceLabel.slice()
+      this.getConstraints().forEach((c, i) => {
+        if (!scaled[i]) return
+        const lag = Math.max(0, usedNow - c.getProgress() - CFG.PRICE.paceSlack)
+        // 1 + lag keeps the scale gentle but effective (lag ∈ [0,1])
+        scaled[i] *= 1 + lag
+      })
+      for (let i = 0; i < this.indicatorCount; i++) hint[i] = scaled[i]
 
-      // Normalize hint so L1 equals the clamped sum (keeps updates stable)
-      const sum = priceLabel.reduce((a, b) => a + b, 0)
+      const sum = scaled.reduce((a, b) => a + b, 0)
       const hintReward = Math.min(3, sum)
       if (sum > 1e-6) for (let i = 0; i < this.indicatorCount; i++) hint[i] *= hintReward / sum
       this.bandit.updateModel(hint, CFG.BANDIT.hintEta)
       const ahead = Array(this.indicatorCount + 2).fill(0)
       let anyAhead = false
-      const used = this.usedFrac()
       this.getConstraints().forEach((c, i) => {
         if (!person[c.attribute]) return
         // satisfied OR ahead of pace relative to capacity
@@ -955,7 +966,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
           anyAhead = true
         }
       })
-      if (anyAhead) this.bandit.updateModel(ahead, 0.5 * CFG.BANDIT.hintEta)
+      if (anyAhead) this.bandit.updateModel(ahead, 0.6 * CFG.BANDIT.hintEta)
     }
 
     // --- fill-to-capacity: if ALL constraints are satisfied late, just admit ---
