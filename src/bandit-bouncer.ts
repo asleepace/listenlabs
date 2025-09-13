@@ -10,7 +10,7 @@ import { dump } from './utils/dump'
    ========================= */
 const CFG = {
   // Included on persisted data to identify models and biases
-  MODEL_VERSION: 2.7,
+  MODEL_VERSION: 2.8,
 
   // Display / reporting
   UI: {
@@ -30,26 +30,26 @@ const CFG = {
     slope: 18.0, // squashing slope → price jump as need > supply
     synergy: 0.12, // small bonus for covering multiple urgent attrs
     paceSlack: 0.02, // allow a tiny progress gap before any pace nudges
-    paceBrake: 0.7, // reduce price when ahead of pace (keeps rate flat)
+    paceBrake: 0.85, // reduce price when ahead of pace (keeps rate flat)
     aheadPenalty: { scale: 1.0, max: 1.3 }, // admit-time nudge vs ahead-of-pace even before satisfied
-    paceBoost: 0.95, // increase price when behind pace (keeps bars together)
+    paceBoost: 1.05, // increase price when behind pace (keeps bars together)
     overshootPenaltyMax: 4.0, // cap on overshoot tax per attribute (per-decision)
-    rareScarcityScale: 1.8, // // multiplier for scarcity feature strength
+    rareScarcityScale: 2.0, // // multiplier for scarcity feature strength
   },
 
   PACE: {
     lagSlack: 0.02, // ignore tiny lag noise
     gateLagLateCushion: 0.01,
     worstLagGateStart: [
-      { ratio: 3.0, start: 0.68 }, // ↓ from 0.70
-      { ratio: 2.0, start: 0.72 }, // NEW row (was jumping to 1.5→0.80)
-      { ratio: 1.5, start: 0.78 }, // ↓ from 0.80
-      { ratio: 0.7, start: 0.88 }, // ↓ from 0.90
-      { ratio: 0.0, start: 0.95 },
+      { ratio: 3.0, start: 0.62 }, // was 0.68
+      { ratio: 2.0, start: 0.66 }, // was 0.72
+      { ratio: 1.5, start: 0.72 }, // was 0.78
+      { ratio: 0.7, start: 0.82 }, // was 0.88
+      { ratio: 0.0, start: 0.92 }, // was 0.95
     ],
-    helperBonus: 0.55, // raw-value bonus if helps worst-lag attr
-    nonHelperMalus: 0.35, // raw-value malus if doesn’t help worst-lag attr late
-    lateCutoverUsed: 0.6, // start applying helper/malus around here
+    helperBonus: 0.6, // was 0.55
+    nonHelperMalus: 0.45, // was 0.35
+    lateCutoverUsed: 0.52, // was 0.60 → bias starts midgame
     gateLagSlack: 0.03, // consider "helps lagging" if progress < used - slack
     scarcityCap: 6.5, // cap for scarcity/ratio to avoid runaway prices
   },
@@ -57,7 +57,7 @@ const CFG = {
   // Linear bandit (dimension is determined dynamically)
   BANDIT: {
     warmStartN: 100, // was hardcoded slice(-100)
-    noiseBase: 0.2, // exploration noise base
+    noiseBase: 0.18, // exploration noise base
     noiseDecaySteps: 400, // steps until half-decayed
 
     eta: 0.15, // learning rate
@@ -69,7 +69,7 @@ const CFG = {
     scarcityFloor: 0.0, // scarcity weight ≥ this
     initRecentValues: { n: 60, start: 0.3, step: 0.02 },
     recentCap: 500,
-    earlyNoiseBoostDecisions: 1200, // more exploration early
+    earlyNoiseBoostDecisions: 1000, // more exploration early
     indicatorPrior: 1.8, // prior for each constraint indicator
     capacityPrior: -0.8, // prior for capacity feature
     scarcityPrior: 1.5,
@@ -81,15 +81,15 @@ const CFG = {
 
   // Thresholding (robust quantile + PI controller)
   THRESH: {
-    sigmaFloor: 0.2, // avoid too-tight thresholds early
+    sigmaFloor: 0.3, // was 0.20
+    floorBumpBase: 0.3, // was 0.25
+    floorBumpSlope: 1.8, // was 1.25
     madToSigma: 1.4826, // MAD→sigma constant
     clipSigma: 3.0, // bound thresholds within ±clipSigma σ
     warmupDecisions: 300,
     warmupErrCap: 0.25,
-    floorBumpBase: 0.25,
-    floorBumpSlope: 1.25,
     capacityBiasScale: { early: 0.28, late: 0.51 }, // early ↓ from 0.32
-    ctrlGains: { kP: 1.3, kI: 0.45, boostEdge: 0.25, boostFactor: 1.15 }, // slightly snappier
+    ctrlGains: { kP: 1.6, kI: 0.55, boostEdge: 0.12, boostFactor: 1.2 }, // snappier, kicks in earlier
   },
 
   // Feasibility-based late gate
@@ -153,7 +153,7 @@ const CFG = {
   },
 
   // Optional epsilon-admit very early (break stalemates)
-  EXPLORE: { epsAdmit: 0.03, epsUntilUsed: 0.08 },
+  EXPLORE: { epsAdmit: 0.02, epsUntilUsed: 0.08 }, // trim lucky early admits
 
   // Debug / logging
   DEBUG: {
