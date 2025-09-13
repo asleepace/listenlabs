@@ -1,3 +1,5 @@
+export type { BerghainBouncer } from './berghain'
+
 export type GameConstraints = {
   attribute: string
   minCount: number
@@ -49,10 +51,7 @@ export interface Person<T extends PersonAttributes> {
 }
 
 export type GameStatusRunning<
-  T extends
-    | PersonAttributesScenario1
-    | PersonAttributesScenario2
-    | PersonAttributesScenario3
+  T extends PersonAttributesScenario1 | PersonAttributesScenario2 | PersonAttributesScenario3
 > = {
   status: 'running'
   admittedCount: number
@@ -72,10 +71,7 @@ export type GameStatusFailed = {
   nextPerson: null
 }
 
-export type GameStatus =
-  | GameStatusRunning<ScenarioAttributes>
-  | GameStatusCompleted
-  | GameStatusFailed
+export type GameStatus = GameStatusRunning<ScenarioAttributes> | GameStatusCompleted | GameStatusFailed
 
 export type GameState<T = any> = {
   file: string
@@ -86,9 +82,6 @@ export type GameState<T = any> = {
   timestamp?: string
 }
 
-export type ScenarioAttributes =
-  | PersonAttributesScenario1
-  | PersonAttributesScenario2
-  | PersonAttributesScenario3
+export type ScenarioAttributes = PersonAttributesScenario1 | PersonAttributesScenario2 | PersonAttributesScenario3
 
 export type Keys = keyof ScenarioAttributes
