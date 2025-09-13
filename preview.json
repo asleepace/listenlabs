@@ -1,107 +1,107 @@
 {
   "model": 3.1,
   "pretrained": false,
-  "progress": "60%",
+  "progress": "80%",
   "attributes": [
     {
-      "total": "364/650 (56%)",
+      "total": "494/650 (76%)",
       "attribute": "techno_lover",
-      "admitted": 364,
+      "admitted": 494,
       "required": 650,
       "satisfied": false,
-      "progress": 0.56,
-      "shortfall": 286,
+      "progress": 0.76,
+      "shortfall": 156,
       "frequency": 0.6265000000000001,
-      "empiricalFrequency": 0.6167979002624672,
-      "scarcity": 1.159212765957447
+      "empiricalFrequency": 0.6357336547152757,
+      "scarcity": 1.2269289099526066
     },
     {
-      "total": "542/450 (100%)",
+      "total": "715/450 (100%)",
       "attribute": "well_connected",
-      "admitted": 542,
+      "admitted": 715,
       "required": 450,
       "satisfied": true,
       "progress": 1,
       "shortfall": 0,
       "frequency": 0.4700000000000001,
-      "empiricalFrequency": 0.4667541557305337,
+      "empiricalFrequency": 0.46670683940946067,
       "scarcity": 0
     },
     {
-      "total": "122/300 (40.7%)",
+      "total": "200/300 (66.7%)",
       "attribute": "creative",
-      "admitted": 122,
+      "admitted": 200,
       "required": 300,
       "satisfied": false,
-      "progress": 0.4066666666666667,
-      "shortfall": 178,
+      "progress": 0.6666666666666666,
+      "shortfall": 100,
       "frequency": 0.06227,
-      "empiricalFrequency": 0.0542432195975503,
-      "scarcity": 8.203790322580646
+      "empiricalFrequency": 0.06086170533293161,
+      "scarcity": 8.215346534653465
     },
     {
-      "total": "442/750 (58.9%)",
+      "total": "576/750 (76.8%)",
       "attribute": "berlin_local",
-      "admitted": 442,
+      "admitted": 576,
       "required": 750,
       "satisfied": false,
-      "progress": 0.5893333333333334,
-      "shortfall": 308,
+      "progress": 0.768,
+      "shortfall": 174,
       "frequency": 0.398,
-      "empiricalFrequency": 0.40244969378827644,
-      "scarcity": 1.913282608695652
+      "empiricalFrequency": 0.3841518529677614,
+      "scarcity": 2.264729411764706
     }
   ],
   "lastLogs": [
-    "prices=creative:1.00,techno_lover:0.52,berlin_local:0.50",
-    "worstLag=creative r=2.67 lag=58"
+    "prices=creative:1.00,techno_lover:0.52,berlin_local:0.51",
+    "worstLag=creative r=3.29 lag=40"
   ],
   "banditStats": {
     "weights": [
-      0.6847524930380812,
-      0.5116295171794194,
-      1.601446091835452,
-      0.6855174658292646,
-      -0.22832668191231228,
-      0.24389352755645555
+      0.5992632768622747,
+      0.35743812477524356,
+      1.3031028823958142,
+      0.5403170375389241,
+      -0.28905955098163494,
+      0.16248943903053648
     ],
-    "decisionCount": 2035,
-    "capacityUsed": 0.6,
-    "threshold": 0.73,
-    "avgWeight": 0.66
+    "decisionCount": 2917,
+    "capacityUsed": 0.8,
+    "threshold": 0.72,
+    "avgWeight": 0.54
   },
-  "remainingSlots": 400,
-  "totalAdmitted": 600,
-  "totalRejected": 1678,
-  "threshold": 0.7271042694813291,
-  "lastRawValue": 0.7220971375785582,
-  "admitRate": 0.238,
+  "remainingSlots": 200,
+  "totalAdmitted": 800,
+  "totalRejected": 2511,
+  "threshold": 0.7202190725346581,
+  "lastRawValue": 0.4305739861132871,
+  "admitRate": 0.134,
   "feasibility": {
-    "maxRatio": 2.6731451612903228,
+    "maxRatio": 3.286138613861386,
     "mostCritical": "creative"
   },
   "top": [
     {
       "attr": "creative",
-      "ratio": 2.6731451612903228,
-      "lag": 58,
-      "freq": 0.0542432195975503
-    },
-    {
-      "attr": "techno_lover",
-      "ratio": 0.10538297872340427,
-      "lag": 26,
-      "freq": 0.6167979002624672
+      "ratio": 3.286138613861386,
+      "lag": 40,
+      "freq": 0.06086170533293161
     },
     {
       "attr": "berlin_local",
-      "ratio": 0.049695652173913044,
-      "lag": 8,
-      "freq": 0.40244969378827644
+      "ratio": 0.3123764705882353,
+      "lag": 24,
+      "freq": 0.3841518529677614
+    },
+    {
+      "attr": "techno_lover",
+      "ratio": 0.20448815165876777,
+      "lag": 26,
+      "freq": 0.6357336547152757
     }
   ],
   "controller": {
     "targetRate": 0.18,
-    "error": 0.058
+    "error": -0.046
   }
 }

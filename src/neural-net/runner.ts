@@ -6,11 +6,11 @@ import type {
   GameStatusCompleted,
   GameStatusFailed,
   PersonAttributesScenario2,
-  GameState,
   BerghainBouncer,
 } from '../types'
 
 import { NeuralNetBouncer } from './neural-net-bouncer'
+import { StateEncoder } from './state-encoder'
 import { SelfPlayTrainer } from './training'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -152,6 +152,13 @@ export class NeuralNetBouncerRunner {
     try {
       const weights = JSON.parse(fs.readFileSync(this.weightsPath, 'utf-8'))
       this.game = this.initializeGame()
+
+      const expected = new StateEncoder(this.game).getFeatureSize()
+      if (weights.layers?.[0]?.weightsShape?.[0] !== expected) {
+        throw new Error(
+          `Weights expect input ${weights.layers[0].weightsShape[0]} but encoder produces ${expected}. Retrain or update encoder/model.`
+        )
+      }
       this.bouncer = new NeuralNetBouncer(this.game, {
         explorationRate: 0, // No exploration when using trained model
         baseThreshold: 0.5,

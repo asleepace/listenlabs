@@ -1,0 +1,363 @@
+{
+  "timestamp": "2025-09-13T10:21:47.264Z",
+  "epochs": 50,
+  "episodesPerEpoch": 50,
+  "testResults": {
+    "successRate": 0,
+    "avgRejections": 20000,
+    "minRejections": 20000,
+    "maxRejections": 20000
+  },
+  "trainingStats": [
+    {
+      "epoch": 1,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 2,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 3,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 4,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 5,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 6,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 7,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 8,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 9,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 10,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 11,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 12,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 13,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 14,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 15,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 16,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 17,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 18,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 19,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 20,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 21,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 22,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 23,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 24,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 25,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 26,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 27,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 28,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 29,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 30,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 31,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 32,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 33,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 34,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 35,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 36,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 37,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 38,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 39,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 40,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 41,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 42,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 43,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 44,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 45,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 46,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 47,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 48,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 49,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    },
+    {
+      "epoch": 50,
+      "avgReward": -20000,
+      "avgRejections": 20000,
+      "successRate": 0,
+      "bestRejections": 20000
+    }
+  ]
+}

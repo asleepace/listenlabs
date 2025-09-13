@@ -1,13 +1,6 @@
 /** @file training.ts */
 
-import type {
-  Game,
-  GameStatusRunning,
-  GameStatusCompleted,
-  GameStatusFailed,
-  PersonAttributesScenario2,
-  Person,
-} from '../types'
+import type { Game, GameStatusRunning, PersonAttributesScenario2, Person } from '../types'
 
 import { NeuralNet, createBerghainNet } from './neural-net'
 import { NeuralNetBouncer } from './neural-net-bouncer'
@@ -107,10 +100,7 @@ export class SelfPlayTrainer {
 
   // Simulate one episode
   private runEpisode(explorationRate: number): Episode {
-    const bouncer = new NeuralNetBouncer(this.game, {
-      explorationRate,
-      baseThreshold: 0.5,
-    })
+    const bouncer = new NeuralNetBouncer(this.game, { explorationRate, baseThreshold: 0.4 })
     bouncer.setNetwork(this.net)
 
     const states: number[][] = []
@@ -159,11 +149,18 @@ export class SelfPlayTrainer {
             completed: true,
           }
         } else {
-          // Failed constraints
+          // Shape the failure reward: penalize shortfalls and rejections
+          const shortfall = progress.constraints.reduce(
+            (sum: number, c: any) => sum + Math.max(0, c.required - c.current),
+            0
+          )
+          // λ scales how harshly you punish unmet constraints relative to rejections
+          const lambda = 10
+          const shapedReward = -(rejected + lambda * shortfall)
           return {
             states,
             actions,
-            reward: -20000,
+            reward: shapedReward,
             rejections: rejected,
             completed: false,
           }
@@ -172,10 +169,13 @@ export class SelfPlayTrainer {
     }
 
     // Failed - too many rejections
+    const progress = bouncer.getProgress()
+    const shortfall = progress.constraints.reduce((sum: number, c: any) => sum + Math.max(0, c.required - c.current), 0)
+    const lambda = 10
     return {
       states,
       actions,
-      reward: -20000,
+      reward: -(rejected + lambda * shortfall),
       rejections: rejected,
       completed: false,
     }
@@ -187,6 +187,10 @@ export class SelfPlayTrainer {
 
     // Sort by reward (higher is better)
     const sorted = [...episodes].sort((a, b) => b.reward - a.reward)
+    if (sorted[0].reward === sorted[sorted.length - 1].reward) {
+      // No signal this round
+      return 0
+    }
 
     // Take elite episodes
     const eliteCount = Math.max(1, Math.floor(episodes.length * this.config.elitePercentile))
@@ -336,7 +340,7 @@ export class SelfPlayTrainer {
       successRate: successes / episodes,
       avgRejections: successes > 0 ? totalRejections / successes : 20000,
       minRejections: minRejections === Infinity ? 20000 : minRejections,
-      maxRejections,
+      maxRejections: successes > 0 ? maxRejections : 20000,
     }
   }
 }
@@ -347,9 +351,9 @@ export async function trainBouncer(game: Game): Promise<NeuralNetBouncer> {
     episodes: 50,
     batchSize: 32,
     learningRate: 0.001,
-    explorationStart: 0.3,
-    explorationEnd: 0.05,
-    explorationDecay: 0.99,
+    explorationStart: 0.6,
+    explorationEnd: 0.1,
+    explorationDecay: 0.999, // per-step decay; across 1000 steps that matters a LOT
   })
 
   // Train for 20 epochs

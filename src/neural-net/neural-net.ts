@@ -61,6 +61,10 @@ export class NeuralNet {
     this.layerOutputs = []
 
     for (const layer of this.layers) {
+      if (current.cols !== layer.weights.rows) {
+        throw new Error(`Shape mismatch: input has ${current.cols} features, but layer expects ${layer.weights.rows}.`)
+      }
+
       // Linear transformation: z = x * W + b
       const z = current.dot(layer.weights).add(layer.bias)
 
@@ -209,6 +213,7 @@ export class NeuralNet {
   // Save weights to JSON
   toJSON(): any {
     return {
+      inputSize: this.layers[0].weights.rows,
       layers: this.layers.map((layer) => ({
         weights: Array.from(layer.weights.data),
         weightsShape: [layer.weights.rows, layer.weights.cols],
@@ -261,7 +266,6 @@ export function createBerghainNet(inputSize: number = 17): NeuralNet {
   // - 3 global features
   // - 1 alignment + 1 correlation
   const net = new NeuralNet(0.001, 0.0001)
-  net.addLayer(13, 24, 'relu', 'he')
   net.addLayer(inputSize, 24, 'relu', 'he')
   net.addLayer(24, 12, 'relu', 'he')
   net.addLayer(12, 1, 'sigmoid', 'xavier')

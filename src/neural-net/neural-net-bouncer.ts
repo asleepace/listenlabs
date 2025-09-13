@@ -104,7 +104,7 @@ export class NeuralNetBouncer implements BerghainBouncer {
     }
 
     // Decay exploration rate
-    this.explorationRate *= this.decayRate
+    // this.explorationRate *= this.decayRate
 
     return decision
   }
@@ -198,8 +198,10 @@ export class NeuralNetBouncer implements BerghainBouncer {
     // Normalize value
     const normalizedValue = totalWeight > 0 ? value / totalWeight : 0.5
 
-    // Make probabilistic decision based on value
-    return Math.random() < 0.3 + 0.4 * normalizedValue
+    // Be generous early to generate positive labels
+    const base = 0.55 // >= 55% admit on explore
+    const admitProb = Math.min(0.95, base + 0.4 * normalizedValue)
+    return Math.random() < admitProb
   }
 
   getProgress(): any {

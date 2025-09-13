@@ -10,7 +10,7 @@ import { dump } from './utils/dump'
    ========================= */
 const CFG = {
   // Included on persisted data to identify models and biases
-  MODEL_VERSION: 3.1,
+  MODEL_VERSION: 3.2,
 
   // Display / reporting
   UI: {
@@ -1348,9 +1348,9 @@ export class BanditBouncer<T> implements BerghainBouncer {
     } as const
 
     // save a quick preview
-    if (this.totalAdmitted % 100 === 0) {
-      Disk.saveJsonFile('preview.json', base).catch(() => {})
-    }
+    // if (this.totalAdmitted % 100 === 0) {
+    //   Disk.saveJsonFile('preview.json', base).catch(() => {})
+    // }
 
     if (!CFG.DEBUG.includeThresholdBlock) return base
     return { ...base, thresholdDebug: this.bandit.getThresholdDebug() }

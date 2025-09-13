@@ -4,5 +4,5 @@
  * @returns
  */
 export async function dump(...args: any[]) {
-  return fetch('https://consoledump.io/8c2ac478', { method: 'POST', body: JSON.stringify(args) }).catch(() => {})
+  // return fetch('https://consoledump.io/8c2ac478', { method: 'POST', body: JSON.stringify(args) }).catch(() => {})
 }

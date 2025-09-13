@@ -1,6 +1,6 @@
 /** @file state-encoder.ts */
 
-import type { Game, GameStatusRunning, PersonAttributesScenario2, GameConstraints } from '../types' // Adjust import path as needed
+import type { Game, GameStatusRunning, PersonAttributesScenario2 } from '../types'
 
 export class StateEncoder {
   private attributeKeys: string[]

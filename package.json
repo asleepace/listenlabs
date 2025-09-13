@@ -4,6 +4,7 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "train": "bun run src/neural-net/runner train 50",
     "start": "bun run src/index.ts",
     "game": "bun run src/index.ts"
   },
