@@ -164,6 +164,12 @@ const CFG = {
     overshootL2: 0.02,
     weightByScarcity: true,
   },
+
+  OVERSHOOT_GUARD: {
+    enable: true,
+    // how much over (in people) before we start blocking “free” overshoot
+    slackPeople: undefined as number | undefined, // if undefined, use SCORE.overshootSlack
+  },
 }
 
 /* ================
@@ -814,6 +820,24 @@ export class BanditBouncer<T> implements BerghainBouncer {
     return (this.statistics?.relativeFrequencies?.[attribute] as number) ?? 0.001
   }
 
+  // Inside BanditBouncer<T> class (near other DRY helpers)
+  private overshootBlock(person: Person<T>, used: number, helpsAnyLagging: boolean, nearWorst: boolean): boolean {
+    if (!CFG.OVERSHOOT_GUARD.enable) return false
+    const slack = CFG.OVERSHOOT_GUARD.slackPeople ?? CFG.SCORE.overshootSlack
+
+    // If the person helps any lagging or near-worst unmet constraint, allow (no block)
+    if (helpsAnyLagging || nearWorst) return false
+
+    // Otherwise, if they carry any attribute that is already overshot beyond slack, block.
+    for (const c of this.getConstraints()) {
+      if (!person[c.attribute]) continue
+      if (!c.isSatisfied()) continue
+      const over = c.admitted - c.minRequired
+      if (over > Math.max(0, slack)) return true
+    }
+    return false
+  }
+
   /* --- shadow prices --- */
   private computeShadowPrices() {
     const used = this.usedFrac()
@@ -1113,6 +1137,13 @@ export class BanditBouncer<T> implements BerghainBouncer {
 
     // Early anti-fill: before gating, reject if the person helps no unmet constraint at all.
     if (unmet.length && used < 0.7 && !this.helpsAnyUnmet(person)) {
+      return this.applyReject(person, features, prices)
+    }
+
+    // Hard overshoot guard: if an attribute is already far overshot, don't admit
+    // candidates carrying it unless they help lagging/near-worst.
+    if (unmet.length && this.overshootBlock(person, used, helpsAnyLagging, nearWorst)) {
+      this.log('BLOCK: overshoot guard (carrying overshot attr without helping lag)')
       return this.applyReject(person, features, prices)
     }
 
