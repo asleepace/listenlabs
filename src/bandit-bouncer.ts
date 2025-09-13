@@ -10,7 +10,7 @@ import { dump } from './utils/dump'
    ========================= */
 const CFG = {
   // Included on persisted data to identify models and biases
-  MODEL_VERSION: 2.99,
+  MODEL_VERSION: 2.999,
 
   // Display / reporting
   UI: {
@@ -94,13 +94,6 @@ const CFG = {
 
   // Feasibility-based late gate
   GATE: {
-    // choose first where maxRatio > ratio, else fallback to last
-    SEQUENCE: [
-      { ratio: 300, start: 0.66 }, // was 0.70
-      { ratio: 150, start: 0.74 }, // was 0.80
-      { ratio: 60, start: 0.82 }, // was 0.90
-      { ratio: -Infinity, start: 0.92 }, // was 0.95
-    ],
     hardCutUsed: 0.95, // ↓ from 0.97 so the “must-help-worst” phase arrives sooner
     lagSlack: 0.02, // consider helping if attr progress < used - lagSlack
   },
@@ -440,12 +433,6 @@ class LinearBandit {
     return Math.max(CFG.TARGET_RATE_MIN, base)
   }
 
-  getScoreSummary() {
-    const s = [...this.recentValues].sort((a, b) => a - b)
-    const pick = (p: number) => (s.length ? s[Math.floor(p * (s.length - 1))] : 0)
-    return { n: s.length, p10: pick(0.1), p50: pick(0.5), p90: pick(0.9) }
-  }
-
   updateController(admitted: boolean) {
     this.admitRateEma = this.admitRateEma * (1 - this.emaBeta) + (admitted ? 1 : 0) * this.emaBeta
   }
@@ -782,7 +769,6 @@ export class BanditBouncer<T> implements BerghainBouncer {
     }
     // identify rarest attribute by prior frequency (fallback to first)
     const all = this.getConstraints()
-    const rare = all.slice().sort((a, b) => (a.frequency ?? 1) - (b.frequency ?? 1))[0]
     this.indicatorCount = all.length
   }
 
@@ -855,10 +841,10 @@ export class BanditBouncer<T> implements BerghainBouncer {
       const pUCB = Math.max(0, Math.min(1, mean + k * sd))
 
       // pace-based need: lag vs expected supply
-      const lag = this.paceLag(c, used)
+      const need = this.needAmount(c, used)
       const ef = c.getEmpiricalFrequency() || c.frequency || 1e-6
       const expect = Math.max(1e-6, remaining * ef)
-      const gap = Math.max(0, lag / expect - pUCB) // optimistic supply vs lag need
+      const gap = Math.max(0, need / expect - pUCB)
 
       // pace brake / boost
       const paceLead = Math.max(0, c.getProgress() - used - CFG.PRICE.paceSlack)
@@ -894,8 +880,8 @@ export class BanditBouncer<T> implements BerghainBouncer {
       if (!c.isSatisfied() && person[c.attribute]) {
         const ef = c.getEmpiricalFrequency() || c.frequency || 1e-6
         const expect = Math.max(1e-6, this.remaining() * ef)
-        const lag = this.paceLag(c, used)
-        const r = Math.min(CFG.FEATURES.scarcityCap, lag / expect)
+        const need = this.needAmount(c, used)
+        const r = Math.min(CFG.FEATURES.scarcityCap, need / expect)
         scarcityBoost = Math.max(scarcityBoost, r)
       }
     }
@@ -970,6 +956,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
     } else {
       this.bandit.updateModel(features, Math.max(CFG.WARMUP.negClampAfter, reward))
     }
+
     this.getConstraints().forEach((c) => c.update(person, false))
     this.totalRejected++
     this.recordDecision(person, 'reject', reward, valueForLog, features)
@@ -1098,7 +1085,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
     const nearWorst = unmet.some((c) => {
       const ef = c.getEmpiricalFrequency() || c.frequency || 1e-6
       const expect = Math.max(1e-6, this.remaining() * ef)
-      const ratio = this.paceLag(c, used) / expect
+      const ratio = this.needAmount(c, used) / expect
       return person[c.attribute] && ratio >= (1 - nearWorstEps) * (worstRatio || 0)
     })
 
@@ -1207,7 +1194,18 @@ export class BanditBouncer<T> implements BerghainBouncer {
       this.getConstraints().forEach((c, i) => {
         if (i < this.indicatorCount && person[c.attribute] && preSatisfied[i]) learnFeat[i] = 0
       })
-      return this.applyAdmit(person, learnFeat, prices, this.bandit.getLastRawValue?.() ?? 0)
+      if (CFG.FILL.learn) {
+        return this.applyAdmit(person, learnFeat, prices, this.bandit.getLastRawValue?.() ?? 0)
+      } else {
+        // admit but skip bandit learning
+        const reward = this.calculateReward(person, true, prices)
+        this.getConstraints().forEach((k) => k.update(person, true))
+        this.totalAdmitted++
+        this.bandit.totalAdmitted++
+        this.recordDecision(person, 'admit', reward, this.bandit.getLastRawValue?.() ?? 0, learnFeat)
+        this.bandit.updateController(true)
+        return true
+      }
     }
 
     // Endgame helper: admit if it closes a tiny remaining gap
@@ -1244,16 +1242,22 @@ export class BanditBouncer<T> implements BerghainBouncer {
     const reward = this.calculateReward(person, shouldAdmit, prices)
 
     if (shouldAdmit) {
-      this.bandit.updateModel(features, reward)
+      const learnFeat = features.slice()
+      this.getConstraints().forEach((c, i) => {
+        if (i < this.indicatorCount && person[c.attribute] && preSatisfied[i]) learnFeat[i] = 0
+      })
+      this.bandit.updateModel(learnFeat, reward)
       this.getConstraints().forEach((c) => c.update(person, true))
       this.totalAdmitted++
       this.bandit.totalAdmitted++
-      this.recordDecision(person, 'admit', reward, value, features)
+      this.recordDecision(person, 'admit', reward, value, learnFeat)
       this.bandit.updateController(true)
       return true
     } else {
       // apply reject (mask indicators for stability)
-      const r = Math.max(CFG.WARMUP.negClampAfter, reward)
+      const inWarmup = used < CFG.WARMUP.usedMax || this.bandit.admitRateEma < CFG.WARMUP.minEma
+      const r = inWarmup ? reward : Math.max(CFG.WARMUP.negClampAfter, reward)
+
       const masked = features.slice()
       for (let i = 0; i < this.indicatorCount; i++) masked[i] = 0
       this.bandit.updateModel(masked, r)
@@ -1295,7 +1299,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
     const base = {
       model: CFG.MODEL_VERSION,
       pretrained: this.pretrained,
-      progress: pct(this.totalAdmitted / CFG.UI.PROGRESS_DENOM, 2) + '%',
+      progress: pct(this.totalAdmitted / this.config.MAX_CAPACITY, 2) + '%',
       attributes: this.getConstraints().map((c) => ({
         total: `${c.admitted}/${c.minRequired} (${pct(c.admitted / c.minRequired, 1)}%)`,
         attribute: c.attribute,
