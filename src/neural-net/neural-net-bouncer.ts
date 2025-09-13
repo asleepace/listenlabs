@@ -17,7 +17,7 @@ export interface NeuralNetBouncerConfig {
   minThreshold?: number
   maxThreshold?: number
   urgencyFactor?: number
-  explorationRate?: number // fixed per episode; decay is handled by trainer per epoch
+  explorationRate?: number
 }
 
 export class NeuralNetBouncer implements BerghainBouncer {
@@ -57,21 +57,22 @@ export class NeuralNetBouncer implements BerghainBouncer {
   }
 
   admit(status: GameStatusRunning<PersonAttributesScenario2>): boolean {
-    // Encode current state with TRUE counts from the tracker
+    // Use TRUE counts from tracker when encoding
     const counts = this.tracker.getCounts()
     const features = this.encoder.encode(status, counts)
 
-    // Network prediction
-    const probability = this.net.forward(features)[0]
+    const output = this.net.forward(features)
+    const probability = output[0]
 
-    // Dynamic threshold
     const threshold = this.calculateDynamicThreshold(status)
 
-    // Exploration vs exploitation
-    const explore = Math.random() < this.explorationRate
-    const decision = explore ? this.makeExploratoryDecision(status) : probability > threshold
+    let decision: boolean
+    if (Math.random() < this.explorationRate) {
+      decision = this.makeExploratoryDecision(status)
+    } else {
+      decision = probability > threshold
+    }
 
-    // Track & update
     this.decisions.push({ features, probability, admitted: decision, threshold })
 
     if (decision) {
@@ -81,7 +82,7 @@ export class NeuralNetBouncer implements BerghainBouncer {
       this.rejectionCount++
     }
 
-    // NO per-step decay here (trainer controls exploration per epoch)
+    // NOTE: no per-step decay here; exploration is managed per-epoch by the trainer.
     return decision
   }
 
@@ -90,9 +91,9 @@ export class NeuralNetBouncer implements BerghainBouncer {
     const counts = this.tracker.getCounts()
 
     let maxUrgency = 0
-    for (const c of this.game.constraints) {
-      const current = counts[c.attribute] || 0
-      const needed = c.minCount - current
+    for (const constraint of this.game.constraints) {
+      const current = counts[constraint.attribute] || 0
+      const needed = constraint.minCount - current
       if (needed > 0 && remaining > 0) {
         const urgency = needed / remaining
         maxUrgency = Math.max(maxUrgency, urgency)
@@ -109,7 +110,6 @@ export class NeuralNetBouncer implements BerghainBouncer {
       threshold = this.maxThreshold
     }
 
-    // Favor a person who has any highly urgent attribute
     const person = status.nextPerson.attributes
     for (const c of this.game.constraints) {
       const current = counts[c.attribute] || 0
@@ -140,7 +140,7 @@ export class NeuralNetBouncer implements BerghainBouncer {
     }
     const normalizedValue = totalWeight > 0 ? value / totalWeight : 0.5
 
-    const base = 0.5 // was 0.65
+    const base = 0.5
     const admitProb = Math.min(0.98, base + 0.45 * normalizedValue)
     return Math.random() < admitProb
   }
@@ -177,15 +177,13 @@ export class NeuralNetBouncer implements BerghainBouncer {
     }
   }
 
-  getDecisions(): typeof this.decisions {
+  getDecisions() {
     return this.decisions
   }
-
-  loadWeights(weights: any): void {
+  loadWeights(weights: any) {
     this.net = NeuralNet.fromJSON(weights)
   }
-
-  getWeights(): any {
+  getWeights() {
     return this.net.toJSON()
   }
 

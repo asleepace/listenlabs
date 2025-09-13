@@ -199,12 +199,14 @@ export class NeuralNet {
   }
 }
 
-// Creates a net matching an encoder-provided input size
-export function createBerghainNet(inputSize: number = 17): NeuralNet {
+// Example network for the Berghain problem
+export function createBerghainNet(inputSize: number): NeuralNet {
   const net = new NeuralNet(0.001, 0.0001)
-  // [inputSize] -> 32 -> 16 -> 1
-  net.addLayer(inputSize, 32, 'relu', 'he')
-  net.addLayer(32, 16, 'relu', 'he')
-  net.addLayer(16, 1, 'sigmoid', 'xavier')
+
+  // in: inputSize -> 64 -> 32 -> 1(sigmoid)
+  net.addLayer(inputSize, 64, 'relu', 'he')
+  net.addLayer(64, 32, 'relu', 'he')
+  net.addLayer(32, 1, 'sigmoid', 'xavier')
+
   return net
 }
