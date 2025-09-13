@@ -10,7 +10,7 @@ import { dump } from './utils/dump'
    ========================= */
 const CFG = {
   // Included on persisted data to identify models and biases
-  MODEL_VERSION: 2.5,
+  MODEL_VERSION: 2.6,
 
   // Display / reporting
   UI: {
@@ -30,8 +30,8 @@ const CFG = {
     slope: 18.0, // squashing slope → price jump as need > supply
     synergy: 0.12, // small bonus for covering multiple urgent attrs
     paceSlack: 0.02, // allow a tiny progress gap before any pace nudges
-    paceBrake: 0.75, // reduce price when ahead of pace (keeps rate flat)
-    aheadPenalty: { scale: 1.1, max: 1.3 }, // admit-time nudge vs ahead-of-pace even before satisfied
+    paceBrake: 0.7, // reduce price when ahead of pace (keeps rate flat)
+    aheadPenalty: { scale: 1.0, max: 1.3 }, // admit-time nudge vs ahead-of-pace even before satisfied
     paceBoost: 0.95, // increase price when behind pace (keeps bars together)
     overshootPenaltyMax: 4.0, // cap on overshoot tax per attribute (per-decision)
     rareScarcityScale: 1.8, // // multiplier for scarcity feature strength
@@ -101,7 +101,7 @@ const CFG = {
       { ratio: 60, start: 0.9 },
       { ratio: -Infinity, start: 0.95 },
     ],
-    hardCutUsed: 0.965, // ↓ from 0.97 so the “must-help-worst” phase arrives sooner
+    hardCutUsed: 0.96, // ↓ from 0.97 so the “must-help-worst” phase arrives sooner
     lagSlack: 0.02, // consider helping if attr progress < used - lagSlack
   },
 
@@ -123,7 +123,7 @@ const CFG = {
   },
 
   HINTS: {
-    abundance: { scale: 0.35, max: 0.9 }, // was 0.25 / 0.6
+    abundance: { scale: 0.33, max: 0.85 }, // was 0.25 / 0.6
     synergyPairCap: 3, // pairs to include for synergy
     antiHintScale: 1.1, // strength for ahead-of-pace anti-hint
   },
@@ -1023,7 +1023,9 @@ export class BanditBouncer<T> implements BerghainBouncer {
         .map((t) => t[0])
     )
 
+    const preSatisfied = this.getConstraints().map((c) => c.isSatisfied())
     const unmet = this.getConstraints().filter((c) => !c.isSatisfied())
+    const reward = this.calculateReward(person, true, prices)
 
     // worst-lag information (pace-based)
     const { attr: worstAttr, ratio: worstRatio } = this.worstLagInfo()
@@ -1036,32 +1038,50 @@ export class BanditBouncer<T> implements BerghainBouncer {
     // late cushion on lag slack (be a hair more permissive near the end)
     const lagSlackNow = CFG.PACE.gateLagSlack + (used >= 0.94 ? CFG.PACE.gateLagLateCushion : 0)
 
+    // Early anti-fill: before gating, reject if the person helps no unmet constraint at all.
+    if (unmet.length && used < 0.7) {
+      const onlySatisfied = !unmet.some((c) => person[c.attribute])
+      if (onlySatisfied) {
+        const reward = this.calculateReward(person, false, prices)
+        const masked = features.slice()
+        for (let i = 0; i < this.indicatorCount; i++) masked[i] = 0
+        this.bandit.updateModel(masked, Math.max(CFG.WARMUP.negClampAfter, reward))
+        this.getConstraints().forEach((c) => c.update(person, false))
+        this.totalRejected++
+        this.recordDecision(person, 'reject', reward, 0, features)
+        this.bandit.updateController(false)
+        return false
+      }
+    }
+
     // helper predicates
-    const helpsLagging = unmet.some((c) => person[c.attribute] && c.getProgress() < used - lagSlackNow)
+    const helpsAnyLagging = unmet.some((c) => person[c.attribute] && c.getProgress() < used - CFG.PACE.gateLagSlack)
     const helpsAnyUnmet = unmet.some((c) => person[c.attribute])
     const hardCut = used >= CFG.GATE.hardCutUsed
 
-    // treat helpers to attrs within 10% of worst ratio as near-worst (only if there IS a worst)
-    const nearWorstEps = 0.1
-    const nearWorst =
-      worstRatio > 0 &&
-      unmet.some((c) => {
-        const ef = c.getEmpiricalFrequency() || c.frequency || 1e-6
-        const expect = Math.max(1e-6, this.remaining() * ef)
-        const ratio = this.paceLag(c, used) / expect
-        return person[c.attribute] && ratio >= (1 - nearWorstEps) * worstRatio
-      })
+    const nearWorstEps = 0.15 // a touch wider than 0.10
+    const nearWorst = unmet.some((c) => {
+      const ef = c.getEmpiricalFrequency() || c.frequency || 1e-6
+      const expect = Math.max(1e-6, this.remaining() * ef)
+      const ratio = this.paceLag(c, used) / expect
+      return person[c.attribute] && ratio >= (1 - nearWorstEps) * (worstRatio || 0)
+    })
 
-    // Single gate with two phases
+    // --- gate: soft → hard ---
     if (unmet.length && used > gateStart) {
-      if (hardCut) {
-        // very late: must help the WORST attr and that attr must be lagging
-        const pass = helpsWorst && helpsLagging
-        if (!pass) return this.applyReject(person, features, prices, 0, true)
-      } else {
-        // pre-hardcut: any unmet helper OR near-worst helper passes
-        const pass = helpsAnyUnmet || nearWorst
-        if (!pass) return this.applyReject(person, features, prices, 0, true)
+      const pass = hardCut
+        ? helpsWorst && helpsAnyLagging // hard phase: must help the worst AND be lagging
+        : helpsAnyLagging || nearWorst // soft phase: any lagging help OR near-worst
+      if (!pass) {
+        const reward = this.calculateReward(person, false, prices)
+        const masked = features.slice()
+        for (let i = 0; i < this.indicatorCount; i++) masked[i] = 0
+        this.bandit.updateModel(masked, Math.max(CFG.WARMUP.negClampAfter, reward))
+        this.getConstraints().forEach((c) => c.update(person, false))
+        this.totalRejected++
+        this.recordDecision(person, 'reject', reward, 0, features)
+        this.bandit.updateController(false)
+        return false
       }
     }
 
@@ -1107,21 +1127,22 @@ export class BanditBouncer<T> implements BerghainBouncer {
 
       // Abundance anti-hint: downweight over-abundant attrs that aren't lagging.
       // Suppress very late for unmet attrs so we don't fight feasibility.
+      // inside the price-based hint block
       const abundance = Array(this.indicatorCount + 2).fill(0)
       const isLate = usedNow >= 0.96
-      let anyAbund = false
+      const preGateBoost = usedNow < 0.7 ? 1.35 : 1.0 // NEW
+      let any = false
       this.getConstraints().forEach((c, i) => {
         if (!person[c.attribute]) return
         const skew = c.getSupplySkew?.() ?? 1
-        const lagging = c.getProgress() < usedNow - lagSlackNow
-        const suppress = isLate && !c.isSatisfied() // don't penalize unmet late
-        if (skew > 1 && !lagging && !suppress) {
-          const d = Math.min(CFG.HINTS.abundance.max, CFG.HINTS.abundance.scale * (skew - 1))
+        const lagging = c.getProgress() < usedNow - CFG.PACE.lagSlack
+        if (skew > 1 && !lagging && !(isLate && !c.isSatisfied())) {
+          const d = preGateBoost * Math.min(CFG.HINTS.abundance.max, CFG.HINTS.abundance.scale * (skew - 1))
           abundance[i] = -d
-          anyAbund = true
+          any = true
         }
       })
-      if (anyAbund) this.bandit.updateModel(abundance, CFG.BANDIT.hintEta)
+      if (any) this.bandit.updateModel(abundance, CFG.BANDIT.hintEta)
 
       // Ahead-of-pace anti-hint (small, bounded), slightly reduced if skew is high
       const ahead = Array(this.indicatorCount + 2).fill(0)
@@ -1172,7 +1193,6 @@ export class BanditBouncer<T> implements BerghainBouncer {
 
     // Learning with warmup rules (mask indicators on rejections)
     const inWarmup = used < CFG.WARMUP.usedMax || this.bandit.admitRateEma < CFG.WARMUP.minEma
-    const reward = this.calculateReward(person, shouldAdmit, prices)
     if (shouldAdmit) {
       this.bandit.updateModel(features, reward)
     } else if (!inWarmup) {
@@ -1190,10 +1210,18 @@ export class BanditBouncer<T> implements BerghainBouncer {
     } else {
       this.totalRejected++
     }
-
-    this.recordDecision(person, action, reward, value, features)
-    this.bandit.updateController(shouldAdmit)
-    return shouldAdmit
+    // learn only on unmet indicators (but still keep capacity/scarcity features)
+    const learnFeat = features.slice()
+    this.getConstraints().forEach((c, i) => {
+      if (i < this.indicatorCount && person[c.attribute] && preSatisfied[i]) learnFeat[i] = 0
+    })
+    this.bandit.updateModel(learnFeat, reward)
+    this.getConstraints().forEach((k) => k.update(person, true))
+    this.totalAdmitted++
+    this.bandit.totalAdmitted++
+    this.recordDecision(person, 'admit', reward, value, learnFeat)
+    this.bandit.updateController(true)
+    return true
   }
 
   /* --- progress / output --- */
