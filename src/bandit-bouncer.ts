@@ -10,7 +10,7 @@ import { dump } from './utils/dump'
    ========================= */
 const CFG = {
   // Included on persisted data to identify models and biases
-  MODEL_VERSION: 2.4,
+  MODEL_VERSION: 2.5,
 
   // Display / reporting
   UI: {
@@ -30,27 +30,28 @@ const CFG = {
     slope: 18.0, // squashing slope → price jump as need > supply
     synergy: 0.12, // small bonus for covering multiple urgent attrs
     paceSlack: 0.02, // allow a tiny progress gap before any pace nudges
-    paceBrake: 0.6, // reduce price when ahead of pace (keeps rate flat)
+    paceBrake: 0.75, // reduce price when ahead of pace (keeps rate flat)
+    aheadPenalty: { scale: 1.1, max: 1.3 }, // admit-time nudge vs ahead-of-pace even before satisfied
     paceBoost: 0.95, // increase price when behind pace (keeps bars together)
-    aheadPenalty: { scale: 0.8, max: 1.1 }, // admit-time nudge vs ahead-of-pace even before satisfied
     overshootPenaltyMax: 4.0, // cap on overshoot tax per attribute (per-decision)
-    rareScarcityScale: 1.5, // multiplier for scarcity feature strength
+    rareScarcityScale: 1.8, // // multiplier for scarcity feature strength
   },
 
   PACE: {
     lagSlack: 0.02, // ignore tiny lag noise
+    gateLagLateCushion: 0.01,
     worstLagGateStart: [
-      // scarcity-like gate but by worst pace lag ratio
-      { ratio: 3.0, start: 0.7 },
-      { ratio: 1.5, start: 0.8 },
-      { ratio: 0.7, start: 0.88 },
-      { ratio: 0.0, start: 0.93 },
+      { ratio: 3.0, start: 0.68 }, // ↓ from 0.70
+      { ratio: 2.0, start: 0.72 }, // NEW row (was jumping to 1.5→0.80)
+      { ratio: 1.5, start: 0.78 }, // ↓ from 0.80
+      { ratio: 0.7, start: 0.88 }, // ↓ from 0.90
+      { ratio: 0.0, start: 0.95 },
     ],
     helperBonus: 0.55, // raw-value bonus if helps worst-lag attr
     nonHelperMalus: 0.35, // raw-value malus if doesn’t help worst-lag attr late
     lateCutoverUsed: 0.6, // start applying helper/malus around here
     gateLagSlack: 0.03, // consider "helps lagging" if progress < used - slack
-    scarcityCap: 10.0, // cap for scarcity/ratio to avoid runaway prices
+    scarcityCap: 6.5, // cap for scarcity/ratio to avoid runaway prices
   },
 
   // Linear bandit (dimension is determined dynamically)
@@ -71,7 +72,7 @@ const CFG = {
     earlyNoiseBoostDecisions: 1200, // more exploration early
     indicatorPrior: 1.8, // prior for each constraint indicator
     capacityPrior: -0.8, // prior for capacity feature
-    scarcityPrior: 1.2, // prior for scarcity feature
+    scarcityPrior: 1.5,
     warmStartDecay: 0.9, // decay for history warm start
     updateClamp: [-50, 50] as const, // clamp for per-update reward
     softClip: 8, // tanh soft clip for decision series
@@ -87,8 +88,8 @@ const CFG = {
     warmupErrCap: 0.25,
     floorBumpBase: 0.25,
     floorBumpSlope: 1.25,
-    capacityBiasScale: { early: 0.32, late: 0.51 }, // * used * sigma
-    ctrlGains: { kP: 1.2, kI: 0.4, boostEdge: 0.25, boostFactor: 1.15 },
+    capacityBiasScale: { early: 0.28, late: 0.51 }, // early ↓ from 0.32
+    ctrlGains: { kP: 1.3, kI: 0.45, boostEdge: 0.25, boostFactor: 1.15 }, // slightly snappier
   },
 
   // Feasibility-based late gate
@@ -100,7 +101,7 @@ const CFG = {
       { ratio: 60, start: 0.9 },
       { ratio: -Infinity, start: 0.95 },
     ],
-    hardCutUsed: 0.95,
+    hardCutUsed: 0.965, // ↓ from 0.97 so the “must-help-worst” phase arrives sooner
     lagSlack: 0.02, // consider helping if attr progress < used - lagSlack
   },
 
@@ -122,9 +123,9 @@ const CFG = {
   },
 
   HINTS: {
+    abundance: { scale: 0.35, max: 0.9 }, // was 0.25 / 0.6
     synergyPairCap: 3, // pairs to include for synergy
-    antiHintScale: 0.9, // strength for ahead-of-pace anti-hint
-    abundance: { scale: 0.25, max: 0.6 }, // mild nudge against over-abundant attrs
+    antiHintScale: 1.1, // strength for ahead-of-pace anti-hint
   },
 
   STATS: {
@@ -1033,7 +1034,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
     if (gateStart === undefined) gateStart = CFG.PACE.worstLagGateStart.at(-1)!.start
 
     // late cushion on lag slack (be a hair more permissive near the end)
-    const lagSlackNow = CFG.PACE.gateLagSlack + (used >= 0.94 ? 0.01 : 0)
+    const lagSlackNow = CFG.PACE.gateLagSlack + (used >= 0.94 ? CFG.PACE.gateLagLateCushion : 0)
 
     // helper predicates
     const helpsLagging = unmet.some((c) => person[c.attribute] && c.getProgress() < used - lagSlackNow)
