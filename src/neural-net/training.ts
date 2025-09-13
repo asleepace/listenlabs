@@ -100,7 +100,7 @@ export class SelfPlayTrainer {
 
   // Simulate one episode
   private runEpisode(explorationRate: number): Episode {
-    const bouncer = new NeuralNetBouncer(this.game, { explorationRate, baseThreshold: 0.4 })
+    const bouncer = new NeuralNetBouncer(this.game, { explorationRate, baseThreshold: 0.35 })
     bouncer.setNetwork(this.net)
 
     const states: number[][] = []
@@ -149,12 +149,11 @@ export class SelfPlayTrainer {
             completed: true,
           }
         } else {
-          // Shape the failure reward: penalize shortfalls and rejections
+          const progress = bouncer.getProgress()
           const shortfall = progress.constraints.reduce(
             (sum: number, c: any) => sum + Math.max(0, c.required - c.current),
             0
           )
-          // λ scales how harshly you punish unmet constraints relative to rejections
           const lambda = 10
           const shapedReward = -(rejected + lambda * shortfall)
           return {
@@ -182,47 +181,81 @@ export class SelfPlayTrainer {
   }
 
   // Train on successful episodes
+  // Train on top-performing (elite) episodes with label balancing & shuffling
   private trainOnEpisodes(episodes: Episode[]): number {
     if (episodes.length === 0) return 0
 
-    // Sort by reward (higher is better)
+    // 1) Sort by reward (higher is better). If there's no variance, skip.
     const sorted = [...episodes].sort((a, b) => b.reward - a.reward)
     if (sorted[0].reward === sorted[sorted.length - 1].reward) {
-      // No signal this round
       return 0
     }
 
-    // Take elite episodes
+    // 2) Take elite slice
     const eliteCount = Math.max(1, Math.floor(episodes.length * this.config.elitePercentile))
     const elite = sorted.slice(0, eliteCount)
 
-    // Prepare training data
-    const inputs: number[][] = []
-    const targets: number[] = []
+    // 3) Optionally compute per-episode weights from reward (min-max to [0.25, 1])
+    //    Better episodes contribute more samples.
+    const rewards = elite.map((e) => e.reward)
+    const rMin = Math.min(...rewards)
+    const rMax = Math.max(...rewards)
+    const scale = rMax > rMin ? (r: number) => 0.25 + 0.75 * ((r - rMin) / (rMax - rMin)) : (_: number) => 1
 
-    for (const episode of elite) {
-      for (let i = 0; i < episode.states.length; i++) {
-        inputs.push(episode.states[i])
-        targets.push(episode.actions[i] ? 1 : 0)
+    // 4) Build dataset (with episode-level upsampling by weight)
+    const X: number[][] = []
+    const y: number[] = []
+
+    for (const ep of elite) {
+      const w = Math.max(1, Math.round(scale(ep.reward) * 1)) // integer duplication factor (tweakable)
+      for (let rep = 0; rep < w; rep++) {
+        for (let i = 0; i < ep.states.length; i++) {
+          X.push(ep.states[i])
+          y.push(ep.actions[i] ? 1 : 0)
+        }
       }
     }
 
-    // Train in batches
+    if (X.length === 0) return 0
+
+    // 5) Ensure at least 20% positive labels via *upsampling* positives
+    const POS_MIN_RATIO = 0.2
+    const posIdx: number[] = []
+    const negIdx: number[] = []
+    for (let i = 0; i < y.length; i++) (y[i] === 1 ? posIdx : negIdx).push(i)
+
+    const desiredPos = Math.ceil(POS_MIN_RATIO * y.length)
+    if (posIdx.length > 0 && posIdx.length < desiredPos) {
+      const need = desiredPos - posIdx.length
+      for (let k = 0; k < need; k++) {
+        const j = posIdx[k % posIdx.length]
+        X.push(X[j].slice()) // duplicate
+        y.push(1)
+      }
+    }
+
+    // 6) Shuffle dataset together (Fisher–Yates)
+    for (let i = X.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[X[i], X[j]] = [X[j], X[i]]
+      ;[y[i], y[j]] = [y[j], y[i]]
+    }
+
+    // 7) Train in batches
+    const batchSize = Math.max(1, this.config.batchSize)
+    const batchCount = Math.ceil(X.length / batchSize)
     let totalLoss = 0
-    const batchCount = Math.ceil(inputs.length / this.config.batchSize)
 
-    for (let i = 0; i < batchCount; i++) {
-      const start = i * this.config.batchSize
-      const end = Math.min(start + this.config.batchSize, inputs.length)
-
-      const batchInputs = inputs.slice(start, end)
-      const batchTargets = targets.slice(start, end)
-
+    for (let b = 0; b < batchCount; b++) {
+      const start = b * batchSize
+      const end = Math.min(start + batchSize, X.length)
+      const batchInputs = X.slice(start, end)
+      const batchTargets = y.slice(start, end)
       const loss = this.net.trainBatch(batchInputs, batchTargets, 1)
       totalLoss += loss
     }
 
-    return totalLoss / batchCount
+    return totalLoss / Math.max(1, batchCount)
   }
 
   // Main training loop
@@ -351,9 +384,9 @@ export async function trainBouncer(game: Game): Promise<NeuralNetBouncer> {
     episodes: 50,
     batchSize: 32,
     learningRate: 0.001,
-    explorationStart: 0.6,
-    explorationEnd: 0.1,
-    explorationDecay: 0.999, // per-step decay; across 1000 steps that matters a LOT
+    explorationStart: 0.9,
+    explorationEnd: 0.2,
+    explorationDecay: 0.97, // per-step decay; across 1000 steps that matters a LOT
   })
 
   // Train for 20 epochs

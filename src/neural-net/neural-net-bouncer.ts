@@ -77,6 +77,23 @@ export class NeuralNetBouncer implements BerghainBouncer {
     // Calculate dynamic threshold
     const threshold = this.calculateDynamicThreshold(status)
 
+    // --- Urgency override: if we are critically behind on any attribute and this person helps, admit.
+    const remaining = 1000 - status.admittedCount
+    if (remaining > 0) {
+      for (const c of this.game.constraints) {
+        const have = this.tracker.getCount(c.attribute)
+        const need = Math.max(0, c.minCount - have)
+        const urgency = need / remaining
+        if (urgency >= 0.9 && status.nextPerson.attributes[c.attribute]) {
+          // force admit to avoid deadlock
+          this.admissionCount++
+          this.tracker.admit(status.nextPerson.attributes)
+          this.decisions.push({ features, probability, admitted: true, threshold })
+          return true
+        }
+      }
+    }
+
     // Exploration vs exploitation
     let decision: boolean
     if (Math.random() < this.explorationRate) {
@@ -198,9 +215,9 @@ export class NeuralNetBouncer implements BerghainBouncer {
     // Normalize value
     const normalizedValue = totalWeight > 0 ? value / totalWeight : 0.5
 
-    // Be generous early to generate positive labels
-    const base = 0.55 // >= 55% admit on explore
-    const admitProb = Math.min(0.95, base + 0.4 * normalizedValue)
+    // Bias toward admitting during exploration to seed positives
+    const base = 0.65
+    const admitProb = Math.min(0.98, base + 0.35 * normalizedValue)
     return Math.random() < admitProb
   }
 
