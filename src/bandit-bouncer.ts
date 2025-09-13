@@ -1276,6 +1276,11 @@ export class BanditBouncer<T> implements BerghainBouncer {
       },
     } as const
 
+    // save a quick preview
+    if (this.totalAdmitted % 100) {
+      Disk.saveJsonFile('preview.json', base).catch(() => {})
+    }
+
     if (!CFG.DEBUG.includeThresholdBlock) return base
     return { ...base, thresholdDebug: this.bandit.getThresholdDebug() }
   }
