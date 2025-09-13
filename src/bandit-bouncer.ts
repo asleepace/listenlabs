@@ -695,6 +695,17 @@ export class BanditBouncer<T> implements BerghainBouncer {
     return this.totalAdmitted / this.config.MAX_CAPACITY
   }
 
+  private unmetConstraints() {
+    return this.getConstraints().filter((c) => !c.isSatisfied())
+  }
+  private totalShortfallCount() {
+    return this.unmetConstraints().reduce((s, c) => s + c.getShortfall(), 0)
+  }
+
+  private helpsAnyUnmet(person: Person<T>) {
+    return this.unmetConstraints().some((c) => person[c.attribute])
+  }
+
   // (Unused helper preserved for future; consider removing if not needed)
   private isFinishEligible(person: Person<T>) {
     const used = this.usedFrac()
@@ -994,11 +1005,6 @@ export class BanditBouncer<T> implements BerghainBouncer {
     this.recordDecision(person, 'admit', reward, valueForLog, learnFeat)
     this.bandit.updateController(true)
     return true
-  }
-
-  private helpsAnyUnmet(person: Person<T>): boolean {
-    const unmet = this.getConstraints().filter((c) => !c.isSatisfied())
-    return unmet.some((c) => person[c.attribute])
   }
 
   private classifyHelp(person: Person<T>, used: number) {

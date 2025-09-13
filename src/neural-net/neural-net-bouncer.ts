@@ -140,8 +140,8 @@ export class NeuralNetBouncer implements BerghainBouncer {
     }
     const normalizedValue = totalWeight > 0 ? value / totalWeight : 0.5
 
-    const base = 0.65
-    const admitProb = Math.min(0.98, base + 0.35 * normalizedValue)
+    const base = 0.5 // was 0.65
+    const admitProb = Math.min(0.98, base + 0.45 * normalizedValue)
     return Math.random() < admitProb
   }
 

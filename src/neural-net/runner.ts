@@ -120,6 +120,68 @@ export class NeuralNetBouncerRunner {
     }
   }
 
+  // runner.ts — add inside class NeuralNetBouncerRunner
+  private greedyOracleScore(
+    personAttrs: Record<string, boolean>,
+    counts: Record<string, number>,
+    game: Game,
+    admitted: number
+  ): number {
+    const remaining = 1000 - admitted
+    let score = 0
+    for (const c of game.constraints) {
+      const current = counts[c.attribute] || 0
+      const need = Math.max(0, c.minCount - current)
+      if (need <= 0) continue
+      const pressure = remaining > 0 ? need / remaining : 0
+      if (personAttrs[c.attribute]) score += 1 + 3 * pressure // matches urgent needs
+    }
+    return score
+  }
+
+  diagnose(samples = 100_000) {
+    this.game = this.initializeGame()
+    const counts: Record<string, number> = {}
+    Object.keys(this.game.attributeStatistics.relativeFrequencies).forEach((k) => (counts[k] = 0))
+
+    // build a candidate pool
+    const pool = []
+    for (let i = 0; i < samples; i++) {
+      const attrs = this.generatePerson(i)
+      const person: PersonAttributesScenario2 = {} as any
+      for (const key of Object.keys(this.game.attributeStatistics.relativeFrequencies)) {
+        person[key as keyof PersonAttributesScenario2] = false
+      }
+      for (const a of attrs) person[a as keyof PersonAttributesScenario2] = true
+      pool.push(person)
+    }
+
+    // greedy pick
+    const chosen: PersonAttributesScenario2[] = []
+    while (chosen.length < 1000 && pool.length > 0) {
+      // rescoring each round keeps urgency updated
+      let bestIdx = -1
+      let bestScore = -Infinity
+      for (let i = 0; i < pool.length; i++) {
+        const s = this.greedyOracleScore(pool[i], counts, this.game, chosen.length)
+        if (s > bestScore) {
+          bestScore = s
+          bestIdx = i
+        }
+      }
+      const pick = pool.splice(bestIdx, 1)[0]
+      chosen.push(pick)
+      for (const [k, v] of Object.entries(pick)) if (v) counts[k] = (counts[k] || 0) + 1
+    }
+
+    console.log('\n=== Feasibility (Greedy Oracle) ===')
+    for (const c of this.game.constraints) {
+      console.log(`  ${c.attribute}: ${counts[c.attribute] || 0}/${c.minCount}`)
+    }
+    const satisfied = this.game.constraints.every((c) => (counts[c.attribute] || 0) >= c.minCount)
+    console.log(`  Result: ${satisfied ? 'POSSIBLE (greedy met all)' : 'LIKELY INFEASIBLE (even greedy failed)'}`)
+  }
+
   getBouncer(): BerghainBouncer | null {
     return this.bouncer
   }
@@ -269,12 +331,16 @@ export async function main() {
       console.log(`  Average Rejections: ${avgRejections.toFixed(0)}`)
       break
     }
+    case 'diagnose':
+      runner.diagnose(100000)
+      break
     default: {
       console.log('Neural Network Bouncer Runner')
       console.log('\nCommands:')
       console.log('  train [epochs] [episodes]  - Train a new neural network')
       console.log('  test [datafile]            - Run a single test game')
       console.log('  benchmark                  - Run 10 games and show statistics')
+      console.log('  diagnose                   - Run 100000 games and show diagnostics')
     }
   }
 }

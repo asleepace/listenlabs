@@ -50,9 +50,9 @@ export class SelfPlayTrainer {
       episodes: 100,
       batchSize: 32,
       learningRate: 0.001,
-      explorationStart: 0.9,
-      explorationEnd: 0.2,
-      explorationDecay: 0.97, // per-epoch
+      explorationStart: 0.6,
+      explorationEnd: 0.05,
+      explorationDecay: 0.95,
       successThreshold: 5000,
       elitePercentile: 0.2,
       ...config,
@@ -141,7 +141,8 @@ export class SelfPlayTrainer {
             (s: number, c: any) => s + Math.max(0, c.required - c.current),
             0
           )
-          const lambda = 10
+          const lambda = 200
+
           return { states, actions, reward: -(rejected + lambda * shortfall), rejections: rejected, completed: false }
         }
       }
@@ -150,7 +151,8 @@ export class SelfPlayTrainer {
     // too many rejections
     const progress = bouncer.getProgress()
     const shortfall = progress.constraints.reduce((s: number, c: any) => s + Math.max(0, c.required - c.current), 0)
-    const lambda = 10
+    const lambda = 200
+
     return { states, actions, reward: -(rejected + lambda * shortfall), rejections: rejected, completed: false }
   }
 
