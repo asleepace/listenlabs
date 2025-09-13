@@ -10,7 +10,7 @@ import { dump } from './utils/dump'
    ========================= */
 const CFG = {
   // Included on persisted data to identify models and biases
-  MODEL_VERSION: 2.9,
+  MODEL_VERSION: 2.99,
 
   // Display / reporting
   UI: {
@@ -101,7 +101,7 @@ const CFG = {
       { ratio: 60, start: 0.82 }, // was 0.90
       { ratio: -Infinity, start: 0.92 }, // was 0.95
     ],
-    hardCutUsed: 0.93, // ↓ from 0.97 so the “must-help-worst” phase arrives sooner
+    hardCutUsed: 0.95, // ↓ from 0.97 so the “must-help-worst” phase arrives sooner
     lagSlack: 0.02, // consider helping if attr progress < used - lagSlack
   },
 
@@ -690,11 +690,35 @@ export class BanditBouncer<T> implements BerghainBouncer {
   private getConstraints(): Constraint<T>[] {
     return Array.from(this.constraints.values())
   }
+
   private remaining() {
     return this.config.MAX_CAPACITY - this.totalAdmitted
   }
+
   private usedFrac() {
     return this.totalAdmitted / this.config.MAX_CAPACITY
+  }
+
+  // NEW: helper so you can reuse the logic
+  private isFinishEligible(person: Person<T>) {
+    const used = this.usedFrac()
+    if (used < CFG.FINISH.enableAtUsed) return false
+    const unmet = this.getConstraints().filter((c) => !c.isSatisfied())
+    if (!unmet.length) return false
+
+    const remaining = this.remaining()
+    const info = unmet
+      .map((c) => {
+        const short = c.getShortfall()
+        const roomy = remaining / Math.max(1, short) >= CFG.FINISH.ratioMin
+        const eligible = short > 0 && (short <= CFG.FINISH.maxShortfall || roomy)
+        return { c, short, eligible }
+      })
+      .filter((x) => x.eligible)
+      .sort((a, b) => a.short - b.short)
+
+    // eligible if this person helps any eligible constraint
+    return info.some((e) => person[e.c.attribute])
   }
 
   private getFeasibilityRatios() {
@@ -705,7 +729,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
       .map((c) => {
         const ef = c.getEmpiricalFrequency() || c.frequency || 1e-6
         const expect = Math.max(1e-6, remaining * ef)
-        const lag = this.paceLag(c, used) // ← pace lag (target - admitted at current used)
+        const lag = this.needAmount(c, used) // (rename var if you want)
         return {
           attr: String(c.attribute),
           ratio: lag / expect, // pace-based ratio
@@ -992,19 +1016,28 @@ export class BanditBouncer<T> implements BerghainBouncer {
     return Math.max(0, target - c.admitted)
   }
 
+  private needAmount(c: Constraint<T>, used: number) {
+    const pace = this.paceLag(c, used) // target-based
+    const short = c.getShortfall() // absolute remaining
+    const t = Math.max(0, Math.min(1, (used - 0.85) / 0.1)) // 0→1 from 85% to 95% used
+    return (1 - t) * pace + t * short
+  }
+
   private worstLagInfo() {
     const used = this.usedFrac()
     const remaining = this.remaining()
     const unmet = this.getConstraints().filter((c) => !c.isSatisfied())
+
     if (!unmet.length) return { attr: null as keyof T | null, ratio: 0, lag: 0 }
 
     // ratio = lag / expected available
     let best: { c: Constraint<T>; ratio: number; lag: number } | null = null
     for (const c of unmet) {
-      const lag = this.paceLag(c, used)
+      const need = this.needAmount(c, used)
       const ef = c.getEmpiricalFrequency() || c.frequency || 1e-6
       const expect = Math.max(1e-6, remaining * ef)
-      const ratio = Math.min(CFG.PACE.scarcityCap, lag / expect)
+      const ratio = Math.min(CFG.PACE.scarcityCap, need / expect)
+      const lag = this.paceLag(c, used)
       if (!best || ratio > best.ratio) best = { c, ratio, lag }
     }
     return { attr: best?.c?.attribute ?? null, ratio: best?.ratio ?? 0, lag: best?.lag ?? 0 }
@@ -1026,6 +1059,14 @@ export class BanditBouncer<T> implements BerghainBouncer {
         .filter((t) => t[1])
         .map((t) => t[0])
     )
+
+    if (this.isFinishEligible(person)) {
+      const learnFeat = features.slice()
+      this.getConstraints().forEach((c, i) => {
+        if (i < this.indicatorCount && person[c.attribute] && c.isSatisfied()) learnFeat[i] = 0
+      })
+      return this.applyAdmit(person, learnFeat, prices, this.bandit.getLastRawValue?.() ?? 0)
+    }
 
     // snapshot of which constraints are already satisfied (for masked learning on admits)
     const preSatisfied = this.getConstraints().map((c) => c.isSatisfied())
@@ -1063,9 +1104,11 @@ export class BanditBouncer<T> implements BerghainBouncer {
 
     // --- gate: soft → hard ---
     if (unmet.length && used > gateStart) {
+      const finishEligible = this.isFinishEligible(person)
       const pass = hardCut
-        ? helpsWorst && helpsAnyLagging // hard phase: must help the worst AND be lagging
-        : helpsAnyLagging || nearWorst // soft phase: any lagging help OR near-worst
+        ? (helpsWorst && helpsAnyLagging) || finishEligible
+        : helpsAnyLagging || nearWorst || finishEligible
+
       if (!pass) return this.applyReject(person, features, prices)
     }
 
