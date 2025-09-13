@@ -13,7 +13,6 @@ export class NeuralNet {
   private layerOutputs: Matrix[] = []
   private layerInputs: Matrix[] = []
 
-  // Learning rate and regularization
   private learningRate: number
   private l2Lambda: number
 
@@ -22,7 +21,6 @@ export class NeuralNet {
     this.l2Lambda = l2Lambda
   }
 
-  // Add a layer to the network
   addLayer(
     inputSize: number,
     outputSize: number,
@@ -30,7 +28,6 @@ export class NeuralNet {
     initMethod: 'he' | 'xavier' | 'random' = 'he'
   ): void {
     let weights: Matrix
-
     switch (initMethod) {
       case 'he':
         weights = Matrix.he(inputSize, outputSize)
@@ -38,37 +35,30 @@ export class NeuralNet {
       case 'xavier':
         weights = Matrix.xavier(inputSize, outputSize)
         break
-      case 'random':
+      default:
         weights = Matrix.random(inputSize, outputSize, -0.5, 0.5)
-        break
     }
-
     const bias = Matrix.zeros(1, outputSize)
-
-    this.layers.push({
-      weights,
-      bias,
-      activation,
-    })
+    this.layers.push({ weights, bias, activation })
   }
 
-  // Forward propagation
   forward(input: number[] | Matrix): number[] {
     let current = input instanceof Matrix ? input : Matrix.fromArray(input).transpose()
 
-    // Store for backprop
+    // Guard: shape must match first layer
+    if (this.layers.length > 0 && current.cols !== this.layers[0].weights.rows) {
+      throw new Error(
+        `Shape mismatch: input has ${current.cols} features, layer expects ${this.layers[0].weights.rows}`
+      )
+    }
+
     this.layerInputs = [current.copy()]
     this.layerOutputs = []
 
-    for (const layer of this.layers) {
-      if (current.cols !== layer.weights.rows) {
-        throw new Error(`Shape mismatch: input has ${current.cols} features, but layer expects ${layer.weights.rows}.`)
-      }
-
-      // Linear transformation: z = x * W + b
+    for (let li = 0; li < this.layers.length; li++) {
+      const layer = this.layers[li]
       const z = current.dot(layer.weights).add(layer.bias)
 
-      // Apply activation
       let output: Matrix
       switch (layer.activation) {
         case 'relu':
@@ -81,67 +71,48 @@ export class NeuralNet {
           output = z.map(activations.tanh)
           break
         case 'linear':
+        default:
           output = z
-          break
       }
 
       this.layerOutputs.push(output.copy())
-      if (this.layers.indexOf(layer) < this.layers.length - 1) {
-        this.layerInputs.push(output.copy())
-      }
-
+      if (li < this.layers.length - 1) this.layerInputs.push(output.copy())
       current = output
     }
 
     return current.toArray()
   }
 
-  // Backward propagation
-  backward(target: number[] | number, predicted?: number[]): void {
-    if (!this.layerOutputs.length) {
-      throw new Error('Must call forward() before backward()')
-    }
+  backward(target: number[] | number): void {
+    if (!this.layerOutputs.length) throw new Error('Must call forward() before backward()')
 
-    // Convert target to matrix
     const targetMatrix = typeof target === 'number' ? new Matrix(1, 1, [target]) : Matrix.fromArray(target).transpose()
-
-    // Start with output layer error
     const outputLayer = this.layers[this.layers.length - 1]
     const output = this.layerOutputs[this.layerOutputs.length - 1]
 
-    // Calculate initial gradient (assuming MSE loss)
     let delta = output.subtract(targetMatrix).scale(2 / output.cols)
 
-    // Apply output activation gradient
     if (outputLayer.activation === 'sigmoid') {
       delta = delta.hadamard(output.map((y) => gradients.sigmoid(y)))
     } else if (outputLayer.activation === 'tanh') {
       delta = delta.hadamard(output.map((y) => gradients.tanh(y)))
     }
 
-    // Backpropagate through layers
     for (let i = this.layers.length - 1; i >= 0; i--) {
       const layer = this.layers[i]
       const layerInput = this.layerInputs[i]
 
-      // Calculate gradients
       const weightGrad = layerInput.transpose().dot(delta)
       const biasGrad = delta.copy()
 
-      // Update weights with L2 regularization
       const weightUpdate = weightGrad.add(layer.weights.scale(this.l2Lambda)).scale(this.learningRate)
-
       layer.weights = layer.weights.subtract(weightUpdate)
       layer.bias = layer.bias.subtract(biasGrad.scale(this.learningRate))
 
-      // Propagate error to previous layer
       if (i > 0) {
         delta = delta.dot(layer.weights.transpose())
-
-        // Apply activation gradient of previous layer
         const prevLayer = this.layers[i - 1]
         const prevOutput = this.layerOutputs[i - 1]
-
         switch (prevLayer.activation) {
           case 'relu':
             delta = delta.hadamard(prevOutput.map((x) => gradients.relu(x)))
@@ -157,7 +128,6 @@ export class NeuralNet {
     }
   }
 
-  // Train on a batch of examples
   trainBatch(inputs: number[][], targets: number[] | number[][], epochs = 1): number {
     let totalLoss = 0
 
@@ -166,21 +136,9 @@ export class NeuralNet {
 
       for (let i = 0; i < inputs.length; i++) {
         const input = inputs[i]
+        const target: number[] = Array.isArray(targets[0]) ? (targets as number[][])[i] : [(targets as number[])[i]]
 
-        // Handle both single values and arrays for targets
-        let target: number[]
-        if (Array.isArray(targets[0])) {
-          // targets is number[][]
-          target = (targets as number[][])[i]
-        } else {
-          // targets is number[]
-          target = [(targets as number[])[i]]
-        }
-
-        // Forward pass
         const output = this.forward(input)
-
-        // Calculate loss (MSE)
         const loss =
           output.reduce((sum, val, idx) => {
             const diff = val - target[idx]
@@ -188,8 +146,6 @@ export class NeuralNet {
           }, 0) / output.length
 
         epochLoss += loss
-
-        // Backward pass
         this.backward(target)
       }
 
@@ -199,21 +155,15 @@ export class NeuralNet {
     return totalLoss
   }
 
-  // Predict with confidence (for binary classification)
   predict(input: number[]): { value: number; confidence: number } {
     const output = this.forward(input)
     const value = output[0]
-
-    // For sigmoid output, confidence is how far from 0.5
     const confidence = Math.abs(value - 0.5) * 2
-
     return { value, confidence }
   }
 
-  // Save weights to JSON
   toJSON(): any {
     return {
-      inputSize: this.layers[0].weights.rows,
       layers: this.layers.map((layer) => ({
         weights: Array.from(layer.weights.data),
         weightsShape: [layer.weights.rows, layer.weights.cols],
@@ -226,47 +176,33 @@ export class NeuralNet {
     }
   }
 
-  // Load weights from JSON
   static fromJSON(json: any): NeuralNet {
     const net = new NeuralNet(json.learningRate, json.l2Lambda)
-
-    net.layers = json.layers.map((layerData: any) => ({
-      weights: new Matrix(layerData.weightsShape[0], layerData.weightsShape[1], layerData.weights),
-      bias: new Matrix(layerData.biasShape[0], layerData.biasShape[1], layerData.bias),
-      activation: layerData.activation,
+    net.layers = json.layers.map((ld: any) => ({
+      weights: new Matrix(ld.weightsShape[0], ld.weightsShape[1], ld.weights),
+      bias: new Matrix(ld.biasShape[0], ld.biasShape[1], ld.bias),
+      activation: ld.activation,
     }))
-
     return net
   }
 
-  // Get current learning rate
   getLearningRate(): number {
     return this.learningRate
   }
 
-  // Update learning rate (for decay)
   setLearningRate(rate: number): void {
     this.learningRate = rate
   }
 
-  // Calculate total number of parameters
   getParameterCount(): number {
-    return this.layers.reduce((sum, layer) => {
-      return sum + layer.weights.data.length + layer.bias.data.length
-    }, 0)
+    return this.layers.reduce((sum, layer) => sum + layer.weights.data.length + layer.bias.data.length, 0)
   }
 }
 
-// Example usage for Berghain problem
+// Creates a net matching an encoder-provided input size
 export function createBerghainNet(inputSize: number = 17): NeuralNet {
-  // Input layer: 17 features
-  // - 4 person attributes
-  // - 4 constraint satisfaction ratios
-  // - 4 constraint pressure scores
-  // - 3 global features
-  // - 1 alignment + 1 correlation
   const net = new NeuralNet(0.001, 0.0001)
-  net.addLayer(inputSize, 24, 'relu', 'he')
+  net.addLayer(inputSize, 24, 'relu', 'he') // first layer uses inputSize
   net.addLayer(24, 12, 'relu', 'he')
   net.addLayer(12, 1, 'sigmoid', 'xavier')
   return net

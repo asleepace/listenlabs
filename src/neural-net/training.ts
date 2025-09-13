@@ -20,7 +20,7 @@ interface TrainingConfig {
   learningRate: number
   explorationStart: number
   explorationEnd: number
-  explorationDecay: number
+  explorationDecay: number // per-epoch decay
   successThreshold: number
   elitePercentile: number
 }
@@ -31,7 +31,6 @@ export class SelfPlayTrainer {
   private encoder: StateEncoder
   private config: TrainingConfig
 
-  // Training history
   private episodeHistory: Episode[] = []
   private bestEpisode: Episode | null = null
   private trainingStats: {
@@ -51,56 +50,44 @@ export class SelfPlayTrainer {
       episodes: 100,
       batchSize: 32,
       learningRate: 0.001,
-      explorationStart: 0.3,
-      explorationEnd: 0.05,
-      explorationDecay: 0.995,
-      successThreshold: 5000, // Max rejections for "success"
-      elitePercentile: 0.2, // Top 20% of episodes
+      explorationStart: 0.9,
+      explorationEnd: 0.2,
+      explorationDecay: 0.97, // per-epoch decay (not per-step)
+      successThreshold: 5000,
+      elitePercentile: 0.2,
       ...config,
     }
 
     this.net.setLearningRate(this.config.learningRate)
   }
 
-  // Generate synthetic person based on statistics
   private generatePerson(index: number): Person<PersonAttributesScenario2> {
     const attributes: PersonAttributesScenario2 = {} as any
     const stats = this.game.attributeStatistics
 
-    // First, sample each attribute independently based on frequency
     const samples: Record<string, boolean> = {}
     for (const [attr, freq] of Object.entries(stats.relativeFrequencies)) {
       samples[attr] = Math.random() < freq
     }
-
-    // Apply correlations to make it more realistic
-    // This is a simplified correlation application
     for (const [attr1, correlations] of Object.entries(stats.correlations)) {
       if (samples[attr1]) {
         for (const [attr2, corr] of Object.entries(correlations)) {
           if (attr1 !== attr2 && Math.abs(corr) > 0.3) {
-            // Strong correlation - adjust probability
             const adjustedProb = stats.relativeFrequencies[attr2] * (1 + corr * 0.5)
             samples[attr2] = Math.random() < adjustedProb
           }
         }
       }
     }
-
-    // Convert to proper format
     for (const key of Object.keys(stats.relativeFrequencies)) {
       attributes[key as keyof PersonAttributesScenario2] = samples[key]
     }
 
-    return {
-      personIndex: index,
-      attributes,
-    }
+    return { personIndex: index, attributes }
   }
 
-  // Simulate one episode
   private runEpisode(explorationRate: number): Episode {
-    const bouncer = new NeuralNetBouncer(this.game, { explorationRate, baseThreshold: 0.35 })
+    const bouncer = new NeuralNetBouncer(this.game, { explorationRate, baseThreshold: 0.35, minThreshold: 0.25 })
     bouncer.setNetwork(this.net)
 
     const states: number[][] = []
@@ -108,10 +95,8 @@ export class SelfPlayTrainer {
     let admitted = 0
     let rejected = 0
 
-    // Run until completion or failure
     while (admitted < 1000 && rejected < 20000) {
       const person = this.generatePerson(admitted + rejected)
-
       const status: GameStatusRunning<PersonAttributesScenario2> = {
         status: 'running',
         admittedCount: admitted,
@@ -119,95 +104,58 @@ export class SelfPlayTrainer {
         nextPerson: person,
       }
 
-      // Encode state
       const state = this.encoder.encode(status)
       states.push(state)
 
-      // Make decision
       const admit = bouncer.admit(status)
       actions.push(admit)
 
-      // Update counts
-      if (admit) {
-        admitted++
-      } else {
-        rejected++
-      }
+      if (admit) admitted++
+      else rejected++
 
-      // Check constraints if venue is full
       if (admitted === 1000) {
         const progress = bouncer.getProgress()
         const satisfied = progress.constraints.every((c: any) => c.satisfied)
 
         if (satisfied) {
-          // Success!
-          return {
-            states,
-            actions,
-            reward: -rejected, // Negative rejections as reward
-            rejections: rejected,
-            completed: true,
-          }
+          return { states, actions, reward: -rejected, rejections: rejected, completed: true }
         } else {
-          const progress = bouncer.getProgress()
           const shortfall = progress.constraints.reduce(
             (sum: number, c: any) => sum + Math.max(0, c.required - c.current),
             0
           )
           const lambda = 10
           const shapedReward = -(rejected + lambda * shortfall)
-          return {
-            states,
-            actions,
-            reward: shapedReward,
-            rejections: rejected,
-            completed: false,
-          }
+          return { states, actions, reward: shapedReward, rejections: rejected, completed: false }
         }
       }
     }
 
-    // Failed - too many rejections
     const progress = bouncer.getProgress()
     const shortfall = progress.constraints.reduce((sum: number, c: any) => sum + Math.max(0, c.required - c.current), 0)
     const lambda = 10
-    return {
-      states,
-      actions,
-      reward: -(rejected + lambda * shortfall),
-      rejections: rejected,
-      completed: false,
-    }
+    return { states, actions, reward: -(rejected + lambda * shortfall), rejections: rejected, completed: false }
   }
 
-  // Train on successful episodes
   // Train on top-performing (elite) episodes with label balancing & shuffling
   private trainOnEpisodes(episodes: Episode[]): number {
     if (episodes.length === 0) return 0
 
-    // 1) Sort by reward (higher is better). If there's no variance, skip.
     const sorted = [...episodes].sort((a, b) => b.reward - a.reward)
-    if (sorted[0].reward === sorted[sorted.length - 1].reward) {
-      return 0
-    }
+    if (sorted[0].reward === sorted[sorted.length - 1].reward) return 0
 
-    // 2) Take elite slice
     const eliteCount = Math.max(1, Math.floor(episodes.length * this.config.elitePercentile))
     const elite = sorted.slice(0, eliteCount)
 
-    // 3) Optionally compute per-episode weights from reward (min-max to [0.25, 1])
-    //    Better episodes contribute more samples.
     const rewards = elite.map((e) => e.reward)
     const rMin = Math.min(...rewards)
     const rMax = Math.max(...rewards)
     const scale = rMax > rMin ? (r: number) => 0.25 + 0.75 * ((r - rMin) / (rMax - rMin)) : (_: number) => 1
 
-    // 4) Build dataset (with episode-level upsampling by weight)
     const X: number[][] = []
     const y: number[] = []
-
     for (const ep of elite) {
-      const w = Math.max(1, Math.round(scale(ep.reward) * 1)) // integer duplication factor (tweakable)
+      const w = Math.max(1, Math.round(scale(ep.reward) * 1))
       for (let rep = 0; rep < w; rep++) {
         for (let i = 0; i < ep.states.length; i++) {
           X.push(ep.states[i])
@@ -215,33 +163,27 @@ export class SelfPlayTrainer {
         }
       }
     }
-
     if (X.length === 0) return 0
 
-    // 5) Ensure at least 20% positive labels via *upsampling* positives
     const POS_MIN_RATIO = 0.2
     const posIdx: number[] = []
-    const negIdx: number[] = []
-    for (let i = 0; i < y.length; i++) (y[i] === 1 ? posIdx : negIdx).push(i)
-
+    for (let i = 0; i < y.length; i++) if (y[i] === 1) posIdx.push(i)
     const desiredPos = Math.ceil(POS_MIN_RATIO * y.length)
     if (posIdx.length > 0 && posIdx.length < desiredPos) {
       const need = desiredPos - posIdx.length
       for (let k = 0; k < need; k++) {
         const j = posIdx[k % posIdx.length]
-        X.push(X[j].slice()) // duplicate
+        X.push(X[j].slice())
         y.push(1)
       }
     }
 
-    // 6) Shuffle dataset together (Fisher–Yates)
     for (let i = X.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1))
       ;[X[i], X[j]] = [X[j], X[i]]
       ;[y[i], y[j]] = [y[j], y[i]]
     }
 
-    // 7) Train in batches
     const batchSize = Math.max(1, this.config.batchSize)
     const batchCount = Math.ceil(X.length / batchSize)
     let totalLoss = 0
@@ -249,16 +191,13 @@ export class SelfPlayTrainer {
     for (let b = 0; b < batchCount; b++) {
       const start = b * batchSize
       const end = Math.min(start + batchSize, X.length)
-      const batchInputs = X.slice(start, end)
-      const batchTargets = y.slice(start, end)
-      const loss = this.net.trainBatch(batchInputs, batchTargets, 1)
+      const loss = this.net.trainBatch(X.slice(start, end), y.slice(start, end), 1)
       totalLoss += loss
     }
 
     return totalLoss / Math.max(1, batchCount)
   }
 
-  // Main training loop
   async train(epochs: number = 10): Promise<void> {
     console.log('Starting self-play training...')
 
@@ -269,7 +208,6 @@ export class SelfPlayTrainer {
       let successCount = 0
       let totalRejections = 0
 
-      // Run episodes
       for (let ep = 0; ep < this.config.episodes; ep++) {
         const episode = this.runEpisode(exploration)
         episodeBatch.push(episode)
@@ -277,25 +215,18 @@ export class SelfPlayTrainer {
         if (episode.completed) {
           successCount++
           totalRejections += episode.rejections
-
-          // Track best episode
-          if (!this.bestEpisode || episode.rejections < this.bestEpisode.rejections) {
-            this.bestEpisode = episode
-          }
+          if (!this.bestEpisode || episode.rejections < this.bestEpisode.rejections) this.bestEpisode = episode
         }
       }
 
-      // Calculate stats
       const avgRejections = successCount > 0 ? totalRejections / successCount : 20000
       const successRate = successCount / this.config.episodes
 
-      // Train on episodes
       const loss = this.trainOnEpisodes(episodeBatch)
 
-      // Update exploration
+      // per-epoch decay
       exploration = Math.max(this.config.explorationEnd, exploration * this.config.explorationDecay)
 
-      // Log progress
       console.log(`Epoch ${epoch + 1}/${epochs}:`)
       console.log(`  Success rate: ${(successRate * 100).toFixed(1)}%`)
       console.log(`  Avg rejections (successful): ${avgRejections.toFixed(0)}`)
@@ -303,7 +234,6 @@ export class SelfPlayTrainer {
       console.log(`  Training loss: ${loss.toFixed(4)}`)
       console.log(`  Exploration rate: ${exploration.toFixed(3)}`)
 
-      // Store stats
       this.trainingStats.push({
         epoch: epoch + 1,
         avgReward: -avgRejections,
@@ -312,7 +242,6 @@ export class SelfPlayTrainer {
         bestRejections: this.bestEpisode?.rejections || 20000,
       })
 
-      // Early stopping if we're doing well
       if (successRate > 0.9 && avgRejections < 1000) {
         console.log('Early stopping - excellent performance achieved!')
         break
@@ -320,37 +249,28 @@ export class SelfPlayTrainer {
     }
 
     console.log('\nTraining complete!')
-    if (this.bestEpisode) {
-      console.log(`Best episode: ${this.bestEpisode.rejections} rejections`)
-    }
+    if (this.bestEpisode) console.log(`Best episode: ${this.bestEpisode.rejections} rejections`)
   }
 
-  // Get trained network
   getNetwork(): NeuralNet {
     return this.net
   }
 
-  // Get training statistics
   getStats(): typeof this.trainingStats {
     return this.trainingStats
   }
 
-  // Save best weights
   getBestWeights(): any {
     return this.net.toJSON()
   }
 
-  // Test the trained network
   test(episodes: number = 100): {
     successRate: number
     avgRejections: number
     minRejections: number
     maxRejections: number
   } {
-    const bouncer = new NeuralNetBouncer(this.game, {
-      explorationRate: 0, // No exploration during testing
-      baseThreshold: 0.5,
-    })
+    const bouncer = new NeuralNetBouncer(this.game, { explorationRate: 0, baseThreshold: 0.5 })
     bouncer.setNetwork(this.net)
 
     let successes = 0
@@ -360,7 +280,6 @@ export class SelfPlayTrainer {
 
     for (let i = 0; i < episodes; i++) {
       const episode = this.runEpisode(0)
-
       if (episode.completed) {
         successes++
         totalRejections += episode.rejections
@@ -378,7 +297,6 @@ export class SelfPlayTrainer {
   }
 }
 
-// Example usage
 export async function trainBouncer(game: Game): Promise<NeuralNetBouncer> {
   const trainer = new SelfPlayTrainer(game, {
     episodes: 50,
@@ -386,22 +304,18 @@ export async function trainBouncer(game: Game): Promise<NeuralNetBouncer> {
     learningRate: 0.001,
     explorationStart: 0.9,
     explorationEnd: 0.2,
-    explorationDecay: 0.97, // per-step decay; across 1000 steps that matters a LOT
+    explorationDecay: 0.97, // per-epoch
   })
 
-  // Train for 20 epochs
   await trainer.train(20)
 
-  // Test performance
   const results = trainer.test(100)
   console.log('\nTest Results:')
   console.log(`Success rate: ${(results.successRate * 100).toFixed(1)}%`)
   console.log(`Average rejections: ${results.avgRejections.toFixed(0)}`)
   console.log(`Best: ${results.minRejections}, Worst: ${results.maxRejections}`)
 
-  // Create bouncer with trained weights
   const bouncer = new NeuralNetBouncer(game)
   bouncer.setNetwork(trainer.getNetwork())
-
   return bouncer
 }
