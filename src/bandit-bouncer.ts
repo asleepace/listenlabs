@@ -10,7 +10,7 @@ import { dump } from './utils/dump'
    ========================= */
 const CFG = {
   // Included on persisted data to identify models and biases
-  MODEL_VERSION: 2.2,
+  MODEL_VERSION: 2.3,
 
   // Display / reporting
   UI: {
@@ -28,11 +28,11 @@ const CFG = {
     priorTotal: 8, // Beta prior total (alpha+beta)
     k0: 0.8, // optimism scale at start (UCB), fades with used (range 0.6–1.2)
     slope: 16.0, // squashing slope → price jump as need > supply
-    synergy: 0.25, // small bonus for covering multiple urgent attrs
+    synergy: 0.12, // small bonus for covering multiple urgent attrs
     paceSlack: 0.02, // allow a tiny progress gap before any pace nudges
     paceBrake: 0.6, // reduce price when ahead of pace (keeps rate flat)
-    paceBoost: 0.7, // increase price when behind pace (keeps bars together)
-    aheadPenalty: { scale: 0.5, max: 0.75 }, // admit-time nudge vs ahead-of-pace even before satisfied
+    paceBoost: 0.95, // increase price when behind pace (keeps bars together)
+    aheadPenalty: { scale: 0.8, max: 1.1 }, // admit-time nudge vs ahead-of-pace even before satisfied
     overshootPenaltyMax: 4.0, // cap on overshoot tax per attribute (per-decision)
     rareScarcityScale: 1.5, // multiplier for scarcity feature strength
   },
@@ -46,11 +46,11 @@ const CFG = {
       { ratio: 0.7, start: 0.9 },
       { ratio: 0.0, start: 0.95 },
     ],
-    helperBonus: 0.35, // raw-value bonus if helps worst-lag attr
-    nonHelperMalus: 0.35, // raw-value malus if doesn’t help worst-lag attr late
-    lateCutoverUsed: 0.7, // start applying helper/malus around here
+    helperBonus: 0.55, // raw-value bonus if helps worst-lag attr
+    nonHelperMalus: 0.45, // raw-value malus if doesn’t help worst-lag attr late
+    lateCutoverUsed: 0.6, // start applying helper/malus around here
     gateLagSlack: 0.02, // consider "helps lagging" if progress < used - slack
-    scarcityCap: 6.0, // cap for scarcity/ratio to avoid runaway prices
+    scarcityCap: 10.0, // cap for scarcity/ratio to avoid runaway prices
   },
 
   // Linear bandit (dimension is determined dynamically)
@@ -60,7 +60,7 @@ const CFG = {
     noiseDecaySteps: 400, // steps until half-decayed
 
     eta: 0.15, // learning rate
-    hintEta: 0.14, // positive hint learning rate
+    hintEta: 0.2, // positive hint learning rate
     emaBeta: 0.035, // admit-rate EMA
     iBeta: 0.002, // integral smoothing
     weightClamp: [-5, 5] as const,
@@ -117,12 +117,12 @@ const CFG = {
   // Feature engineering
   FEATURES: {
     capacityExp: 0.8, // exponent on used fraction
-    scarcityCap: 3.0, // cap on scarcity feature before scaling
+    scarcityCap: 5.0, // cap on scarcity feature before scaling
   },
 
   HINTS: {
     synergyPairCap: 3, // pairs to include for synergy
-    antiHintScale: 0.6, // strength for ahead-of-pace anti-hint
+    antiHintScale: 0.9, // strength for ahead-of-pace anti-hint
     abundance: { scale: 0.25, max: 0.6 }, // mild nudge against over-abundant attrs
   },
 
@@ -151,7 +151,7 @@ const CFG = {
   },
 
   // Optional epsilon-admit very early (break stalemates)
-  EXPLORE: { epsAdmit: 0.06, epsUntilUsed: 0.12 },
+  EXPLORE: { epsAdmit: 0.03, epsUntilUsed: 0.08 },
 
   // Debug / logging
   DEBUG: {
@@ -161,8 +161,8 @@ const CFG = {
 
   // Final score shaping (global)
   SCORE: {
-    overshootSlack: 10, // free buffer per attribute (ignores small drift)
-    overshootL1: 0.5, // linear cost per extra admit beyond the slack
+    overshootSlack: 5, // free buffer per attribute (ignores small drift)
+    overshootL1: 0.75, // linear cost per extra admit beyond the slack
     overshootL2: 0.02, // gentle quadratic kicker (keeps huge overshoots costly)
     weightByScarcity: true, // weight overshoot by current scarcity of that attribute
   },
