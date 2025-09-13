@@ -1,7 +1,6 @@
 /** @file training.ts */
 
 import type { Game, GameStatusRunning, PersonAttributesScenario2, Person } from '../types'
-
 import { NeuralNet, createBerghainNet } from './neural-net'
 import { NeuralNetBouncer } from './neural-net-bouncer'
 import { StateEncoder } from './state-encoder'
@@ -45,6 +44,7 @@ export class SelfPlayTrainer {
     this.game = game
     this.encoder = new StateEncoder(game)
     this.net = createBerghainNet(this.encoder.getFeatureSize())
+    console.log('[Net] featureSize =', this.encoder.getFeatureSize())
 
     this.config = {
       episodes: 100,
@@ -52,7 +52,7 @@ export class SelfPlayTrainer {
       learningRate: 0.001,
       explorationStart: 0.9,
       explorationEnd: 0.2,
-      explorationDecay: 0.97, // per-epoch decay (not per-step)
+      explorationDecay: 0.97, // per-epoch
       successThreshold: 5000,
       elitePercentile: 0.2,
       ...config,
@@ -64,39 +64,48 @@ export class SelfPlayTrainer {
   private generatePerson(index: number): Person<PersonAttributesScenario2> {
     const attributes: PersonAttributesScenario2 = {} as any
     const stats = this.game.attributeStatistics
-
     const samples: Record<string, boolean> = {}
+
+    // sample independent
     for (const [attr, freq] of Object.entries(stats.relativeFrequencies)) {
       samples[attr] = Math.random() < freq
     }
-    for (const [attr1, correlations] of Object.entries(stats.correlations)) {
-      if (samples[attr1]) {
-        for (const [attr2, corr] of Object.entries(correlations)) {
-          if (attr1 !== attr2 && Math.abs(corr) > 0.3) {
-            const adjustedProb = stats.relativeFrequencies[attr2] * (1 + corr * 0.5)
-            samples[attr2] = Math.random() < adjustedProb
+    // apply coarse correlations
+    for (const [a1, correlations] of Object.entries(stats.correlations)) {
+      if (samples[a1]) {
+        for (const [a2, corr] of Object.entries(correlations)) {
+          if (a1 !== a2 && Math.abs(corr) > 0.3) {
+            const p = Math.min(0.999, Math.max(0.001, stats.relativeFrequencies[a2] * (1 + corr * 0.5)))
+            samples[a2] = Math.random() < p
           }
         }
       }
     }
-    for (const key of Object.keys(stats.relativeFrequencies)) {
-      attributes[key as keyof PersonAttributesScenario2] = samples[key]
+    // to typed map
+    for (const k of Object.keys(stats.relativeFrequencies)) {
+      attributes[k as keyof PersonAttributesScenario2] = samples[k]
     }
-
     return { personIndex: index, attributes }
   }
 
   private runEpisode(explorationRate: number): Episode {
+    // bouncer has NO per-step decay; explorationRate is fixed for the episode
     const bouncer = new NeuralNetBouncer(this.game, { explorationRate, baseThreshold: 0.35, minThreshold: 0.25 })
     bouncer.setNetwork(this.net)
 
     const states: number[][] = []
     const actions: boolean[] = []
+
     let admitted = 0
     let rejected = 0
 
+    // true running counts used for encoding (to match bouncer’s tracker)
+    const trueCounts: Record<string, number> = {}
+    Object.keys(this.game.attributeStatistics.relativeFrequencies).forEach((k) => (trueCounts[k] = 0))
+
     while (admitted < 1000 && rejected < 20000) {
       const person = this.generatePerson(admitted + rejected)
+
       const status: GameStatusRunning<PersonAttributesScenario2> = {
         status: 'running',
         admittedCount: admitted,
@@ -104,35 +113,43 @@ export class SelfPlayTrainer {
         nextPerson: person,
       }
 
-      const state = this.encoder.encode(status)
+      // Encode with TRUE counts (not estimates)
+      const state = this.encoder.encode(status, trueCounts)
       states.push(state)
 
       const admit = bouncer.admit(status)
       actions.push(admit)
 
-      if (admit) admitted++
-      else rejected++
+      if (admit) {
+        admitted++
+        // update trueCounts
+        for (const [attr, has] of Object.entries(person.attributes)) {
+          if (has) trueCounts[attr] = (trueCounts[attr] || 0) + 1
+        }
+      } else {
+        rejected++
+      }
 
+      // capacity reached
       if (admitted === 1000) {
         const progress = bouncer.getProgress()
         const satisfied = progress.constraints.every((c: any) => c.satisfied)
-
         if (satisfied) {
           return { states, actions, reward: -rejected, rejections: rejected, completed: true }
         } else {
           const shortfall = progress.constraints.reduce(
-            (sum: number, c: any) => sum + Math.max(0, c.required - c.current),
+            (s: number, c: any) => s + Math.max(0, c.required - c.current),
             0
           )
           const lambda = 10
-          const shapedReward = -(rejected + lambda * shortfall)
-          return { states, actions, reward: shapedReward, rejections: rejected, completed: false }
+          return { states, actions, reward: -(rejected + lambda * shortfall), rejections: rejected, completed: false }
         }
       }
     }
 
+    // too many rejections
     const progress = bouncer.getProgress()
-    const shortfall = progress.constraints.reduce((sum: number, c: any) => sum + Math.max(0, c.required - c.current), 0)
+    const shortfall = progress.constraints.reduce((s: number, c: any) => s + Math.max(0, c.required - c.current), 0)
     const lambda = 10
     return { states, actions, reward: -(rejected + lambda * shortfall), rejections: rejected, completed: false }
   }
@@ -165,6 +182,7 @@ export class SelfPlayTrainer {
     }
     if (X.length === 0) return 0
 
+    // minimally upsample positives to 20% to avoid trivial rejecter
     const POS_MIN_RATIO = 0.2
     const posIdx: number[] = []
     for (let i = 0; i < y.length; i++) if (y[i] === 1) posIdx.push(i)
@@ -178,12 +196,14 @@ export class SelfPlayTrainer {
       }
     }
 
+    // shuffle
     for (let i = X.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1))
       ;[X[i], X[j]] = [X[j], X[i]]
       ;[y[i], y[j]] = [y[j], y[i]]
     }
 
+    // batched training
     const batchSize = Math.max(1, this.config.batchSize)
     const batchCount = Math.ceil(X.length / batchSize)
     let totalLoss = 0
@@ -224,7 +244,7 @@ export class SelfPlayTrainer {
 
       const loss = this.trainOnEpisodes(episodeBatch)
 
-      // per-epoch decay
+      // per-epoch decay ONLY
       exploration = Math.max(this.config.explorationEnd, exploration * this.config.explorationDecay)
 
       console.log(`Epoch ${epoch + 1}/${epochs}:`)

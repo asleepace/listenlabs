@@ -202,8 +202,8 @@ export class NeuralNet {
 // Creates a net matching an encoder-provided input size
 export function createBerghainNet(inputSize: number = 17): NeuralNet {
   const net = new NeuralNet(0.001, 0.0001)
-  net.addLayer(inputSize, 24, 'relu', 'he') // first layer uses inputSize
-  net.addLayer(24, 12, 'relu', 'he')
-  net.addLayer(12, 1, 'sigmoid', 'xavier')
+  net.addLayer(inputSize, 32, 'relu', 'he') // first hidden
+  net.addLayer(32, 16, 'relu', 'he') // second hidden
+  net.addLayer(16, 1, 'sigmoid', 'xavier') // output
   return net
 }

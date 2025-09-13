@@ -1,5 +1,3 @@
-/** @file state-encoder.ts */
-
 import type { Game, GameStatusRunning, PersonAttributesScenario2 } from '../types'
 
 export class StateEncoder {
@@ -8,47 +6,41 @@ export class StateEncoder {
   private maxRejected = 20000
 
   constructor(private game: Game) {
-    // Extract attribute keys from constraints or statistics
     this.attributeKeys = Object.keys(game.attributeStatistics.relativeFrequencies)
   }
 
-  encode(status: GameStatusRunning<PersonAttributesScenario2>): number[] {
-    const features: number[] = []
-
-    // 1. Person attributes (4 binary values)
+  /**
+   * Encode the state.
+   * @param status game status
+   * @param countsOverride (optional) real counts of admitted attributes to use instead of estimates
+   */
+  encode(status: GameStatusRunning<PersonAttributesScenario2>, countsOverride?: Record<string, number>): number[] {
+    // Precompute once
     const personFeatures = this.encodePersonAttributes(status.nextPerson.attributes)
-    features.push(...personFeatures)
+    const satisfactionRatios = this.getConstraintSatisfactionRatios(status, countsOverride)
+    const pressureScores = this.getConstraintPressure(status, countsOverride)
+    const alignmentScore = this.getAlignmentScore(status, countsOverride)
+    const correlationScore = this.getCorrelationScore(status, countsOverride)
 
-    // 2. Constraint satisfaction ratios (4 values, 0-1)
-    const satisfactionRatios = this.getConstraintSatisfactionRatios(status)
-    features.push(...satisfactionRatios)
+    const progressRatio = status.admittedCount / this.maxAdmitted
+    const rejectionRatio = status.rejectedCount / this.maxRejected
+    const remainingCapacity = (this.maxAdmitted - status.admittedCount) / this.maxAdmitted
 
-    // 3. Constraint pressure scores (4 values, 0-1)
-    // How urgently we need each attribute
-    const pressureScores = this.getConstraintPressure(status)
-    features.push(...pressureScores)
+    // Build the feature vector in the same order used by getFeatureNames()
+    const features: number[] = [
+      ...personFeatures, // |attributeKeys|
+      ...satisfactionRatios, // |constraints|
+      ...pressureScores, // |constraints|
+      progressRatio, // 1
+      rejectionRatio, // 1
+      remainingCapacity, // 1
+      alignmentScore, // 1
+      correlationScore, // 1
+    ]
 
-    // 4. Global state features
-    features.push(
-      // Progress toward capacity
-      status.admittedCount / this.maxAdmitted,
-
-      // Rejection rate
-      status.rejectedCount / this.maxRejected,
-
-      // Remaining capacity ratio
-      (this.maxAdmitted - status.admittedCount) / this.maxAdmitted
-    )
-
-    // 5. Person-constraint alignment score
-    // How well this person helps meet unsatisfied constraints
-    const alignmentScore = this.getAlignmentScore(status)
-    features.push(alignmentScore)
-
-    // 6. Correlation features
-    // How this person's attributes correlate with high-need attributes
-    const correlationScore = this.getCorrelationScore(status)
-    features.push(correlationScore)
+    if (features.length !== this.getFeatureSize()) {
+      console.warn('[StateEncoder] feature length mismatch:', { got: features.length, expected: this.getFeatureSize() })
+    }
 
     return features
   }
@@ -57,127 +49,95 @@ export class StateEncoder {
     return this.attributeKeys.map((key) => (attributes[key] ? 1 : 0))
   }
 
-  private getConstraintSatisfactionRatios(status: GameStatusRunning<PersonAttributesScenario2>): number[] {
-    // Track current counts for each attribute
-    const currentCounts = this.getCurrentAttributeCounts(status)
-
+  private getConstraintSatisfactionRatios(
+    status: GameStatusRunning<PersonAttributesScenario2>,
+    countsOverride?: Record<string, number>
+  ): number[] {
+    const currentCounts = countsOverride ?? this.getEstimatedCounts(status)
     return this.game.constraints.map((constraint) => {
       const current = currentCounts[constraint.attribute] || 0
       const required = constraint.minCount
-      // Clamp to [0, 1]
       return Math.min(1, current / required)
     })
   }
 
-  private getConstraintPressure(status: GameStatusRunning<PersonAttributesScenario2>): number[] {
+  private getConstraintPressure(
+    status: GameStatusRunning<PersonAttributesScenario2>,
+    countsOverride?: Record<string, number>
+  ): number[] {
     const remaining = this.maxAdmitted - status.admittedCount
-    const currentCounts = this.getCurrentAttributeCounts(status)
-
+    const currentCounts = countsOverride ?? this.getEstimatedCounts(status)
     return this.game.constraints.map((constraint) => {
       const current = currentCounts[constraint.attribute] || 0
       const stillNeeded = Math.max(0, constraint.minCount - current)
-
       if (remaining === 0) return 0
-
-      // Pressure = how many we still need / how many slots remain
-      // Higher pressure means we need a higher percentage of remaining slots
       const pressure = stillNeeded / remaining
-
-      // Apply exponential scaling for high pressure situations
-      // This makes the network more sensitive to urgent constraints
       return Math.min(1, Math.pow(pressure, 0.7))
     })
   }
 
-  private getAlignmentScore(status: GameStatusRunning<PersonAttributesScenario2>): number {
-    const pressures = this.getConstraintPressure(status)
+  private getAlignmentScore(
+    status: GameStatusRunning<PersonAttributesScenario2>,
+    countsOverride?: Record<string, number>
+  ): number {
+    const pressures = this.getConstraintPressure(status, countsOverride)
     const personAttrs = this.encodePersonAttributes(status.nextPerson.attributes)
-
     let score = 0
-    let totalPressure = 0
-
+    let total = 0
     this.game.constraints.forEach((constraint, i) => {
-      const attrIndex = this.attributeKeys.indexOf(constraint.attribute)
-      if (attrIndex >= 0 && personAttrs[attrIndex] === 1) {
-        score += pressures[i]
-      }
-      totalPressure += pressures[i]
+      const idx = this.attributeKeys.indexOf(constraint.attribute)
+      if (idx >= 0 && personAttrs[idx] === 1) score += pressures[i]
+      total += pressures[i]
     })
-
-    return totalPressure > 0 ? score / totalPressure : 0
+    return total > 0 ? score / total : 0
   }
 
-  private getCorrelationScore(status: GameStatusRunning<PersonAttributesScenario2>): number {
-    const pressures = this.getConstraintPressure(status)
+  private getCorrelationScore(
+    status: GameStatusRunning<PersonAttributesScenario2>,
+    countsOverride?: Record<string, number> // kept for symmetry
+  ): number {
+    const pressures = this.getConstraintPressure(status, countsOverride)
     const person = status.nextPerson.attributes
     let score = 0
-
-    // For each high-pressure constraint, check correlations
     this.game.constraints.forEach((constraint, i) => {
       if (pressures[i] > 0.5) {
-        // High pressure threshold
         const targetAttr = constraint.attribute
-
-        // Check how this person's attributes correlate with the needed attribute
         this.attributeKeys.forEach((attr) => {
           if (person[attr]) {
-            const correlation = this.game.attributeStatistics.correlations[attr]?.[targetAttr] || 0
-            score += correlation * pressures[i]
+            const corr = this.game.attributeStatistics.correlations[attr]?.[targetAttr] || 0
+            score += corr * pressures[i]
           }
         })
       }
     })
-
-    // Normalize to [-1, 1]
-    const maxPossible = pressures.filter((p) => p > 0.5).length
-    return maxPossible > 0 ? score / maxPossible : 0
+    const maxP = pressures.filter((p) => p > 0.5).length
+    return maxP > 0 ? score / maxP : 0
   }
 
-  private getCurrentAttributeCounts(status: GameStatusRunning<PersonAttributesScenario2>): Record<string, number> {
-    // In a real implementation, we'd track this incrementally
-    // For now, estimate based on admitted count and expected frequencies
+  /** Old heuristic: keep for fallback when no override is provided */
+  private getEstimatedCounts(status: GameStatusRunning<PersonAttributesScenario2>): Record<string, number> {
     const counts: Record<string, number> = {}
-
     this.attributeKeys.forEach((attr) => {
-      const frequency = this.game.attributeStatistics.relativeFrequencies[attr]
-      // This is an approximation - in practice you'd track actual counts
-      counts[attr] = Math.floor(status.admittedCount * frequency)
+      const freq = this.game.attributeStatistics.relativeFrequencies[attr]
+      counts[attr] = Math.floor(status.admittedCount * freq)
     })
-
     return counts
   }
 
-  // Get feature vector size
   getFeatureSize(): number {
-    // 4 person attrs + 4 satisfaction ratios + 4 pressure scores +
-    // 3 global features + 1 alignment + 1 correlation = 17
     return this.attributeKeys.length + 2 * this.game.constraints.length + 5
   }
 
-  // Get feature names for debugging
   getFeatureNames(): string[] {
     const names: string[] = []
-
-    // Person attributes
-    this.attributeKeys.forEach((key) => names.push(`person_${key}`))
-
-    // Constraint satisfaction
+    this.attributeKeys.forEach((k) => names.push(`person_${k}`))
     this.game.constraints.forEach((c) => names.push(`satisfaction_${c.attribute}`))
-
-    // Constraint pressure
     this.game.constraints.forEach((c) => names.push(`pressure_${c.attribute}`))
-
-    // Global features
     names.push('progress_ratio', 'rejection_ratio', 'remaining_capacity', 'alignment_score', 'correlation_score')
-
     return names
   }
 
-  // Normalize features to [-1, 1] or [0, 1] if needed
   normalize(features: number[]): number[] {
-    // Most features are already in [0, 1]
-    // Correlation score is in [-1, 1]
-    // This method can be extended if different normalization is needed
     return features
   }
 }

@@ -17,8 +17,7 @@ export interface NeuralNetBouncerConfig {
   minThreshold?: number
   maxThreshold?: number
   urgencyFactor?: number
-  explorationRate?: number
-  decayRate?: number // unused now (no per-step decay)
+  explorationRate?: number // fixed per episode; decay is handled by trainer per epoch
 }
 
 export class NeuralNetBouncer implements BerghainBouncer {
@@ -58,45 +57,21 @@ export class NeuralNetBouncer implements BerghainBouncer {
   }
 
   admit(status: GameStatusRunning<PersonAttributesScenario2>): boolean {
-    const features = this.encoder.encode(status)
-    const output = this.net.forward(features)
-    const probability = output[0]
+    // Encode current state with TRUE counts from the tracker
+    const counts = this.tracker.getCounts()
+    const features = this.encoder.encode(status, counts)
+
+    // Network prediction
+    const probability = this.net.forward(features)[0]
+
+    // Dynamic threshold
     const threshold = this.calculateDynamicThreshold(status)
 
-    // --- Urgency override: if critically behind on any attribute and this person helps, force admit
-    const remaining = 1000 - status.admittedCount
-    if (remaining > 0) {
-      for (const c of this.game.constraints) {
-        const have = this.tracker.getCount(c.attribute)
-        const need = Math.max(0, c.minCount - have)
-        const urgency = need / remaining
-        if (urgency >= 0.9 && status.nextPerson.attributes[c.attribute]) {
-          this.decisions.push({ features, probability, admitted: true, threshold })
-          this.admissionCount++
-          this.tracker.admit(status.nextPerson.attributes)
-          return true
-        }
-      }
-    }
-
-    // Stall breaker: if we're completely stuck early, admit with high probability
-    if (this.admissionCount === 0 && this.rejectionCount >= 500) {
-      if (Math.random() < 0.9) {
-        this.decisions.push({ features, probability, admitted: true, threshold })
-        this.admissionCount++
-        this.tracker.admit(status.nextPerson.attributes)
-        return true
-      }
-    }
-
     // Exploration vs exploitation
-    let decision: boolean
-    if (Math.random() < this.explorationRate) {
-      decision = this.makeExploratoryDecision(status)
-    } else {
-      decision = probability > threshold
-    }
+    const explore = Math.random() < this.explorationRate
+    const decision = explore ? this.makeExploratoryDecision(status) : probability > threshold
 
+    // Track & update
     this.decisions.push({ features, probability, admitted: decision, threshold })
 
     if (decision) {
@@ -106,8 +81,7 @@ export class NeuralNetBouncer implements BerghainBouncer {
       this.rejectionCount++
     }
 
-    // NOTE: no per-step exploration decay here
-
+    // NO per-step decay here (trainer controls exploration per epoch)
     return decision
   }
 
@@ -116,9 +90,9 @@ export class NeuralNetBouncer implements BerghainBouncer {
     const counts = this.tracker.getCounts()
 
     let maxUrgency = 0
-    for (const constraint of this.game.constraints) {
-      const current = counts[constraint.attribute] || 0
-      const needed = constraint.minCount - current
+    for (const c of this.game.constraints) {
+      const current = counts[c.attribute] || 0
+      const needed = c.minCount - current
       if (needed > 0 && remaining > 0) {
         const urgency = needed / remaining
         maxUrgency = Math.max(maxUrgency, urgency)
