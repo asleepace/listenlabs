@@ -941,6 +941,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
     this.bandit.updateController(true)
     return true
   }
+
   private applyReject(
     person: Person<T>,
     features: number[],
@@ -949,17 +950,23 @@ export class BanditBouncer<T> implements BerghainBouncer {
     maskIndicators = true
   ) {
     const reward = this.calculateReward(person, false, prices)
+
+    // Gate the negative-reward clamp to *post*-warmup only
+    const used = this.usedFrac()
+    const inWarmup = used < CFG.WARMUP.usedMax || this.bandit.admitRateEma < CFG.WARMUP.minEma
+    const rEff = inWarmup ? reward : Math.max(CFG.WARMUP.negClampAfter, reward)
+
     if (maskIndicators) {
       const masked = features.slice()
       for (let i = 0; i < this.indicatorCount; i++) masked[i] = 0
-      this.bandit.updateModel(masked, Math.max(CFG.WARMUP.negClampAfter, reward))
+      this.bandit.updateModel(masked, rEff)
     } else {
-      this.bandit.updateModel(features, Math.max(CFG.WARMUP.negClampAfter, reward))
+      this.bandit.updateModel(features, rEff)
     }
 
     this.getConstraints().forEach((c) => c.update(person, false))
     this.totalRejected++
-    this.recordDecision(person, 'reject', reward, valueForLog, features)
+    this.recordDecision(person, 'reject', reward, valueForLog, features) // keep raw reward for logs
     this.bandit.updateController(false)
     return false
   }
