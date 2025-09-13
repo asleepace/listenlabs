@@ -1135,14 +1135,17 @@ export class BanditBouncer<T> implements BerghainBouncer {
     {
       const remaining = this.remaining()
       const totalShort = this.totalShortfallCount()
-      if (unmet.length && remaining <= totalShort + 1) {
+
+      // Keep this *late-ish* so early exploration isn't crushed
+      if (unmet.length && remaining <= totalShort + 1 && used >= 0.7) {
         if (!this.helpsAnyUnmet(person)) {
           this.log('RESERVE: holding slots for unmet constraints')
           return this.applyReject(person, features, prices)
         }
       }
-      // Strict finisher: if remaining ≤ total shortfall, every seat must help an unmet constraint
-      if (unmet.length && remaining <= totalShort) {
+
+      // STRICT finisher: only late, otherwise it triggers way too early
+      if (unmet.length && remaining <= totalShort && used >= CFG.FINISH.enableAtUsed) {
         if (this.helpsAnyUnmet(person)) {
           const learnFeat = this.maskedForAdmit(features, person, preSatisfied)
           this.log('FINISH: strict feasibility admit')
