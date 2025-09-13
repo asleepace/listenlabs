@@ -78,7 +78,8 @@ export class SelfPlayTrainer {
       if (samples[a1]) {
         for (const [a2, corr] of Object.entries(correlations)) {
           if (a1 !== a2 && Math.abs(corr) > 0.3) {
-            const p = stats.relativeFrequencies[a2] * (1 + corr * 0.5)
+            // guard probability to [0,1]
+            const p = Math.max(0, Math.min(1, stats.relativeFrequencies[a2] * (1 + corr * 0.5)))
             samples[a2] = Math.random() < p
           }
         }
@@ -125,7 +126,7 @@ export class SelfPlayTrainer {
     let rejected = 0
     let nudgeCount = 0
 
-    // TRUE running counts used for encoding
+    // TRUE running counts used for encoding and success/shortfall
     const trueCounts: Record<string, number> = {}
     Object.keys(this.game.attributeStatistics.relativeFrequencies).forEach((k) => (trueCounts[k] = 0))
 
@@ -166,8 +167,9 @@ export class SelfPlayTrainer {
       }
 
       if (admitted === 1000) {
-        const progress = bouncer.getProgress()
-        const satisfied = progress.constraints.every((c: any) => c.satisfied)
+        // Use TRUE COUNTS to judge success and shortfall
+        const satisfied = this.game.constraints.every((c) => (trueCounts[c.attribute] || 0) >= c.minCount)
+
         if (satisfied) {
           return {
             states,
@@ -179,8 +181,8 @@ export class SelfPlayTrainer {
             nudgeCount,
           }
         } else {
-          const shortfall = progress.constraints.reduce(
-            (s: number, c: any) => s + Math.max(0, c.required - c.current),
+          const shortfall = this.game.constraints.reduce(
+            (s, c) => s + Math.max(0, c.minCount - (trueCounts[c.attribute] || 0)),
             0
           )
           const lambda = 10
@@ -197,9 +199,11 @@ export class SelfPlayTrainer {
       }
     }
 
-    // ran out by rejections
-    const progress = bouncer.getProgress()
-    const shortfall = progress.constraints.reduce((s: number, c: any) => s + Math.max(0, c.required - c.current), 0)
+    // ran out by rejections — compute shortfall from TRUE COUNTS
+    const shortfall = this.game.constraints.reduce(
+      (s, c) => s + Math.max(0, c.minCount - (trueCounts[c.attribute] || 0)),
+      0
+    )
     const lambda = 10
     return {
       states,
@@ -308,7 +312,8 @@ export class SelfPlayTrainer {
       const loss = this.trainOnEpisodes(episodeBatch)
 
       // Diagnostics
-      const avgAdmittedAll = episodeBatch.reduce((s, e) => s + e.admittedAtEnd, 0) / episodeBatch.length
+      const avgAdmittedAll =
+        episodeBatch.length > 0 ? episodeBatch.reduce((s, e) => s + e.admittedAtEnd, 0) / episodeBatch.length : 0
       const totalNudges = episodeBatch.reduce((s, e) => s + (e.nudgeCount ?? 0), 0)
       const bestEp = episodeBatch.reduce((b, e) => (e.reward > b.reward ? e : b), episodeBatch[0])
 
