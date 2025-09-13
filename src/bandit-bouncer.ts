@@ -38,7 +38,6 @@ const CFG = {
   },
 
   PACE: {
-    lagSlack: 0.02, // ignore tiny lag noise
     gateLagLateCushion: 0.01,
     worstLagGateStart: [
       { ratio: 3.0, start: 0.62 }, // was 0.68
@@ -47,6 +46,7 @@ const CFG = {
       { ratio: 0.7, start: 0.82 }, // was 0.88
       { ratio: 0.0, start: 0.92 }, // was 0.95
     ],
+    nearWorstEps: 0.15,
     helperBonus: 0.6, // was 0.55
     nonHelperMalus: 0.45, // was 0.35
     lateCutoverUsed: 0.52, // was 0.60
@@ -134,8 +134,8 @@ const CFG = {
   // Small endgame helper (only “gate” we keep)
   FINISH: {
     enableAtUsed: 0.85,
-    maxShortfall: 20, // admit helpful people when smallest gap ≤ 30
-    ratioMin: 2.5, // OR remainingSlots / smallestShortfall ≥ 2.0
+    maxShortfall: 20, // admit helpful people when smallest gap ≤ 20
+    ratioMin: 2.5, // OR remainingSlots / smallestShortfall ≥ 2.5
   },
 
   // Learning warmup
@@ -1083,13 +1083,16 @@ export class BanditBouncer<T> implements BerghainBouncer {
     const hardCut = used >= CFG.GATE.hardCutUsed
 
     // near-worst helper (ratio within (1 - eps) of worst)
-    const nearWorstEps = 0.15
     const nearWorst = unmet.some((c) => {
-      const need = this.needAmount(c, used)
-      const ef = c.getEmpiricalFrequency() || c.frequency || 1e-6
-      const expect = Math.max(1e-6, this.remaining() * ef)
-      const ratio = Math.min(CFG.PACE.scarcityCap, need / expect)
-      return person[c.attribute] && ratio >= (1 - nearWorstEps) * (worstRatio || 0)
+      const nearWorst =
+        worstRatio > 0 &&
+        unmet.some((c) => {
+          const need = this.needAmount(c, used)
+          const ef = c.getEmpiricalFrequency() || c.frequency || 1e-6
+          const expect = Math.max(1e-6, this.remaining() * ef)
+          const ratio = Math.min(CFG.PACE.scarcityCap, need / expect)
+          return person[c.attribute] && ratio >= (1 - CFG.PACE.nearWorstEps) * worstRatio
+        })
     })
 
     // --- gate: soft → hard ---
