@@ -35,23 +35,21 @@ export class NeuralNet {
       case 'xavier':
         weights = Matrix.xavier(inputSize, outputSize)
         break
-      default:
+      case 'random':
         weights = Matrix.random(inputSize, outputSize, -0.5, 0.5)
+        break
     }
     const bias = Matrix.zeros(1, outputSize)
-    this.layers.push({ weights, bias, activation })
+
+    this.layers.push({
+      weights,
+      bias,
+      activation,
+    })
   }
 
   forward(input: number[] | Matrix): number[] {
     let current = input instanceof Matrix ? input : Matrix.fromArray(input).transpose()
-
-    // Guard: shape must match first layer
-    if (this.layers.length > 0 && current.cols !== this.layers[0].weights.rows) {
-      throw new Error(
-        `Shape mismatch: input has ${current.cols} features, layer expects ${this.layers[0].weights.rows}`
-      )
-    }
-
     this.layerInputs = [current.copy()]
     this.layerOutputs = []
 
@@ -71,27 +69,33 @@ export class NeuralNet {
           output = z.map(activations.tanh)
           break
         case 'linear':
-        default:
           output = z
+          break
       }
 
       this.layerOutputs.push(output.copy())
-      if (li < this.layers.length - 1) this.layerInputs.push(output.copy())
+      if (li < this.layers.length - 1) {
+        this.layerInputs.push(output.copy())
+      }
       current = output
     }
 
     return current.toArray()
   }
 
-  backward(target: number[] | number): void {
-    if (!this.layerOutputs.length) throw new Error('Must call forward() before backward()')
+  backward(target: number[] | number, _predicted?: number[]): void {
+    if (!this.layerOutputs.length) {
+      throw new Error('Must call forward() before backward()')
+    }
 
     const targetMatrix = typeof target === 'number' ? new Matrix(1, 1, [target]) : Matrix.fromArray(target).transpose()
     const outputLayer = this.layers[this.layers.length - 1]
     const output = this.layerOutputs[this.layerOutputs.length - 1]
 
+    // MSE loss gradient
     let delta = output.subtract(targetMatrix).scale(2 / output.cols)
 
+    // Output activation gradient
     if (outputLayer.activation === 'sigmoid') {
       delta = delta.hadamard(output.map((y) => gradients.sigmoid(y)))
     } else if (outputLayer.activation === 'tanh') {
@@ -105,14 +109,18 @@ export class NeuralNet {
       const weightGrad = layerInput.transpose().dot(delta)
       const biasGrad = delta.copy()
 
+      // L2 regularization
       const weightUpdate = weightGrad.add(layer.weights.scale(this.l2Lambda)).scale(this.learningRate)
+
       layer.weights = layer.weights.subtract(weightUpdate)
       layer.bias = layer.bias.subtract(biasGrad.scale(this.learningRate))
 
       if (i > 0) {
         delta = delta.dot(layer.weights.transpose())
+
         const prevLayer = this.layers[i - 1]
         const prevOutput = this.layerOutputs[i - 1]
+
         switch (prevLayer.activation) {
           case 'relu':
             delta = delta.hadamard(prevOutput.map((x) => gradients.relu(x)))
@@ -136,9 +144,16 @@ export class NeuralNet {
 
       for (let i = 0; i < inputs.length; i++) {
         const input = inputs[i]
-        const target: number[] = Array.isArray(targets[0]) ? (targets as number[][])[i] : [(targets as number[])[i]]
+
+        let target: number[]
+        if (Array.isArray(targets[0])) {
+          target = (targets as number[][])[i]
+        } else {
+          target = [(targets as number[])[i]]
+        }
 
         const output = this.forward(input)
+
         const loss =
           output.reduce((sum, val, idx) => {
             const diff = val - target[idx]
@@ -178,10 +193,10 @@ export class NeuralNet {
 
   static fromJSON(json: any): NeuralNet {
     const net = new NeuralNet(json.learningRate, json.l2Lambda)
-    net.layers = json.layers.map((ld: any) => ({
-      weights: new Matrix(ld.weightsShape[0], ld.weightsShape[1], ld.weights),
-      bias: new Matrix(ld.biasShape[0], ld.biasShape[1], ld.bias),
-      activation: ld.activation,
+    net.layers = json.layers.map((layerData: any) => ({
+      weights: new Matrix(layerData.weightsShape[0], layerData.weightsShape[1], layerData.weights),
+      bias: new Matrix(layerData.biasShape[0], layerData.biasShape[1], layerData.bias),
+      activation: layerData.activation,
     }))
     return net
   }
@@ -189,24 +204,19 @@ export class NeuralNet {
   getLearningRate(): number {
     return this.learningRate
   }
-
   setLearningRate(rate: number): void {
     this.learningRate = rate
   }
-
   getParameterCount(): number {
     return this.layers.reduce((sum, layer) => sum + layer.weights.data.length + layer.bias.data.length, 0)
   }
 }
 
-// Example network for the Berghain problem
-export function createBerghainNet(inputSize: number): NeuralNet {
+// Clean, input-size-first topology.
+export function createBerghainNet(inputSize: number = 17): NeuralNet {
   const net = new NeuralNet(0.001, 0.0001)
-
-  // in: inputSize -> 64 -> 32 -> 1(sigmoid)
-  net.addLayer(inputSize, 64, 'relu', 'he')
-  net.addLayer(64, 32, 'relu', 'he')
-  net.addLayer(32, 1, 'sigmoid', 'xavier')
-
+  net.addLayer(inputSize, 32, 'relu', 'he')
+  net.addLayer(32, 16, 'relu', 'he')
+  net.addLayer(16, 1, 'sigmoid', 'xavier')
   return net
 }

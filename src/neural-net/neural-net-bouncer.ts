@@ -57,15 +57,18 @@ export class NeuralNetBouncer implements BerghainBouncer {
   }
 
   admit(status: GameStatusRunning<PersonAttributesScenario2>): boolean {
-    // Use TRUE counts from tracker when encoding
+    // Encode current state with TRUE counts from the tracker
     const counts = this.tracker.getCounts()
     const features = this.encoder.encode(status, counts)
 
+    // Get neural network prediction
     const output = this.net.forward(features)
     const probability = output[0]
 
+    // Calculate dynamic threshold
     const threshold = this.calculateDynamicThreshold(status)
 
+    // Exploration vs exploitation
     let decision: boolean
     if (Math.random() < this.explorationRate) {
       decision = this.makeExploratoryDecision(status)
@@ -73,6 +76,7 @@ export class NeuralNetBouncer implements BerghainBouncer {
       decision = probability > threshold
     }
 
+    // Track & update
     this.decisions.push({ features, probability, admitted: decision, threshold })
 
     if (decision) {
@@ -82,7 +86,6 @@ export class NeuralNetBouncer implements BerghainBouncer {
       this.rejectionCount++
     }
 
-    // NOTE: no per-step decay here; exploration is managed per-epoch by the trainer.
     return decision
   }
 
@@ -110,6 +113,7 @@ export class NeuralNetBouncer implements BerghainBouncer {
       threshold = this.maxThreshold
     }
 
+    // Favor a person who has any highly urgent attribute
     const person = status.nextPerson.attributes
     for (const c of this.game.constraints) {
       const current = counts[c.attribute] || 0
@@ -140,8 +144,9 @@ export class NeuralNetBouncer implements BerghainBouncer {
     }
     const normalizedValue = totalWeight > 0 ? value / totalWeight : 0.5
 
-    const base = 0.5
-    const admitProb = Math.min(0.98, base + 0.45 * normalizedValue)
+    // Make exploratory policy roughly *neutral*, not admit-biased
+    const base = 0.4
+    const admitProb = Math.min(0.9, Math.max(0.1, base + 0.35 * normalizedValue))
     return Math.random() < admitProb
   }
 
@@ -177,13 +182,15 @@ export class NeuralNetBouncer implements BerghainBouncer {
     }
   }
 
-  getDecisions() {
+  getDecisions(): typeof this.decisions {
     return this.decisions
   }
-  loadWeights(weights: any) {
+
+  loadWeights(weights: any): void {
     this.net = NeuralNet.fromJSON(weights)
   }
-  getWeights() {
+
+  getWeights(): any {
     return this.net.toJSON()
   }
 

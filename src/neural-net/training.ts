@@ -43,6 +43,9 @@ export class SelfPlayTrainer {
     bestRejections: number
   }[] = []
 
+  // current (decayed) teacher-assist used inside runEpisode()
+  private currentAssistProb = 0
+
   constructor(game: Game, config?: Partial<TrainingConfig>) {
     this.game = game
     this.encoder = new StateEncoder(game)
@@ -58,7 +61,7 @@ export class SelfPlayTrainer {
       explorationDecay: 0.97, // per-epoch only
       successThreshold: 5000,
       elitePercentile: 0.2,
-      teacherAssistProb: 0.05, // small greedy nudge to seed positives
+      teacherAssistProb: 0.02, // smaller start; we’ll decay it fast
       ...config,
     }
 
@@ -78,8 +81,7 @@ export class SelfPlayTrainer {
       if (samples[a1]) {
         for (const [a2, corr] of Object.entries(correlations)) {
           if (a1 !== a2 && Math.abs(corr) > 0.3) {
-            // guard probability to [0,1]
-            const p = Math.max(0, Math.min(1, stats.relativeFrequencies[a2] * (1 + corr * 0.5)))
+            const p = stats.relativeFrequencies[a2] * (1 + corr * 0.5)
             samples[a2] = Math.random() < p
           }
         }
@@ -112,9 +114,9 @@ export class SelfPlayTrainer {
   private runEpisode(explorationRate: number, useTeacherAssist: boolean = true): Episode {
     const bouncer = new NeuralNetBouncer(this.game, {
       explorationRate,
-      baseThreshold: 0.35,
-      minThreshold: 0.25,
-      maxThreshold: 0.7,
+      baseThreshold: 0.45,
+      minThreshold: 0.35,
+      maxThreshold: 0.75,
       urgencyFactor: 2.0,
     })
     bouncer.setNetwork(this.net)
@@ -126,7 +128,7 @@ export class SelfPlayTrainer {
     let rejected = 0
     let nudgeCount = 0
 
-    // TRUE running counts used for encoding and success/shortfall
+    // TRUE running counts used for encoding
     const trueCounts: Record<string, number> = {}
     Object.keys(this.game.attributeStatistics.relativeFrequencies).forEach((k) => (trueCounts[k] = 0))
 
@@ -147,8 +149,8 @@ export class SelfPlayTrainer {
       // Base decision from the bouncer
       let admit = bouncer.admit(status)
 
-      // OPTIONAL: tiny teacher assist to seed positive episodes (training only)
-      if (!admit && useTeacherAssist && Math.random() < (this.config.teacherAssistProb ?? 0)) {
+      // OPTIONAL: tiny teacher assist to seed positive episodes (training only, and decayed)
+      if (!admit && useTeacherAssist && Math.random() < this.currentAssistProb) {
         if (this.greedyNudgeShouldAdmit(trueCounts, person.attributes, admitted)) {
           admit = true
           nudgeCount++
@@ -167,10 +169,14 @@ export class SelfPlayTrainer {
       }
 
       if (admitted === 1000) {
-        // Use TRUE COUNTS to judge success and shortfall
-        const satisfied = this.game.constraints.every((c) => (trueCounts[c.attribute] || 0) >= c.minCount)
-
+        const progress = bouncer.getProgress()
+        const satisfied = progress.constraints.every((c: any) => c.satisfied)
         if (satisfied) {
+          const shortfall = progress.constraints.reduce(
+            (s: number, c: any) => s + Math.max(0, c.required - c.current),
+            0
+          )
+          console.log(`[episode end] admitted=${admitted}, rej=${rejected}, shortfall=${shortfall}, success=true`)
           return {
             states,
             actions,
@@ -181,15 +187,17 @@ export class SelfPlayTrainer {
             nudgeCount,
           }
         } else {
-          const shortfall = this.game.constraints.reduce(
-            (s, c) => s + Math.max(0, c.minCount - (trueCounts[c.attribute] || 0)),
+          const shortfall = progress.constraints.reduce(
+            (s: number, c: any) => s + Math.max(0, c.required - c.current),
             0
           )
-          const lambda = 10
+          const lambda = 30 // stronger push toward satisfying mix
+          const reward = -(rejected + lambda * shortfall)
+          console.log(`[episode end] admitted=${admitted}, rej=${rejected}, shortfall=${shortfall}, reward=${reward}`)
           return {
             states,
             actions,
-            reward: -(rejected + lambda * shortfall),
+            reward,
             rejections: rejected,
             completed: false,
             admittedAtEnd: admitted,
@@ -199,16 +207,18 @@ export class SelfPlayTrainer {
       }
     }
 
-    // ran out by rejections — compute shortfall from TRUE COUNTS
-    const shortfall = this.game.constraints.reduce(
-      (s, c) => s + Math.max(0, c.minCount - (trueCounts[c.attribute] || 0)),
-      0
+    // ran out by rejections
+    const progress = bouncer.getProgress()
+    const shortfall = progress.constraints.reduce((s: number, c: any) => s + Math.max(0, c.required - c.current), 0)
+    const lambda = 30
+    const reward = -(rejected + lambda * shortfall)
+    console.log(
+      `[episode end] admitted=${admitted}, rej=${rejected}, shortfall=${shortfall}, reward=${reward} (failed by rejections)`
     )
-    const lambda = 10
     return {
       states,
       actions,
-      reward: -(rejected + lambda * shortfall),
+      reward,
       rejections: rejected,
       completed: false,
       admittedAtEnd: admitted,
@@ -226,61 +236,80 @@ export class SelfPlayTrainer {
     const eliteCount = Math.max(1, Math.floor(episodes.length * this.config.elitePercentile))
     const elite = sorted.slice(0, eliteCount)
 
-    const rewards = elite.map((e) => e.reward)
-    const rMin = Math.min(...rewards)
-    const rMax = Math.max(...rewards)
-    const scale = rMax > rMin ? (r: number) => 0.25 + 0.75 * ((r - rMin) / (rMax - rMin)) : (_: number) => 1
-
+    // Build raw dataset from elites
     const X: number[][] = []
     const y: number[] = []
     for (const ep of elite) {
-      const w = Math.max(1, Math.round(scale(ep.reward) * 1))
-      for (let rep = 0; rep < w; rep++) {
-        for (let i = 0; i < ep.states.length; i++) {
-          X.push(ep.states[i])
-          y.push(ep.actions[i] ? 1 : 0)
-        }
+      for (let i = 0; i < ep.states.length; i++) {
+        X.push(ep.states[i])
+        y.push(ep.actions[i] ? 1 : 0)
       }
     }
     if (X.length === 0) return 0
 
-    // upsample positives to at least 20%
-    const POS_MIN = 0.2
+    // Downsample to a target class ratio (avoid "always admit").
+    // Target ~ 60% positive, 40% negative.
+    const TARGET_POS = 0.6
     const posIdx: number[] = []
-    for (let i = 0; i < y.length; i++) if (y[i] === 1) posIdx.push(i)
-    const wantPos = Math.ceil(POS_MIN * y.length)
-    if (posIdx.length > 0 && posIdx.length < wantPos) {
-      const need = wantPos - posIdx.length
-      for (let k = 0; k < need; k++) {
-        const j = posIdx[k % posIdx.length]
-        X.push(X[j].slice())
-        y.push(1)
+    const negIdx: number[] = []
+    for (let i = 0; i < y.length; i++) (y[i] === 1 ? posIdx : negIdx).push(i)
+
+    if (posIdx.length === 0 || negIdx.length === 0) {
+      // no usable signal this round
+      console.log('[train] skipped: dataset has only one class')
+      return 0
+    }
+
+    // Choose the largest dataset size that satisfies availability and target ratio
+    const maxByPos = Math.floor(posIdx.length / TARGET_POS)
+    const maxByNeg = Math.floor(negIdx.length / (1 - TARGET_POS))
+    const totalKeep = Math.max(2, Math.min(maxByPos, maxByNeg))
+    const wantPos = Math.floor(TARGET_POS * totalKeep)
+    const wantNeg = totalKeep - wantPos
+
+    function pick<T>(arr: T[], k: number): T[] {
+      const a = arr.slice()
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1))
+        ;[a[i], a[j]] = [a[j], a[i]]
       }
+      return a.slice(0, Math.max(0, Math.min(k, a.length)))
     }
 
-    // shuffle
-    for (let i = X.length - 1; i > 0; i--) {
+    const keepPos = pick(posIdx, wantPos)
+    const keepNeg = pick(negIdx, wantNeg)
+    const keep = keepPos.concat(keepNeg)
+
+    const Xb: number[][] = []
+    const yb: number[] = []
+    for (const i of keep) {
+      Xb.push(X[i])
+      yb.push(y[i])
+    }
+
+    // Shuffle combined set (Fisher–Yates)
+    for (let i = Xb.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1))
-      ;[X[i], X[j]] = [X[j], X[i]]
-      ;[y[i], y[j]] = [y[j], y[i]]
+      ;[Xb[i], Xb[j]] = [Xb[j], Xb[i]]
+      ;[yb[i], yb[j]] = [yb[j], yb[i]]
     }
 
-    // minibatches
+    // Minibatches
     const batchSize = Math.max(1, this.config.batchSize)
-    const batchCount = Math.ceil(X.length / batchSize)
+    const batchCount = Math.ceil(Xb.length / batchSize)
     let totalLoss = 0
 
     for (let b = 0; b < batchCount; b++) {
       const start = b * batchSize
-      const end = Math.min(start + batchSize, X.length)
-      const loss = this.net.trainBatch(X.slice(start, end), y.slice(start, end), 1)
+      const end = Math.min(start + batchSize, Xb.length)
+      const loss = this.net.trainBatch(Xb.slice(start, end), yb.slice(start, end), 1)
       totalLoss += loss
     }
 
     // helpful debug
-    const posCount = y.filter((v) => v === 1).length
-    const negCount = y.length - posCount
-    console.log(`[train] elite samples: ${X.length} (pos=${posCount}, neg=${negCount})`)
+    const posCount = yb.filter((v) => v === 1).length
+    const negCount = yb.length - posCount
+    console.log(`[train] elite samples: ${Xb.length} (pos=${posCount}, neg=${negCount})`)
 
     return totalLoss / Math.max(1, batchCount)
   }
@@ -292,6 +321,10 @@ export class SelfPlayTrainer {
     let exploration = this.config.explorationStart
 
     for (let epoch = 0; epoch < epochs; epoch++) {
+      // decay teacher assist per epoch (fast decay)
+      const assist0 = this.config.teacherAssistProb ?? 0
+      this.currentAssistProb = assist0 * Math.pow(0.9, epoch)
+
       const episodeBatch: Episode[] = []
       let successCount = 0
       let totalRejections = 0
@@ -312,10 +345,10 @@ export class SelfPlayTrainer {
       const loss = this.trainOnEpisodes(episodeBatch)
 
       // Diagnostics
-      const avgAdmittedAll =
-        episodeBatch.length > 0 ? episodeBatch.reduce((s, e) => s + e.admittedAtEnd, 0) / episodeBatch.length : 0
+      const avgAdmittedAll = episodeBatch.reduce((s, e) => s + e.admittedAtEnd, 0) / episodeBatch.length
       const totalNudges = episodeBatch.reduce((s, e) => s + (e.nudgeCount ?? 0), 0)
       const bestEp = episodeBatch.reduce((b, e) => (e.reward > b.reward ? e : b), episodeBatch[0])
+      const approxShortfallBest = Math.max(0, Math.floor((-bestEp.reward - bestEp.rejections) / 30))
 
       // per-epoch exploration decay (NOT per-step)
       exploration = Math.max(this.config.explorationEnd, exploration * this.config.explorationDecay)
@@ -328,9 +361,11 @@ export class SelfPlayTrainer {
       console.log(`  Exploration rate: ${exploration.toFixed(3)}`)
       console.log(`  Avg admitted (all episodes): ${avgAdmittedAll.toFixed(1)}`)
       console.log(
-        `  Best episode — admitted: ${bestEp.admittedAtEnd}, rejections: ${bestEp.rejections}, reward: ${bestEp.reward}`
+        `  Best episode — admitted: ${bestEp.admittedAtEnd}, rejections: ${bestEp.rejections}, reward: ${bestEp.reward}, ~shortfall≈${approxShortfallBest}`
       )
-      console.log(`  Teacher nudges used this epoch: ${totalNudges}`)
+      console.log(
+        `  Teacher nudges used this epoch: ${totalNudges}, assistProb(now)=${this.currentAssistProb.toFixed(4)}`
+      )
 
       this.trainingStats.push({
         epoch: epoch + 1,
