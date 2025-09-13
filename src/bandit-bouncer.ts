@@ -10,7 +10,7 @@ import { dump } from './utils/dump'
    ========================= */
 const CFG = {
   // Included on persisted data to identify models and biases
-  MODEL_VERSION: 2.999,
+  MODEL_VERSION: 3.0,
 
   // Display / reporting
   UI: {
@@ -134,8 +134,8 @@ const CFG = {
   // Small endgame helper (only “gate” we keep)
   FINISH: {
     enableAtUsed: 0.85,
-    maxShortfall: 30, // admit helpful people when smallest gap ≤ 30
-    ratioMin: 2.0, // OR remainingSlots / smallestShortfall ≥ 2.0
+    maxShortfall: 20, // admit helpful people when smallest gap ≤ 30
+    ratioMin: 2.5, // OR remainingSlots / smallestShortfall ≥ 2.0
   },
 
   // Learning warmup
@@ -686,26 +686,28 @@ export class BanditBouncer<T> implements BerghainBouncer {
     return this.totalAdmitted / this.config.MAX_CAPACITY
   }
 
-  // NEW: helper so you can reuse the logic
   private isFinishEligible(person: Person<T>) {
     const used = this.usedFrac()
     if (used < CFG.FINISH.enableAtUsed) return false
+
     const unmet = this.getConstraints().filter((c) => !c.isSatisfied())
     if (!unmet.length) return false
 
     const remaining = this.remaining()
-    const info = unmet
-      .map((c) => {
-        const short = c.getShortfall()
-        const roomy = remaining / Math.max(1, short) >= CFG.FINISH.ratioMin
-        const eligible = short > 0 && (short <= CFG.FINISH.maxShortfall || roomy)
-        return { c, short, eligible }
-      })
-      .filter((x) => x.eligible)
-      .sort((a, b) => a.short - b.short)
 
-    // eligible if this person helps any eligible constraint
-    return info.some((e) => person[e.c.attribute])
+    // Only consider feasibility against the *smallest* shortfall.
+    const shorts = unmet.map((c) => c.getShortfall()).filter((s) => s > 0)
+    const smallest = Math.min(...shorts)
+
+    // Must be "roomy" enough to actually close that smallest gap.
+    const roomy = remaining / Math.max(1, smallest) >= CFG.FINISH.ratioMin
+    if (!roomy) return false
+
+    // Optionally require the smallest gap to be reasonably small (prevents late “random” finishers)
+    if (smallest > CFG.FINISH.maxShortfall) return false
+
+    // Only allow finish if the person helps one of the *smallest* gaps
+    return unmet.filter((c) => c.getShortfall() === smallest).some((c) => person[c.attribute])
   }
 
   private getFeasibilityRatios() {
@@ -971,7 +973,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
     return false
   }
 
-  // --- force-finish helper (late-game admit if a person helps close any small gap)
+  // --- force-finish helper (late-game admit if a person helps close the smallest feasible gap)
   private tryForceFinish(person: Person<T>, features: number[], prices: Record<string, number>): boolean {
     const used = this.usedFrac()
     if (used < CFG.FINISH.enableAtUsed) return false
@@ -981,26 +983,27 @@ export class BanditBouncer<T> implements BerghainBouncer {
 
     const remaining = this.remaining()
 
-    // Compute eligibility for each unmet constraint
-    const info = unmet.map((c) => {
-      const short = c.getShortfall()
-      const roomy = remaining / Math.max(1, short) >= CFG.FINISH.ratioMin
-      const eligible = short > 0 && (short <= CFG.FINISH.maxShortfall || roomy)
-      return { c, short, roomy, eligible }
-    })
+    // Global feasibility guard: if even in the best case we can't cover all remaining shortfalls, bail.
+    const totalShortfall = unmet.reduce((s, c) => s + c.getShortfall(), 0)
+    if (remaining < totalShortfall) return false
 
-    // If exactly one unmet, be decisive
-    if (info.length === 1) {
-      const { c } = info[0]
-      if (person[c.attribute]) return this.applyAdmit(person, features, prices, this.bandit.getLastRawValue?.() ?? 0)
-      return false
+    // Focus on the smallest shortfall(s) only
+    const shorts = unmet.map((c) => ({ c, short: c.getShortfall() })).filter((x) => x.short > 0)
+    if (!shorts.length) return false
+
+    const minShort = Math.min(...shorts.map((x) => x.short))
+
+    // Require both: (a) "roominess" vs smallest gap and (b) the smallest gap not being too large
+    const roomy = remaining / Math.max(1, minShort) >= CFG.FINISH.ratioMin
+    if (!roomy || minShort > CFG.FINISH.maxShortfall) return false
+
+    // Admit only if this person helps one of the *smallest* gaps
+    for (const s of shorts) {
+      if (s.short === minShort && person[s.c.attribute]) {
+        return this.applyAdmit(person, features, prices, this.bandit.getLastRawValue?.() ?? 0)
+      }
     }
 
-    // Otherwise any eligible → admit the first that helps (smallest shortfall first)
-    const eligible = info.filter((x) => x.eligible).sort((a, b) => a.short - b.short)
-    for (const e of eligible) {
-      if (person[e.c.attribute]) return this.applyAdmit(person, features, prices, this.bandit.getLastRawValue?.() ?? 0)
-    }
     return false
   }
 
@@ -1054,14 +1057,6 @@ export class BanditBouncer<T> implements BerghainBouncer {
         .map((t) => t[0])
     )
 
-    if (this.isFinishEligible(person)) {
-      const learnFeat = features.slice()
-      this.getConstraints().forEach((c, i) => {
-        if (i < this.indicatorCount && person[c.attribute] && c.isSatisfied()) learnFeat[i] = 0
-      })
-      return this.applyAdmit(person, learnFeat, prices, this.bandit.getLastRawValue?.() ?? 0)
-    }
-
     // snapshot of which constraints are already satisfied (for masked learning on admits)
     const preSatisfied = this.getConstraints().map((c) => c.isSatisfied())
     const unmet = this.getConstraints().filter((c) => !c.isSatisfied())
@@ -1090,18 +1085,18 @@ export class BanditBouncer<T> implements BerghainBouncer {
     // near-worst helper (ratio within (1 - eps) of worst)
     const nearWorstEps = 0.15
     const nearWorst = unmet.some((c) => {
+      const need = this.needAmount(c, used)
       const ef = c.getEmpiricalFrequency() || c.frequency || 1e-6
       const expect = Math.max(1e-6, this.remaining() * ef)
-      const ratio = this.needAmount(c, used) / expect
+      const ratio = Math.min(CFG.PACE.scarcityCap, need / expect)
       return person[c.attribute] && ratio >= (1 - nearWorstEps) * (worstRatio || 0)
     })
 
     // --- gate: soft → hard ---
     if (unmet.length && used > gateStart) {
-      const finishEligible = this.isFinishEligible(person)
       const pass = hardCut
-        ? (helpsWorst && helpsAnyLagging) || finishEligible
-        : helpsAnyLagging || nearWorst || finishEligible
+        ? helpsWorst && helpsAnyLagging // ✅ no finishEligible in hard phase
+        : helpsAnyLagging || nearWorst // keep soft phase simple
 
       if (!pass) return this.applyReject(person, features, prices)
     }
@@ -1240,6 +1235,11 @@ export class BanditBouncer<T> implements BerghainBouncer {
     let bias = 0
     if (used > CFG.PACE.lateCutoverUsed) {
       bias += helpsWorst ? CFG.PACE.helperBonus : -CFG.PACE.nonHelperMalus
+    }
+    // If the person passed the gate because they help (lagging/near-worst),
+    // never apply a negative bias — don’t let the bandit undo the gate.
+    if (unmet.length && used > gateStart && (helpsAnyLagging || nearWorst)) {
+      bias = Math.max(bias, 0)
     }
     const { action, value } = this.bandit.selectAction(features, bias)
     const shouldAdmit = action === 'admit'
