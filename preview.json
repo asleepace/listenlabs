@@ -1,0 +1,107 @@
+{
+  "model": 2.8,
+  "pretrained": true,
+  "progress": "96%",
+  "attributes": [
+    {
+      "total": "605/650 (93.1%)",
+      "attribute": "techno_lover",
+      "admitted": 605,
+      "required": 650,
+      "satisfied": false,
+      "progress": 0.9307692307692308,
+      "shortfall": 45,
+      "frequency": 0.6265000000000001,
+      "empiricalFrequency": 0.6231830386075363,
+      "scarcity": 1.8052481057792304
+    },
+    {
+      "total": "815/450 (100%)",
+      "attribute": "well_connected",
+      "admitted": 815,
+      "required": 450,
+      "satisfied": true,
+      "progress": 1,
+      "shortfall": 0,
+      "frequency": 0.4700000000000001,
+      "empiricalFrequency": 0.4769928710304601,
+      "scarcity": 0
+    },
+    {
+      "total": "286/300 (95.3%)",
+      "attribute": "creative",
+      "admitted": 286,
+      "required": 300,
+      "satisfied": false,
+      "progress": 0.9533333333333334,
+      "shortfall": 14,
+      "frequency": 0.06227,
+      "empiricalFrequency": 0.06425330987871493,
+      "scarcity": 5.447190201729107
+    },
+    {
+      "total": "708/750 (94.4%)",
+      "attribute": "berlin_local",
+      "admitted": 708,
+      "required": 750,
+      "satisfied": false,
+      "progress": 0.944,
+      "shortfall": 42,
+      "frequency": 0.398,
+      "empiricalFrequency": 0.40848069623183036,
+      "scarcity": 2.5705009066183138
+    }
+  ],
+  "lastLogs": [
+    "REJECT: r=-0.6 v=0.0 useful=[berlin_local]",
+    "REJECT: r=-0.6 v=0.0 useful=[techno_lover]"
+  ],
+  "banditStats": {
+    "weights": [
+      0.49337033739281844,
+      0.5042159365048517,
+      1.2709785052289813,
+      0.5460833101253261,
+      -0.24884102839857733,
+      0.006769221613340363
+    ],
+    "decisionCount": 3035,
+    "capacityUsed": 0.96,
+    "threshold": 0.59,
+    "avgWeight": 0.51
+  },
+  "remainingSlots": 40,
+  "totalAdmitted": 960,
+  "totalRejected": 9833,
+  "threshold": 0.5855582639788677,
+  "lastRawValue": 0.9153270825885595,
+  "admitRate": 0,
+  "feasibility": {
+    "maxRatio": 0.7781700288184439,
+    "mostCritical": "creative"
+  },
+  "top": [
+    {
+      "attr": "creative",
+      "ratio": 0.7781700288184439,
+      "lag": 2,
+      "freq": 0.06425330987871493
+    },
+    {
+      "attr": "techno_lover",
+      "ratio": 0.762215866884564,
+      "lag": 19,
+      "freq": 0.6231830386075363
+    },
+    {
+      "attr": "berlin_local",
+      "ratio": 0.7344288304623754,
+      "lag": 12,
+      "freq": 0.40848069623183036
+    }
+  ],
+  "controller": {
+    "targetRate": 0.18,
+    "error": -0.18
+  }
+}

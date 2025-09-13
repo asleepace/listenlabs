@@ -21,7 +21,6 @@ export type ListenLabsConfig = {
 export interface BerghainBouncer {
   admit(next: GameStatusRunning<ScenarioAttributes>): boolean
   getProgress(): any
-  // getOutput(): any | Promise<any>
   getOutput(lastStatus: GameStatusCompleted | GameStatusFailed): any | Promise<any>
 }
 

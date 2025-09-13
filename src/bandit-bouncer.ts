@@ -10,7 +10,7 @@ import { dump } from './utils/dump'
    ========================= */
 const CFG = {
   // Included on persisted data to identify models and biases
-  MODEL_VERSION: 2.8,
+  MODEL_VERSION: 2.9,
 
   // Display / reporting
   UI: {
@@ -28,13 +28,13 @@ const CFG = {
     priorTotal: 8, // Beta prior total (alpha+beta)
     k0: 0.8, // optimism scale at start (UCB), fades with used (range 0.6–1.2)
     slope: 18.0, // squashing slope → price jump as need > supply
-    synergy: 0.12, // small bonus for covering multiple urgent attrs
+    synergy: 0.15, // small bonus for covering multiple urgent attrs
     paceSlack: 0.02, // allow a tiny progress gap before any pace nudges
-    paceBrake: 0.85, // reduce price when ahead of pace (keeps rate flat)
+    paceBrake: 0.9, // reduce price when ahead of pace (keeps rate flat)
     aheadPenalty: { scale: 1.0, max: 1.3 }, // admit-time nudge vs ahead-of-pace even before satisfied
-    paceBoost: 1.05, // increase price when behind pace (keeps bars together)
+    paceBoost: 1.1, // increase price when behind pace (keeps bars together)
     overshootPenaltyMax: 4.0, // cap on overshoot tax per attribute (per-decision)
-    rareScarcityScale: 2.0, // // multiplier for scarcity feature strength
+    rareScarcityScale: 2.2, // // multiplier for scarcity feature strength
   },
 
   PACE: {
@@ -49,7 +49,7 @@ const CFG = {
     ],
     helperBonus: 0.6, // was 0.55
     nonHelperMalus: 0.45, // was 0.35
-    lateCutoverUsed: 0.52, // was 0.60 → bias starts midgame
+    lateCutoverUsed: 0.52, // was 0.60
     gateLagSlack: 0.03, // consider "helps lagging" if progress < used - slack
     scarcityCap: 6.5, // cap for scarcity/ratio to avoid runaway prices
   },
@@ -61,7 +61,7 @@ const CFG = {
     noiseDecaySteps: 400, // steps until half-decayed
 
     eta: 0.15, // learning rate
-    hintEta: 0.2, // positive hint learning rate
+    hintEta: 0.28, // positive hint learning rate
     emaBeta: 0.035, // admit-rate EMA
     iBeta: 0.002, // integral smoothing
     weightClamp: [-5, 5] as const,
@@ -96,12 +96,12 @@ const CFG = {
   GATE: {
     // choose first where maxRatio > ratio, else fallback to last
     SEQUENCE: [
-      { ratio: 300, start: 0.7 },
-      { ratio: 150, start: 0.8 },
-      { ratio: 60, start: 0.9 },
-      { ratio: -Infinity, start: 0.95 },
+      { ratio: 300, start: 0.66 }, // was 0.70
+      { ratio: 150, start: 0.74 }, // was 0.80
+      { ratio: 60, start: 0.82 }, // was 0.90
+      { ratio: -Infinity, start: 0.92 }, // was 0.95
     ],
-    hardCutUsed: 0.96, // ↓ from 0.97 so the “must-help-worst” phase arrives sooner
+    hardCutUsed: 0.93, // ↓ from 0.97 so the “must-help-worst” phase arrives sooner
     lagSlack: 0.02, // consider helping if attr progress < used - lagSlack
   },
 
@@ -124,8 +124,8 @@ const CFG = {
 
   HINTS: {
     abundance: { scale: 0.33, max: 0.85 }, // was 0.25 / 0.6
-    synergyPairCap: 3, // pairs to include for synergy
-    antiHintScale: 1.1, // strength for ahead-of-pace anti-hint
+    synergyPairCap: 4, // pairs to include for synergy
+    antiHintScale: 1.0, // strength for ahead-of-pace anti-hint
   },
 
   STATS: {
@@ -140,9 +140,9 @@ const CFG = {
 
   // Small endgame helper (only “gate” we keep)
   FINISH: {
-    enableAtUsed: 0.9,
-    maxShortfall: 18, // admit helpful people when smallest gap ≤ 10
-    ratioMin: 2.5, // OR remainingSlots / smallestShortfall ≥ 3
+    enableAtUsed: 0.85,
+    maxShortfall: 30, // admit helpful people when smallest gap ≤ 30
+    ratioMin: 2.0, // OR remainingSlots / smallestShortfall ≥ 2.0
   },
 
   // Learning warmup
@@ -318,8 +318,8 @@ class LinearBandit {
     lb.A = s.A
     lb.b = s.b
     lb.weights = s.weights
-    lb.recentValues = LinearBandit.randomInitialValues()
-    lb.admitRateEma = lb.getTargetAdmitRate()
+    lb.recentValues = s.recentValues?.length ? s.recentValues.slice(-lb.recentCap) : LinearBandit.randomInitialValues()
+    lb.admitRateEma = isFinite(s.admitRateEma) ? Math.max(0, Math.min(1, s.admitRateEma)) : lb.getTargetAdmitRate()
     return lb
   }
 
@@ -576,14 +576,18 @@ class LinearBandit {
     this.decisionCount++
     this.updateWeights()
 
-    const rawValue = this.predictValue(features) + bias // <-- add bias here
+    const rawValue = this.predictValue(features) + bias
     const base = CFG.BANDIT.noiseBase
     const decay = Math.min(1, this.decisionCount / CFG.BANDIT.noiseDecaySteps)
     const boost = this.decisionCount < CFG.BANDIT.earlyNoiseBoostDecisions ? 1.5 : 1.0
     const noise = (Math.random() - 0.5) * (base * boost * (1 - 0.5 * decay))
     const decisionVar = rawValue + noise
-    this.pushRaw(decisionVar)
+
+    // 1) compute threshold from *previous* history
     const threshold = this.calculateAdaptiveThreshold()
+
+    // 2) now record this sample
+    this.pushRaw(decisionVar)
 
     this.lastThreshold = threshold
     this.lastRawValue = rawValue
@@ -1067,7 +1071,13 @@ export class BanditBouncer<T> implements BerghainBouncer {
 
     // Lagger-first safety: never reject someone who closes the most-behind unmet constraint
     if (CFG.LAGGER_FORCE.enable && unmet.length) {
-      const lagInfo = unmet.map((c) => ({ c, lag: Math.max(0, used - c.getProgress() - CFG.PRICE.paceSlack) }))
+      const lagInfo = unmet.map((c) => ({
+        c,
+        lag: Math.max(
+          0,
+          used - c.getProgress() - (used >= 0.94 ? CFG.PACE.gateLagLateCushion : 0) - CFG.PRICE.paceSlack
+        ),
+      }))
       lagInfo.sort((a, b) => b.lag - a.lag)
       const mostLag = lagInfo[0]
       if (mostLag && mostLag.lag >= CFG.LAGGER_FORCE.minLag && person[mostLag.c.attribute]) {
@@ -1122,7 +1132,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
       this.getConstraints().forEach((c, i) => {
         if (!person[c.attribute]) return
         const skew = c.getSupplySkew?.() ?? 1
-        const lagging = c.getProgress() < usedNow - CFG.PACE.lagSlack
+        const lagging = c.getProgress() < usedNow - lagSlackNow
         if (skew > 1 && !lagging && !(isLate && !c.isSatisfied())) {
           const d = preGateBoost * Math.min(CFG.HINTS.abundance.max, CFG.HINTS.abundance.scale * (skew - 1))
           abundance[i] = -d
@@ -1187,25 +1197,28 @@ export class BanditBouncer<T> implements BerghainBouncer {
     const shouldAdmit = action === 'admit'
 
     // Learning with warmup rules (mask indicators on rejections)
-    const inWarmup = used < CFG.WARMUP.usedMax || this.bandit.admitRateEma < CFG.WARMUP.minEma
+    // const inWarmup = used < CFG.WARMUP.usedMax || this.bandit.admitRateEma < CFG.WARMUP.minEma
+    const reward = this.calculateReward(person, shouldAdmit, prices)
 
     if (shouldAdmit) {
-      const learnFeat = features.slice()
-      this.getConstraints().forEach((c, i) => {
-        if (i < this.indicatorCount && person[c.attribute] && preSatisfied[i]) learnFeat[i] = 0
-      })
-      return this.applyAdmit(person, learnFeat, prices, value)
+      this.bandit.updateModel(features, reward)
+      this.getConstraints().forEach((c) => c.update(person, true))
+      this.totalAdmitted++
+      this.bandit.totalAdmitted++
+      this.recordDecision(person, 'admit', reward, value, features)
+      this.bandit.updateController(true)
+      return true
     } else {
-      if (inWarmup) {
-        // Reject with no negative learning during warmup
-        const r = this.calculateReward(person, false, prices)
-        this.getConstraints().forEach((c) => c.update(person, false))
-        this.totalRejected++
-        this.recordDecision(person, 'reject', r, value, features)
-        this.bandit.updateController(false)
-        return false
-      }
-      return this.applyReject(person, features, prices, value, /*maskIndicators*/ true)
+      // apply reject (mask indicators for stability)
+      const r = Math.max(CFG.WARMUP.negClampAfter, reward)
+      const masked = features.slice()
+      for (let i = 0; i < this.indicatorCount; i++) masked[i] = 0
+      this.bandit.updateModel(masked, r)
+      this.getConstraints().forEach((c) => c.update(person, false))
+      this.totalRejected++
+      this.recordDecision(person, 'reject', reward, value, features)
+      this.bandit.updateController(false)
+      return false
     }
   }
 
@@ -1277,7 +1290,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
     } as const
 
     // save a quick preview
-    if (this.totalAdmitted % 100) {
+    if (this.totalAdmitted % 100 === 0) {
       Disk.saveJsonFile('preview.json', base).catch(() => {})
     }
 
