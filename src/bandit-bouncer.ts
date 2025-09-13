@@ -31,7 +31,7 @@ const CFG = {
     synergy: 0.15, // small bonus for covering multiple urgent attrs
     paceSlack: 0.02, // allow a tiny progress gap before any pace nudges
     paceBrake: 0.9, // reduce price when ahead of pace (keeps rate flat)
-    aheadPenalty: { scale: 1.0, max: 1.3 }, // admit-time nudge vs ahead-of-pace even before satisfied
+    aheadPenalty: { scale: 1.8, max: 2.4 }, // admit-time nudge vs ahead-of-pace even before satisfied
     paceBoost: 1.1, // increase price when behind pace (keeps bars together)
     overshootPenaltyMax: 4.0, // cap on overshoot tax per attribute (per-decision)
     rareScarcityScale: 2.2, // // multiplier for scarcity feature strength
@@ -40,15 +40,16 @@ const CFG = {
   PACE: {
     gateLagLateCushion: 0.01,
     worstLagGateStart: [
-      { ratio: 3.0, start: 0.62 }, // was 0.68
-      { ratio: 2.0, start: 0.66 }, // was 0.72
-      { ratio: 1.5, start: 0.72 }, // was 0.78
-      { ratio: 0.7, start: 0.82 }, // was 0.88
-      { ratio: 0.0, start: 0.92 }, // was 0.95
+      { ratio: 3.0, start: 0.62 },
+      { ratio: 2.0, start: 0.66 },
+      { ratio: 1.5, start: 0.72 },
+      { ratio: 1.0, start: 0.82 }, // NEW row
+      { ratio: 0.7, start: 0.86 }, // was 0.82 → push later
+      { ratio: 0.0, start: 0.92 },
     ],
     nearWorstEps: 0.15,
-    helperBonus: 0.6, // was 0.55
-    nonHelperMalus: 0.45, // was 0.35
+    helperBonus: 0.9, // was 0.55
+    nonHelperMalus: 0.35, // was 0.35
     lateCutoverUsed: 0.52, // was 0.60
     gateLagSlack: 0.03, // consider "helps lagging" if progress < used - slack
     scarcityCap: 6.5, // cap for scarcity/ratio to avoid runaway prices
@@ -76,19 +77,19 @@ const CFG = {
     warmStartDecay: 0.9, // decay for history warm start
     updateClamp: [-50, 50] as const, // clamp for per-update reward
     softClip: 8, // tanh soft clip for decision series
-    priorScale: { min: 0.3, max: 1.4 }, // clamps how much we scale up/down priors
+    priorScale: { min: 0.2, max: 1.4 }, // clamps how much we scale up/down priors
   },
 
   // Thresholding (robust quantile + PI controller)
   THRESH: {
-    sigmaFloor: 0.3, // was 0.20
+    sigmaFloor: 0.22, // was 0.20
     floorBumpBase: 0.3, // was 0.25
     floorBumpSlope: 1.8, // was 1.25
     madToSigma: 1.4826, // MAD→sigma constant
     clipSigma: 3.0, // bound thresholds within ±clipSigma σ
     warmupDecisions: 300,
     warmupErrCap: 0.25,
-    capacityBiasScale: { early: 0.28, late: 0.51 }, // early ↓ from 0.32
+    capacityBiasScale: { early: 0.28, late: 0.35 }, // early ↓ from 0.32
     ctrlGains: { kP: 1.6, kI: 0.55, boostEdge: 0.12, boostFactor: 1.2 }, // snappier, kicks in earlier
   },
 
@@ -1069,13 +1070,13 @@ export class BanditBouncer<T> implements BerghainBouncer {
     let gateStart = CFG.PACE.worstLagGateStart.find((x) => worstRatio >= x.ratio)?.start
     if (gateStart === undefined) gateStart = CFG.PACE.worstLagGateStart.at(-1)!.start
 
-    // late cushion on lag slack (be a bit more permissive near the end)
-    const lagSlackNow = CFG.PACE.gateLagSlack + (used >= 0.94 ? CFG.PACE.gateLagLateCushion : 0)
+    // ✅ tighten slack late (avoid declaring "not lagging" with real gaps)
+    const lagSlackNow = Math.max(0, CFG.PACE.gateLagSlack - (used >= 0.94 ? CFG.PACE.gateLagLateCushion : 0))
 
     // Early anti-fill: before gating, reject if the person helps no unmet constraint at all.
     if (unmet.length && used < 0.7) {
       const onlySatisfied = !unmet.some((c) => person[c.attribute])
-      if (onlySatisfied) return this.applyReject(person, features, prices)
+      if (onlySatisfied) return this.applyReject(person, features, prices, this.bandit.getLastRawValue?.() ?? 0)
     }
 
     // helper predicates
@@ -1083,25 +1084,39 @@ export class BanditBouncer<T> implements BerghainBouncer {
     const hardCut = used >= CFG.GATE.hardCutUsed
 
     // near-worst helper (ratio within (1 - eps) of worst)
+    const nearWorstEps = 0.15
     const nearWorst = unmet.some((c) => {
-      const nearWorst =
-        worstRatio > 0 &&
-        unmet.some((c) => {
-          const need = this.needAmount(c, used)
-          const ef = c.getEmpiricalFrequency() || c.frequency || 1e-6
-          const expect = Math.max(1e-6, this.remaining() * ef)
-          const ratio = Math.min(CFG.PACE.scarcityCap, need / expect)
-          return person[c.attribute] && ratio >= (1 - CFG.PACE.nearWorstEps) * worstRatio
-        })
+      const need = this.needAmount(c, used)
+      const ef = c.getEmpiricalFrequency() || c.frequency || 1e-6
+      const expect = Math.max(1e-6, this.remaining() * ef)
+      const ratio = Math.min(CFG.PACE.scarcityCap, need / expect)
+      return person[c.attribute] && ratio >= (1 - nearWorstEps) * (worstRatio || 0)
     })
+
+    // ✅ "need" predicate for hard cut (pace→shortfall blend; equals shortfall late)
+    const helpsAnyNeedy = unmet.some((c) => person[c.attribute] && this.needAmount(c, used) > 0)
+
+    // ✅ global feasibility valve (prevents starvation when finishable)
+    const totalShortfall = unmet.reduce((s, c) => s + c.getShortfall(), 0)
+    const feasibleToFinish = this.remaining() >= totalShortfall
 
     // --- gate: soft → hard ---
     if (unmet.length && used > gateStart) {
       const pass = hardCut
-        ? helpsWorst && helpsAnyLagging // ✅ no finishEligible in hard phase
-        : helpsAnyLagging || nearWorst // keep soft phase simple
+        ? helpsWorst || helpsAnyNeedy // ✅ hard cut keys on need/worst
+        : helpsAnyLagging || nearWorst // soft gate unchanged
 
-      if (!pass) return this.applyReject(person, features, prices)
+      if (!pass) {
+        // ✅ feasibility valve at hard cut: if finishable and helps any unmet, allow
+        if (hardCut && feasibleToFinish && unmet.some((c) => person[c.attribute])) {
+          const learnFeat = features.slice()
+          this.getConstraints().forEach((c, i) => {
+            if (i < this.indicatorCount && person[c.attribute] && preSatisfied[i]) learnFeat[i] = 0
+          })
+          return this.applyAdmit(person, learnFeat, prices, this.bandit.getLastRawValue?.() ?? 0)
+        }
+        return this.applyReject(person, features, prices, this.bandit.getLastRawValue?.() ?? 0)
+      }
     }
 
     // Lagger-first safety: never reject someone who closes the most-behind unmet constraint
@@ -1116,7 +1131,6 @@ export class BanditBouncer<T> implements BerghainBouncer {
       lagInfo.sort((a, b) => b.lag - a.lag)
       const mostLag = lagInfo[0]
       if (mostLag && mostLag.lag >= CFG.LAGGER_FORCE.minLag && person[mostLag.c.attribute]) {
-        // admit with masked indicators for already-satisfied attrs
         const learnFeat = features.slice()
         this.getConstraints().forEach((c, i) => {
           if (i < this.indicatorCount && person[c.attribute] && preSatisfied[i]) learnFeat[i] = 0
@@ -1145,7 +1159,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
       const hint = Array(this.indicatorCount + 2).fill(0) // +2 for capacity & scarcity alignment
       const usedNow = this.usedFrac()
 
-      // pace-scaled positive hint (with late cushion)
+      // pace-scaled positive hint (with late cushion already applied in lagSlackNow)
       const scaled = priceLabel.slice()
       this.getConstraints().forEach((c, i) => {
         if (!scaled[i]) return
@@ -1244,11 +1258,9 @@ export class BanditBouncer<T> implements BerghainBouncer {
     if (unmet.length && used > gateStart && (helpsAnyLagging || nearWorst)) {
       bias = Math.max(bias, 0)
     }
+
     const { action, value } = this.bandit.selectAction(features, bias)
     const shouldAdmit = action === 'admit'
-
-    // Learning with warmup rules (mask indicators on rejections)
-    // const inWarmup = used < CFG.WARMUP.usedMax || this.bandit.admitRateEma < CFG.WARMUP.minEma
     const reward = this.calculateReward(person, shouldAdmit, prices)
 
     if (shouldAdmit) {
@@ -1264,7 +1276,7 @@ export class BanditBouncer<T> implements BerghainBouncer {
       this.bandit.updateController(true)
       return true
     } else {
-      // apply reject (mask indicators for stability)
+      // apply reject (mask indicators for stability) with warmup-aware clamp
       const inWarmup = used < CFG.WARMUP.usedMax || this.bandit.admitRateEma < CFG.WARMUP.minEma
       const r = inWarmup ? reward : Math.max(CFG.WARMUP.negClampAfter, reward)
 
