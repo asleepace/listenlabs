@@ -1,3 +1,5 @@
+/** @file neural-net.ts */
+
 import { Matrix, activations, gradients } from './matrix'
 
 export interface Layer {
@@ -251,17 +253,17 @@ export class NeuralNet {
 }
 
 // Example usage for Berghain problem
-export function createBerghainNet(): NeuralNet {
-  const net = new NeuralNet(0.001, 0.0001)
-
-  // Input layer: ~13 features
+export function createBerghainNet(inputSize: number = 17): NeuralNet {
+  // Input layer: 17 features
   // - 4 person attributes
   // - 4 constraint satisfaction ratios
-  // - 4 current counts
-  // - 1 remaining capacity
-  net.addLayer(13, 24, 'relu', 'he') // Hidden layer 1
-  net.addLayer(24, 12, 'relu', 'he') // Hidden layer 2
-  net.addLayer(12, 1, 'sigmoid', 'xavier') // Output layer
-
+  // - 4 constraint pressure scores
+  // - 3 global features
+  // - 1 alignment + 1 correlation
+  const net = new NeuralNet(0.001, 0.0001)
+  net.addLayer(13, 24, 'relu', 'he')
+  net.addLayer(inputSize, 24, 'relu', 'he')
+  net.addLayer(24, 12, 'relu', 'he')
+  net.addLayer(12, 1, 'sigmoid', 'xavier')
   return net
 }

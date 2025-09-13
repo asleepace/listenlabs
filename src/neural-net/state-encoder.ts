@@ -1,3 +1,5 @@
+/** @file state-encoder.ts */
+
 import type { Game, GameStatusRunning, PersonAttributesScenario2, GameConstraints } from '../types' // Adjust import path as needed
 
 export class StateEncoder {
@@ -149,7 +151,7 @@ export class StateEncoder {
   getFeatureSize(): number {
     // 4 person attrs + 4 satisfaction ratios + 4 pressure scores +
     // 3 global features + 1 alignment + 1 correlation = 17
-    return this.attributeKeys.length * 3 + 5
+    return this.attributeKeys.length + 2 * this.game.constraints.length + 5
   }
 
   // Get feature names for debugging

@@ -1,3 +1,5 @@
+/** @file training.ts */
+
 import type {
   Game,
   GameStatusRunning,
@@ -50,7 +52,7 @@ export class SelfPlayTrainer {
   constructor(game: Game, config?: Partial<TrainingConfig>) {
     this.game = game
     this.encoder = new StateEncoder(game)
-    this.net = createBerghainNet()
+    this.net = createBerghainNet(this.encoder.getFeatureSize())
 
     this.config = {
       episodes: 100,

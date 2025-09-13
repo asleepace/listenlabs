@@ -1,3 +1,5 @@
+/** @file runner.ts */
+
 import type {
   Game,
   GameStatusRunning,

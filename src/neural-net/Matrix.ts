@@ -1,3 +1,5 @@
+/** @file matrix.ts */
+
 export class Matrix {
   readonly rows: number
   readonly cols: number
@@ -30,6 +32,7 @@ export class Matrix {
   // Matrix multiplication (dot product)
   dot(other: Matrix): Matrix {
     if (this.cols !== other.rows) {
+      console.log({ ...this, other })
       throw new Error(`Cannot multiply ${this.rows}x${this.cols} with ${other.rows}x${other.cols}`)
     }
 

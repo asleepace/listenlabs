@@ -1,3 +1,5 @@
+/** @file neural-net-bouncer.ts */
+
 import type { BerghainBouncer } from '../berghain'
 
 import type {
@@ -53,7 +55,7 @@ export class NeuralNetBouncer implements BerghainBouncer {
     this.tracker = new AttributeTracker(Object.keys(game.attributeStatistics.relativeFrequencies))
 
     // Initialize or load neural network
-    this.net = createBerghainNet()
+    this.net = createBerghainNet(this.encoder.getFeatureSize())
 
     // Configure thresholds
     this.baseThreshold = config.baseThreshold ?? 0.5
