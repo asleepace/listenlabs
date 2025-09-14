@@ -317,8 +317,31 @@ export class NeuralNetBouncerRunner {
           rejectedCount: rejected,
           nextPerson: { personIndex, attributes },
         }
-        admit = this.bouncer.admit(status)
-        if (!admit) admit = scoring.shouldAdmit(guest, 1.0, 0.5) // fusion overrule
+
+        // --- FINISHER: if any quota needs just 1 head, only admit if guest hits it ---
+        const critical = scoring
+          .quotas() // unmet only
+          .map((q) => ({ q, need: q.needed() }))
+          .sort((a, b) => a.need - b.need)[0]
+
+        if (critical && critical.need <= 1) {
+          admit = !!guest[critical.q.attribute]
+        } else {
+          // regular hybrid gating
+          const nnAdmit = this.bouncer.admit(status)
+          const policyAdmit = scoring.shouldAdmit(guest, 1.0, 0.5)
+          const quotasOutstanding = scoring.quotas().length > 0
+          if (quotasOutstanding) {
+            admit = policyAdmit && nnAdmit
+            // Optional soft guard: block low-urgency slip-throughs
+            if (!policyAdmit && admit) {
+              const minimalTheta = 1.0 + 0.5 * scoring.seatScarcity()
+              if (scoring.guestScore(guest) < minimalTheta) admit = false
+            }
+          } else {
+            admit = nnAdmit || policyAdmit
+          }
+        }
       } else {
         // score-only
         admit = scoring.shouldAdmit(guest, 1.0, 0.5)
@@ -384,26 +407,30 @@ export class NeuralNetBouncerRunner {
 
 export async function main() {
   const runner = new NeuralNetBouncerRunner('./bouncer-data', '2')
+  const argv = process.argv.slice(2)
+  const command = argv[0] || 'help'
+  const rest = argv.slice(1)
 
-  const args = process.argv.slice(2)
-  const command = args[0] || 'help'
-  const flags = parseFlags(args.slice(2))
+  // split rest into positionals and flags
+  const positional: string[] = []
+  const flagArgs: string[] = []
+  for (const a of rest) {
+    if (a.startsWith('--')) flagArgs.push(a)
+    else positional.push(a)
+  }
+  const flags = parseFlags(flagArgs)
   const mode = (flags.mode as 'score' | 'bouncer' | 'hybrid') || 'score'
 
   switch (command) {
     case 'train': {
-      const epochs = parseInt(args[1] || '20', 10)
-      const episodes = parseInt(args[2] || '50', 10)
-      console.log(`Weights: ${path.resolve(runner['weightsPath'])}`)
-      console.log(`Logs:    ${path.resolve(runner['logPath'])}`)
+      const epochs = parseInt(positional[0] || '20', 10)
+      const episodes = parseInt(positional[1] || '50', 10)
       await runner.train(epochs, episodes, flags)
       break
     }
     case 'resume': {
-      const epochs = parseInt(args[1] || '10', 10)
-      const episodes = parseInt(args[2] || '50', 10)
-      console.log(`Weights: ${path.resolve(runner['weightsPath'])}`)
-      console.log(`Logs:    ${path.resolve(runner['logPath'])}`)
+      const epochs = parseInt(positional[0] || '10', 10)
+      const episodes = parseInt(positional[1] || '50', 10)
       await runner.resume(epochs, episodes, flags)
       break
     }
@@ -412,20 +439,20 @@ export async function main() {
         console.log('Please train the model first: bun run src/neural-net/runner train 20')
         break
       }
+      const datafile = positional[0]
       let sampleData: any[] | null = null
-      if (args[1]) {
+      if (datafile) {
         try {
-          const data = fs.readFileSync(args[1], 'utf-8')
+          const data = fs.readFileSync(datafile, 'utf-8')
           sampleData = JSON.parse(data)
-          console.log(`Loaded ${sampleData?.length} samples from ${args[1]}`)
+          console.log(`Loaded ${sampleData?.length} samples from ${datafile}`)
         } catch (error) {
           console.error('Error loading sample data:', (error as Error).message)
         }
       }
       console.log('\n=== Running Test Game ===\n')
-      console.log(`Mode: ${mode}`)
       const result = runner.runGame(sampleData || undefined, mode)
-
+      console.log('Mode:', mode)
       console.log('Game Result:')
       console.log(`  Status: ${result.status}`)
       console.log(`  Final Rejections: ${result.finalRejections}`)

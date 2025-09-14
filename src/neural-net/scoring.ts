@@ -89,10 +89,10 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
   )
 
   // penalty weights
-  const pw = {
-    shortfallPerHead: 2.0,
-    overagePerHead: 0.5,
-    unmetQuotaConstant: 100,
+  const pw: NonNullable<ScoringConfig['weights']> = {
+    shortfallPerHead: 3.0, // ↑ was 2.0
+    overagePerHead: 0.25, // ↓ was 0.5
+    unmetQuotaConstant: 300, // ↑ was 100
     targetPerPerson: 1.0,
     targetBonusCap: 1000,
     targetPenaltyCap: 5000,
@@ -188,19 +188,19 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
       for (const q of Object.values(quotas)) {
         const gap = Math.abs(q.count - q.minCount)
         if (q.isComplete()) {
-          terms.push(gap * pw.overagePerHead) // mild overage cost
+          terms.push(gap * pw.overagePerHead!) // mild overage cost
         } else {
           unmet++
-          terms.push(gap * pw.shortfallPerHead) // stronger shortfall cost
+          terms.push(gap * pw.shortfallPerHead!) // stronger shortfall cost
         }
       }
 
-      const completionPenalty = unmet === 0 ? average(terms) : sum(terms) + pw.unmetQuotaConstant * unmet
+      const completionPenalty = unmet === 0 ? average(terms) : sum(terms) + pw.unmetQuotaConstant! * unmet
 
       const peopleSeen = this.getTotalPeopleSeen()
-      let delta = (peopleSeen - TARGET_REJECTIONS) * pw.targetPerPerson
-      if (delta < 0) delta = Math.max(delta, -pw.targetBonusCap)
-      else delta = Math.min(delta, pw.targetPenaltyCap)
+      let delta = (peopleSeen - TARGET_REJECTIONS) * pw.targetPerPerson!
+      if (delta < 0) delta = Math.max(delta, -pw.targetBonusCap!)
+      else delta = Math.min(delta, pw.targetPenaltyCap!)
 
       return completionPenalty + delta
     },

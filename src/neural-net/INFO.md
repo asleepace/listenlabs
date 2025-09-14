@@ -12,11 +12,11 @@ bun run src/neural-net/runner train 10 50 --assistGain=3 --oracleRelabelFrac=1 -
 bun run src/neural-net/runner test --mode=hybrid
 
 # Quick sanity test (uses latest saved weights):
-# hand policy only
+# - score: hand policy only
+# - bouncer: pure neural net (requires weights file)
+# - hybrid: hybrid (NN + policy overrule on denies) — usually best early on
 bun run src/neural-net/runner test --mode=score
-# pure neural net (requires weights file)
 bun run src/neural-net/runner test --mode=bouncer
-# hybrid (NN + policy overrule on denies) — usually best early on
 bun run src/neural-net/runner test --mode=hybrid
 
 # Run a small benchmark (10 games)
