@@ -4,6 +4,28 @@ A small self-play trainer + neural network policy for a “bouncer” that admit
 
 ---
 
+## Quick Start
+
+```bash
+# If you don’t have weights yet (fast warmup, then test)
+bun run src/neural-net/runner train 10 50 --assistGain=3 --oracleRelabelFrac=1 --elitePercentile=0.05
+bun run src/neural-net/runner test --mode=hybrid
+
+# Quick sanity test (uses latest saved weights):
+# hand policy only
+bun run src/neural-net/runner test --mode=score
+# pure neural net (requires weights file)
+bun run src/neural-net/runner test --mode=bouncer
+# hybrid (NN + policy overrule on denies) — usually best early on
+bun run src/neural-net/runner test --mode=hybrid
+
+# Run a small benchmark (10 games)
+bun run src/neural-net/runner benchmark --mode=hybrid
+
+# Test on a fixed dataset (optional)
+bun run src/neural-net/runner test ./fixtures/samples.json --mode=hybrid
+```
+
 ## What’s in here
 
 - **`neural-net.ts`** – Lightweight MLP with JSON (de)serialization (`toJSON` / `fromJSON`) and batch training.
