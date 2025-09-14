@@ -11,7 +11,16 @@
     "bouncer:train:quick": "bun run src/neural-net/runner train 2 10 --oracleRelabelFrac=1 --assistGain=3 --elitePercentile=0.1",
     "bouncer:resume": "bun run src/neural-net/runner resume 20 50 --assistGain=3 --oracleRelabelFrac=0.8 --elitePercentile=0.2",
     "bouncer:test": "bun run src/neural-net/runner test",
-    "bouncer:bench": "bun run src/neural-net/runner benchmark"
+    "bouncer:bench": "bun run src/neural-net/runner benchmark",
+    "neural": "bun run src/neural-net/runner --",
+    "neural:train": "bun run src/neural-net/runner train 10 50 --assistGain=2.0 --oracleRelabelFrac=0.6 --elitePercentile=0.2 --resume",
+    "neural:resume": "bun run src/neural-net/runner resume 6 100 --assistGain=1.0 --oracleRelabelFrac=0.4 --elitePercentile=0.2",
+    "neural:test:score":  "bun run src/neural-net/runner test \"\" --mode=score",
+    "neural:test:bouncer":"bun run src/neural-net/runner test \"\" --mode=bouncer",
+    "neural:test:hybrid": "bun run src/neural-net/runner test \"\" --mode=hybrid",
+    "neural:sanity": "bun run src/neural-net/runner sanity",
+    "neural:diagnose": "bun run src/neural-net/runner diagnose",
+    "neural:diagnostics": "bun run neural diagnose"
   },
   "devDependencies": {
     "@types/bun": "latest"

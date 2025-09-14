@@ -251,10 +251,10 @@ export class SelfPlayTrainer {
         const policyVote = scoring.shouldAdmit(guest, 1.0, 0.5)
         const helpsWorstGap = this.oracleShouldAdmit(trueCounts, person.attributes, admitted)
 
-        // Allow scoring to open doors when NN denied
+        // Open the door if either the policy or the NN says yes
         admit = policyVote || admit
 
-        // Late-game veto: if we're running out of seats AND this admit doesn't help the worst gap, deny.
+        // Late-game veto: protect seats if a "yes" doesn't help the worst gap
         if (admit && scoring.isRunningOutOfAvailableSpots() && !helpsWorstGap) {
           admit = false
         }

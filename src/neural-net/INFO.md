@@ -24,6 +24,37 @@ bun run src/neural-net/runner benchmark --mode=hybrid
 
 # Test on a fixed dataset (optional)
 bun run src/neural-net/runner test ./fixtures/samples.json --mode=hybrid
+
+### --- Training w/ Warm Start ---
+
+# Re-align + warm train
+bun run neural train 6 100 \
+  --assistGain=1.5 \
+  --oracleRelabelFrac=0.60 \
+  --elitePercentile=0.20 \
+  --resume
+
+# Stabilize a bit more
+bun run neural train 6 120 \
+  --assistGain=0.8 \
+  --oracleRelabelFrac=0.40 \
+  --elitePercentile=0.20 \
+  --resume
+
+# Wean (final 3 epochs are assist/fusion OFF automatically)
+bun run neural train 4 150 \
+  --assistGain=0.4 \
+  --oracleRelabelFrac=0.20 \
+  --elitePercentile=0.15 \
+  --resume
+
+# Verify output:
+bun run neural diagnose
+bun run neural sanity
+
+# hybrid (what you actually care about)
+bun run neural test "" --mode=hybrid
+bun run neural benchmark --mode=hybrid
 ```
 
 ## Example Flow

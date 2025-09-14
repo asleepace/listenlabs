@@ -250,7 +250,7 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
       if (before > 0) {
         const scarcity = this.seatScarcity()
         // Early: any improvement is enough. Late: require a modest improvement.
-        const tighten = 0.05 + 0.25 * scarcity
+        const tighten = 0.03 + 0.18 * scarcity
         return delta > 0 && delta >= tighten * Math.min(1, before)
       }
 
@@ -311,7 +311,7 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
       const theta = baseTheta + 0.6 * scarcity + 0.4 * Math.min(1, quotaBehind)
       return score >= theta
     },
-
+    /** returns if all quotas have been met and we've hit 1,000 admissions. */
     isComplete() {
       return this.quotas().length === 0
     },
