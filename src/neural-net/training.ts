@@ -544,23 +544,28 @@ export class SelfPlayTrainer {
     return this.net.toJSON()
   }
 
-  test(episodes: number = 100): {
+  // Replace your current test(...) with this
+  test(
+    episodes: number = 100,
+    opts?: { explorationRate?: number; usePolicyFusion?: boolean; useTeacherAssist?: boolean }
+  ): {
     successRate: number
     avgRejections: number
     minRejections: number
     maxRejections: number
   } {
+    const { explorationRate = 0, usePolicyFusion = false, useTeacherAssist = false } = opts ?? {}
+
     let successes = 0
     let totalRejections = 0
     let minRejections = Infinity
     let maxRejections = 0
 
     for (let i = 0; i < episodes; i++) {
-      // pure-network evaluation: no exploration, no policy fusion, no teacher assist
       const episode = this.runEpisode({
-        explorationRate: 0,
-        usePolicyFusion: false,
-        useTeacherAssist: false,
+        explorationRate,
+        usePolicyFusion,
+        useTeacherAssist,
       })
       if (episode.completed) {
         successes++

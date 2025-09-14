@@ -132,13 +132,22 @@ export class NeuralNetBouncerRunner {
       })
     })
 
-    console.log('\n=== Testing Trained Network ===\n')
     const testResults = trainer.test(100)
-    console.log('Test Results (100 episodes):')
-    console.log(`  Success Rate: ${(testResults.successRate * 100).toFixed(1)}%`)
-    console.log(`  Average Rejections: ${testResults.avgRejections.toFixed(0)}`)
-    console.log(`  Best Performance: ${testResults.minRejections} rejections`)
-    console.log(`  Worst Performance: ${testResults.maxRejections} rejections`)
+    console.log('\n=== Testing Trained Network ===\n')
+
+    const pure = trainer.test(100, { explorationRate: 0, usePolicyFusion: false, useTeacherAssist: false })
+    console.log('Pure NN (no fusion, no assist):')
+    console.log(`  Success Rate: ${(pure.successRate * 100).toFixed(1)}%`)
+    console.log(`  Average Rejections: ${pure.avgRejections.toFixed(0)}`)
+    console.log(`  Best Performance: ${pure.minRejections} rejections`)
+    console.log(`  Worst Performance: ${pure.maxRejections} rejections`)
+
+    const hybridEval = trainer.test(100, { explorationRate: 0, usePolicyFusion: true, useTeacherAssist: false })
+    console.log('\nHybrid (policy fusion on, no assist):')
+    console.log(`  Success Rate: ${(hybridEval.successRate * 100).toFixed(1)}%`)
+    console.log(`  Average Rejections: ${hybridEval.avgRejections.toFixed(0)}`)
+    console.log(`  Best Performance: ${hybridEval.minRejections} rejections`)
+    console.log(`  Worst Performance: ${hybridEval.maxRejections} rejections`)
 
     // Save final weights (+ run summary)
     fs.writeFileSync(this.weightsPath, JSON.stringify(trainer.getBestWeights(), null, 2))
