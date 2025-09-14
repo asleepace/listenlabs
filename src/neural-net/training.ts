@@ -66,14 +66,15 @@ export async function getSampleGame(filePath = 'data/samples/sample-01.json'): P
       copy()
     )
   })
-  SelfPlayTrainer.lastDatsetPath = filePath
+  SelfPlayTrainer.lastDatasetPath = filePath
   console.log('[dataset] total entries:', guestList.length)
   return shuffle(guestList)
 }
 
 export class SelfPlayTrainer {
-  static readonly DISABLE_FUSION_AT_EPOCH = true
-  static lastDatsetPath?: string
+  static readonly DISABLE_FUSION_AT_EPOCH = false
+  static readonly MAX_SAMPLES_PER_EPOCH = 250_000
+  static lastDatasetPath?: string
 
   private net: NeuralNet
   private game: Game
@@ -81,7 +82,7 @@ export class SelfPlayTrainer {
   private config: TrainingConfig
   private resumedFromWeights = false
 
-  private dataset?: ScenarioAttributes[]
+  dataset?: ScenarioAttributes[]
   private datasetPtr = 0
 
   public get hasDataset() {
@@ -415,7 +416,7 @@ export class SelfPlayTrainer {
           const oracleLabel = this.oracleShouldAdmit(counts, person, admittedSoFar) ? 1 : 0
           label = oracleLabel
           // Oversample hard examples more aggressively
-          if (oracleLabel !== modelLabel) repeats += 8
+          if (oracleLabel !== modelLabel) repeats += 4
         }
 
         // Rare-attr boost: if 'creative' still unmet and present, upweight
@@ -430,6 +431,22 @@ export class SelfPlayTrainer {
     }
 
     if (X.length === 0) return 0
+
+    if (X.length > SelfPlayTrainer.MAX_SAMPLES_PER_EPOCH) {
+      const keep = SelfPlayTrainer.MAX_SAMPLES_PER_EPOCH
+      const perm = Array.from({ length: X.length }, (_, i) => i)
+      for (let i = 0; i < keep; i++) {
+        const j = i + Math.floor(Math.random() * (perm.length - i))
+        ;[perm[i], perm[j]] = [perm[j], perm[i]]
+      }
+      const picked = perm.slice(0, keep)
+      const X2 = picked.map((i) => X[i])
+      const y2 = picked.map((i) => y[i])
+      X.length = 0
+      y.length = 0
+      X.push(...X2)
+      y.push(...y2)
+    }
 
     // ensure at least ~40% positives to avoid collapse to "deny"
     // If you notice the NN getting too “admit-happy”, raise the positive floor a touch:
@@ -487,6 +504,8 @@ export class SelfPlayTrainer {
 
     // If resuming, don’t crank exploration back up
     let exploration = this.resumedFromWeights ? this.config.explorationEnd : this.config.explorationStart
+    let bestSuccess = 0,
+      stall = 0
 
     for (let epoch = 0; epoch < epochs; epoch++) {
       if (this.dataset) this.resetDatasetOrdering()
@@ -531,7 +550,7 @@ export class SelfPlayTrainer {
       )
 
       console.log(`Epoch ${epoch + 1}/${epochs}:`)
-      console.log(`  Using dataset:`, this.hasDataset ? SelfPlayTrainer.lastDatsetPath : false)
+      console.log(`  Using dataset:`, this.hasDataset ? SelfPlayTrainer.lastDatasetPath : false)
       console.log(`  Success rate: ${(successRate * 100).toFixed(1)}%`)
       console.log(`  Avg rejections (successful):`, +avgRejections.toFixed(0))
       console.log(`  Avg admitted (all episodes):`, +avgAdmittedAll.toFixed(0))
@@ -571,6 +590,21 @@ export class SelfPlayTrainer {
           reward: bestEp.reward,
         },
       })
+
+      if ((epoch + 1) % 3 === 0) {
+        const cur = this.net.getLearningRate()
+        this.net.setLearningRate(cur * 0.7)
+        console.log(`[lr] decayed to ${this.net.getLearningRate()}`)
+      }
+
+      if (successRate >= bestSuccess) {
+        bestSuccess = successRate
+        stall = 0
+      } else stall++
+      if (bestSuccess >= 0.99 && stall >= 2) {
+        console.log('Early stopping: success regressed, keeping best weights.')
+        break
+      }
 
       if (successRate > 0.9 && avgRejections < Conf.TARGET_REJECTIONS) {
         console.log('Early stopping - excellent performance achieved!')
@@ -659,6 +693,10 @@ export async function trainBouncer(game: Game): Promise<NeuralNetBouncer> {
 
   const results = trainer.test(100)
   console.log('\nTest Results:')
+  if (trainer.hasDataset) {
+    console.log(`Dataset file:`, SelfPlayTrainer.lastDatasetPath)
+    console.log(`Dataset count:`, trainer.dataset?.length)
+  }
   console.log(`Success rate: ${(results.successRate * 100).toFixed(1)}%`)
   console.log(`Average admissions:`, toFixed(results.avgAdmissions))
   console.log(`Average rejections:`, toFixed(results.avgRejections))

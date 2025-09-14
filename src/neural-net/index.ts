@@ -16,8 +16,13 @@ const __dirname = path.dirname(__filename)
 
 const trainingData: string[][] = []
 
+enum Weights {
+  scenario2BestAverage = `../bouncer-data/weights-s2.best-4407avg.json`,
+  scenario2Normal = `../bouncer-data/weights-scenario-2.json`,
+}
+
 export async function initializeNeuralNetwork(initialState: GameState): Promise<BerghainBouncer> {
-  const weightsPath = path.resolve(__dirname, `../bouncer-data/weights-s2.best-4407avg.json`)
+  const weightsPath = path.resolve(__dirname, Weights.scenario2Normal)
 
   console.log('[neural-net] weights:', weightsPath)
 
@@ -31,20 +36,11 @@ export async function initializeNeuralNetwork(initialState: GameState): Promise<
   })
 
   // load weights (fallback to fresh net if missing)
-  try {
-    const raw = await fs.readFile(weightsPath, 'utf-8')
-    const json = JSON.parse(raw)
-    const net = NeuralNet.fromJSON(json)
-    bouncer.setNetwork(net)
-    console.log(`[bouncer] Loaded weights: ${weightsPath}`)
-  } catch (err) {
-    console.warn(`[bouncer] No weights at ${weightsPath} — using fresh net.`, (err as Error).message)
-    const net = new NeuralNet(0.0003, 0.00001)
-    // build same topology as training (input size is inferred by StateEncoder at runtime)
-    // you can keep a tiny helper if you prefer: createBerghainNet(...)
-    // net.addLayer(<featureSize>, 64, 'relu', 'he')... <-- not needed if you will immediately load weights later
-    bouncer.setNetwork(net)
-  }
+  const raw = await fs.readFile(weightsPath, 'utf-8')
+  const json = JSON.parse(raw)
+  const net = NeuralNet.fromJSON(json)
+  bouncer.setNetwork(net)
+  console.log(`[bouncer] Loaded weights: ${weightsPath}`)
 
   const scoring = initializeScoring(initialState.game, {
     maxAdmissions: Conf.MAX_ADMISSIONS,
@@ -53,7 +49,7 @@ export async function initializeNeuralNetwork(initialState: GameState): Promise<
 
   let lastPerson: ScenarioAttributes = {} as ScenarioAttributes
   let lastAdmit = false
-  let randomSample = true // allow game to progress to 10,000
+  let isSampleOnly = false // allow game to progress to 10,000
 
   const outputFile = `data/random-sample-${+new Date()}.json`
 
@@ -64,7 +60,7 @@ export async function initializeNeuralNetwork(initialState: GameState): Promise<
   return {
     admit(next) {
       lastPerson = next.nextPerson.attributes
-      if (randomSample) return false
+      if (isSampleOnly) return false
       const admit = bouncer.admit(next, scoring.getCounts())
       scoring.update({ guest: next.nextPerson.attributes, admit })
       lastAdmit = admit
