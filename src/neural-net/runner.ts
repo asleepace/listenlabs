@@ -276,9 +276,13 @@ export class NeuralNetBouncerRunner {
     const getData = sampleData ? () => sampleData[personIndex++] : () => this.generatePerson(personIndex++)
 
     const scoring = initializeScoring(this.game, {
-      maxRejections: MAX_REJECTIONS,
-      maxAdmissions: MAX_ADMISSIONS,
-      targetRejections: TARGET_REJECTIONS,
+      maxRejections: 20_000,
+      maxAdmissions: 1_000,
+      targetRejections: 5_000,
+      safetyCushion: 1,
+      weights: {
+        // override here...
+      },
     })
 
     while (scoring.inProgress() && (!sampleData || personIndex < sampleData.length)) {

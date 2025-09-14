@@ -10,6 +10,7 @@ export type ScoringConfig = {
   maxRejections: number
   maxAdmissions: number
   targetRejections?: number // default 5,000 (target number of rejections to complete by)
+  safetyCushion?: number // NEW: heads of buffer to pace against (default 1)
   weights?: {
     shortfallPerHead?: number // default 2.0
     overagePerHead?: number // default 0.5
@@ -44,7 +45,12 @@ export const getAttributes = (scenarioAttributes: ScenarioAttributes): string[] 
 }
 
 /** Creates a quota tracker. */
-export function createQuota(constraint: GameConstraints, frequency: number, correlations: Correlation) {
+export function createQuota(
+  constraint: GameConstraints,
+  frequency: number,
+  correlations: Correlation,
+  cushion: number = 0
+) {
   return {
     attribute: constraint.attribute,
     minCount: constraint.minCount,
@@ -54,7 +60,8 @@ export function createQuota(constraint: GameConstraints, frequency: number, corr
     relativeProgress(peopleLeftInLine: number): number {
       if (this.isComplete()) return 1.0
       const expectedRemaining = Math.max(1, peopleLeftInLine * Math.max(0, this.frequency))
-      return this.needed() / expectedRemaining
+      const need = Math.max(0, this.minCount + cushion - this.count)
+      return need / expectedRemaining
     },
     progress() {
       return this.count / this.minCount
@@ -78,13 +85,14 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
   const frequencies = game.attributeStatistics.relativeFrequencies
 
   const TARGET_REJECTIONS = config.targetRejections ?? 5_000
+  const CUSHION = Math.max(0, config.safetyCushion ?? 1) // NEW
 
   const quotas = Object.fromEntries(
     game.constraints.map((constraint) => {
       const attr = constraint.attribute
       const attributeFreq = frequencies[attr]
       const attributeCorr = correlations[attr]
-      return [attr, createQuota(constraint, attributeFreq, attributeCorr)] as const
+      return [attr, createQuota(constraint, attributeFreq, attributeCorr, CUSHION)] as const
     })
   )
 
@@ -103,7 +111,8 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
   const quotaUrgency = (q: Quota, peopleLeftInLine: number): number => {
     if (!q.inProgress()) return 0
     const expected = Math.max(1, peopleLeftInLine * Math.max(0, q.frequency))
-    return q.needed() / expected // 1.0 = exactly on pace, >1 behind, <1 ahead
+    const need = Math.max(0, q.minCount + CUSHION - q.count)
+    return need / expected
   }
 
   /** Pair bonus when guest hits two unmet quotas that are negatively correlated (rarer combo). */
@@ -157,18 +166,11 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
     // },
     worstExpectedShortfall(peopleLeftInLine: number, guest?: ScenarioAttributes): number {
       let worst = 0
-      const seatsLeft = this.getTotalSpotsAvailable()
-
       for (const q of this.quotas()) {
         const cur = q.count + (guest && guest[q.attribute] ? 1 : 0)
-
-        // How many arrivals with this attr are likely to show up…
-        const arrivalsWithAttr = Math.max(0, peopleLeftInLine) * Math.max(0, q.frequency)
-
-        // …but we can only ADMIT up to seatsLeft total.
-        const bestWeCanStillAdmit = Math.min(seatsLeft, arrivalsWithAttr)
-
-        const gap = Math.max(0, q.minCount - (cur + bestWeCanStillAdmit))
+        const expectedFuture = Math.max(0, peopleLeftInLine) * Math.max(0, q.frequency)
+        const target = q.minCount + CUSHION
+        const gap = Math.max(0, target - (cur + expectedFuture))
         if (gap > worst) worst = gap
       }
       return worst

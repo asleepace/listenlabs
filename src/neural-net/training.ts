@@ -203,6 +203,7 @@ export class SelfPlayTrainer {
       maxAdmissions: 1_000,
       maxRejections: 20_000,
       targetRejections: 5_000,
+      safetyCushion: 1,
       weights: {
         // override here...
       },
