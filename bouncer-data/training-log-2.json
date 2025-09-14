@@ -6805,6 +6805,236 @@
           "bestRejections": 8843
         }
       ]
+    },
+    {
+      "type": "epoch",
+      "scenario": "2",
+      "startedAt": "2025-09-14T05:22:18.271Z",
+      "timestamp": "2025-09-14T05:22:27.326Z",
+      "summary": {
+        "epoch": 1,
+        "loss": 0.11818055920193651,
+        "successRate": 1,
+        "avgRejections": 10253.49,
+        "exploration": 0.2,
+        "totalNudges": 1954,
+        "bestEpisode": {
+          "admitted": 1000,
+          "rejections": 8560,
+          "reward": -8707.6
+        }
+      }
+    },
+    {
+      "type": "epoch",
+      "scenario": "2",
+      "startedAt": "2025-09-14T05:22:18.271Z",
+      "timestamp": "2025-09-14T05:22:36.092Z",
+      "summary": {
+        "epoch": 2,
+        "loss": 0.12111633175611536,
+        "successRate": 1,
+        "avgRejections": 10151.71,
+        "exploration": 0.2,
+        "totalNudges": 3075,
+        "bestEpisode": {
+          "admitted": 1000,
+          "rejections": 8336,
+          "reward": -8468.6
+        }
+      }
+    },
+    {
+      "type": "epoch",
+      "scenario": "2",
+      "startedAt": "2025-09-14T05:22:18.271Z",
+      "timestamp": "2025-09-14T05:22:44.736Z",
+      "summary": {
+        "epoch": 3,
+        "loss": 0.11917236251486309,
+        "successRate": 1,
+        "avgRejections": 9774,
+        "exploration": 0.2,
+        "totalNudges": 4052,
+        "bestEpisode": {
+          "admitted": 1000,
+          "rejections": 7917,
+          "reward": -8078.2
+        }
+      }
+    },
+    {
+      "type": "epoch",
+      "scenario": "2",
+      "startedAt": "2025-09-14T05:22:18.271Z",
+      "timestamp": "2025-09-14T05:22:53.273Z",
+      "summary": {
+        "epoch": 4,
+        "loss": 0.1194983574229482,
+        "successRate": 1,
+        "avgRejections": 10101.35,
+        "exploration": 0.2,
+        "totalNudges": 3307,
+        "bestEpisode": {
+          "admitted": 1000,
+          "rejections": 7818,
+          "reward": -7933.2
+        }
+      }
+    },
+    {
+      "type": "epoch",
+      "scenario": "2",
+      "startedAt": "2025-09-14T05:22:18.271Z",
+      "timestamp": "2025-09-14T05:23:02.066Z",
+      "summary": {
+        "epoch": 5,
+        "loss": 0.1228760805231578,
+        "successRate": 1,
+        "avgRejections": 10039.64,
+        "exploration": 0.2,
+        "totalNudges": 3188,
+        "bestEpisode": {
+          "admitted": 1000,
+          "rejections": 7967,
+          "reward": -8119.6
+        }
+      }
+    },
+    {
+      "type": "epoch",
+      "scenario": "2",
+      "startedAt": "2025-09-14T05:22:18.271Z",
+      "timestamp": "2025-09-14T05:23:06.860Z",
+      "summary": {
+        "epoch": 6,
+        "loss": 0.14280961048899754,
+        "successRate": 0,
+        "avgRejections": 20000,
+        "exploration": 0.2,
+        "totalNudges": 0,
+        "bestEpisode": {
+          "admitted": 1000,
+          "rejections": 4675,
+          "reward": -124013.17
+        }
+      }
+    },
+    {
+      "type": "epoch",
+      "scenario": "2",
+      "startedAt": "2025-09-14T05:22:18.271Z",
+      "timestamp": "2025-09-14T05:23:08.871Z",
+      "summary": {
+        "epoch": 7,
+        "loss": 0.11811010451290956,
+        "successRate": 0,
+        "avgRejections": 20000,
+        "exploration": 0.2,
+        "totalNudges": 0,
+        "bestEpisode": {
+          "admitted": 1000,
+          "rejections": 1388,
+          "reward": -123214.84
+        }
+      }
+    },
+    {
+      "type": "epoch",
+      "scenario": "2",
+      "startedAt": "2025-09-14T05:22:18.271Z",
+      "timestamp": "2025-09-14T05:23:13.138Z",
+      "summary": {
+        "epoch": 8,
+        "loss": 0.14969838592349405,
+        "successRate": 0,
+        "avgRejections": 20000,
+        "exploration": 0.2,
+        "totalNudges": 0,
+        "bestEpisode": {
+          "admitted": 1000,
+          "rejections": 3912,
+          "reward": -123636.20999999999
+        }
+      }
+    },
+    {
+      "type": "run",
+      "scenario": "2",
+      "startedAt": "2025-09-14T05:22:18.271Z",
+      "finishedAt": "2025-09-14T05:23:20.856Z",
+      "params": {
+        "epochs": 8,
+        "episodesPerEpoch": 100,
+        "assistGain": 1.5,
+        "oracleRelabelFrac": 0.6,
+        "elitePercentile": 0.2,
+        "resumeFlag": true
+      },
+      "testResults": {
+        "successRate": 0,
+        "avgRejections": 20000,
+        "minRejections": 20000,
+        "maxRejections": 20000
+      },
+      "trainingStats": [
+        {
+          "epoch": 1,
+          "avgReward": -10253.49,
+          "avgRejections": 10253.49,
+          "successRate": 1,
+          "bestRejections": 8560
+        },
+        {
+          "epoch": 2,
+          "avgReward": -10151.71,
+          "avgRejections": 10151.71,
+          "successRate": 1,
+          "bestRejections": 8336
+        },
+        {
+          "epoch": 3,
+          "avgReward": -9774,
+          "avgRejections": 9774,
+          "successRate": 1,
+          "bestRejections": 7917
+        },
+        {
+          "epoch": 4,
+          "avgReward": -10101.35,
+          "avgRejections": 10101.35,
+          "successRate": 1,
+          "bestRejections": 7818
+        },
+        {
+          "epoch": 5,
+          "avgReward": -10039.64,
+          "avgRejections": 10039.64,
+          "successRate": 1,
+          "bestRejections": 7818
+        },
+        {
+          "epoch": 6,
+          "avgReward": -20000,
+          "avgRejections": 20000,
+          "successRate": 0,
+          "bestRejections": 7818
+        },
+        {
+          "epoch": 7,
+          "avgReward": -20000,
+          "avgRejections": 20000,
+          "successRate": 0,
+          "bestRejections": 7818
+        },
+        {
+          "epoch": 8,
+          "avgReward": -20000,
+          "avgRejections": 20000,
+          "successRate": 0,
+          "bestRejections": 7818
+        }
+      ]
     }
   ]
 }

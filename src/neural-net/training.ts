@@ -245,21 +245,21 @@ export class SelfPlayTrainer {
 
       // --- hybrid decision (scoring + network) ---
       const guest = person.attributes as ScenarioAttributes
-      let admit = bouncer.admit(status)
+      let admit = bouncer.admit(status, trueCounts)
 
       if (usePolicyFusion) {
         const policyVote = scoring.shouldAdmit(guest, 1.0, 0.5)
         const helpsWorstGap = this.oracleShouldAdmit(trueCounts, person.attributes, admitted)
+        const scarce = scoring.isRunningOutOfAvailableSpots()
 
-        // Open the door if either the policy or the NN says yes
-        admit = policyVote || admit
-
-        // Late-game veto: protect seats if a "yes" doesn't help the worst gap
-        if (admit && scoring.isRunningOutOfAvailableSpots() && !helpsWorstGap) {
-          admit = false
+        if (!scarce) {
+          // Early/mid game: permissive — let either strategy open the door
+          admit = policyVote || admit
+        } else {
+          // Late/low-seats: must help the worst shortfall, and pass at least one gate
+          admit = (policyVote || admit) && helpsWorstGap
         }
       }
-
       // teacher assist (oracle) during training only
       if (useTeacherAssist) {
         const pAssist = this.assistProb(trueCounts, admitted)

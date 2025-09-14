@@ -85,11 +85,9 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
   const frequencies = game.attributeStatistics.relativeFrequencies
 
   const TARGET_REJECTIONS = config.targetRejections ?? 5_000
-  const MAX = config.maxAdmissions ?? 1000
-  const REJ_MAX = config.maxRejections ?? 20000
   const CUSHION = config.safetyCushion ?? 1 // you already pass safetyCushion: 1
-  const CUSHION_PER_QUOTA = 5 // “5 person cushion” per unmet quota
-  const BREATH_MULTIPLIER = 10 // scales when to start getting strict
+  const CUSHION_PER_QUOTA = 4 // “4 person cushion” per unmet quota
+  const BREATH_MULTIPLIER = 8 // scales when to start getting strict
 
   const quotas = Object.fromEntries(
     game.constraints.map((constraint) => {
@@ -140,7 +138,7 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
 
   /** Seat scarcity in [0..1]: closer to 1 when seats are getting scarce. */
   const seatScarcity = (seatsLeft: number): number => {
-    return clamp(0, 200 / Math.max(1, seatsLeft), 1)
+    return clamp(0, 120 / Math.max(1, seatsLeft), 1) // was 200 / seatsLeft
   }
 
   return {
@@ -168,7 +166,7 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
       const totalSpots = this.getTotalSpotsAvailable()
 
       if (totalUnmet < 2) {
-        // one quota left → be slightly under; allow off-by-one tolerance
+        // one quota left → allow off-by-one tolerance
         return spotsReserved + 1 >= totalSpots
       }
 
@@ -234,24 +232,14 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
 
       const before = this.worstExpectedShortfall(peopleLeft)
       const after = this.worstExpectedShortfall(Math.max(0, peopleLeft - 1), guest)
-      const delta = before - after
+      const delta = before - after // improvement (heads of shortfall reduced)
 
-      // DEBUG (optional)
-      if (before > 0 && Math.random() < 0.0005) {
-        console.log('[gate]', {
-          peopleLeft,
-          seatsLeft,
-          before: before.toFixed(3),
-          after: after.toFixed(3),
-          delta: delta.toFixed(3),
-        })
-      }
-
+      // optional tiny debug remains...
       if (before > 0) {
-        const scarcity = this.seatScarcity()
-        // Early: any improvement is enough. Late: require a modest improvement.
-        const tighten = 0.03 + 0.18 * scarcity
-        return delta > 0 && delta >= tighten * Math.min(1, before)
+        const scarcity = seatScarcity(seatsLeft)
+        // ↓ require smaller improvement; earlier it was 0.05 + 0.25*scarcity
+        const tighten = 0.02 + 0.15 * scarcity
+        return delta >= tighten * Math.min(1, before)
       }
 
       const byScore = this.admitByScore(guest, baseTheta)
