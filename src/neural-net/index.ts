@@ -17,8 +17,8 @@ const __dirname = path.dirname(__filename)
 const trainingData: string[][] = []
 
 enum Weights {
-  scenario2BestAverage = `../bouncer-data/weights-s2.best-4407avg.json`,
-  scenario2Normal = `../bouncer-data/weights-scenario-2.json`,
+  scenario2BestAverage = `../../bouncer-data/weights-s2.best-4407avg.json`,
+  scenario2Normal = `../../bouncer-data/weights-scenario-2.json`,
 }
 
 export async function initializeNeuralNetwork(initialState: GameState): Promise<BerghainBouncer> {
@@ -29,7 +29,7 @@ export async function initializeNeuralNetwork(initialState: GameState): Promise<
   // build bouncer (no exploration for prod)
   const bouncer = new NeuralNetBouncer(initialState.game, {
     explorationRate: 0,
-    baseThreshold: 0.32, // same as training
+    baseThreshold: 0.30, // same as training
     minThreshold: 0.22,
     maxThreshold: 0.62,
     urgencyFactor: 2.0,

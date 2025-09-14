@@ -117,6 +117,7 @@ export class NeuralNetBouncerRunner {
       try {
         const weights = JSON.parse(fs.readFileSync(this.weightsPath, 'utf-8'))
         trainer.loadWeights(weights)
+        trainer.getNetwork().setLearningRate(0.0001)
         console.log(`[resume] Warm-started from ${this.weightsPath}`)
       } catch (e) {
         console.warn('[resume] Failed to load saved weights; starting fresh.', (e as Error).message)
