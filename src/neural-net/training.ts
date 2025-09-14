@@ -234,7 +234,8 @@ export class SelfPlayTrainer {
 
       if (usePolicyFusion) {
         const policyVote = scoring.shouldAdmit(guest, 1.0, 0.5)
-        if (!admit && policyVote) admit = true
+        // Safe fusion: policy must approve; net can only allow/deny within policy-YES region
+        admit = policyVote && admit
       }
 
       // teacher assist (oracle) during training only
@@ -363,16 +364,30 @@ export class SelfPlayTrainer {
     for (const ep of elite) {
       for (let i = 0; i < ep.states.length; i++) {
         const modelLabel = ep.actions[i] ? 1 : 0
+
+        const counts = ep.countsPerStep[i]
+        const person = ep.peoplePerStep[i]
+        const admittedSoFar = ep.admittedPrefix[i]
+
+        let label = modelLabel
+        let repeats = 1
+
         if (Math.random() < relabelFrac) {
-          const counts = ep.countsPerStep[i]
-          const person = ep.peoplePerStep[i]
-          const admittedSoFar = ep.admittedPrefix[i]
           const oracleLabel = this.oracleShouldAdmit(counts, person, admittedSoFar) ? 1 : 0
-          const repeats = oracleLabel !== modelLabel ? disagreeBoost : 1
-          pushSample(ep.states[i], oracleLabel, repeats)
-        } else {
-          pushSample(ep.states[i], modelLabel, 1)
+          label = oracleLabel
+          // disagreements get boosted
+          repeats = oracleLabel !== modelLabel ? 6 : 1
         }
+
+        // --- Rare-attr boost: creative present & still unmet ---
+        const needCreative =
+          this.game.constraints.find((c) => c.attribute === 'creative')!.minCount - (counts['creative'] || 0)
+        if (person['creative'] && needCreative > 0) {
+          // stronger when oracle says admit
+          repeats += label === 1 ? 3 : 1
+        }
+
+        pushSample(ep.states[i], label, repeats)
       }
     }
 

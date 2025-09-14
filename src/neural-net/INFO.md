@@ -36,16 +36,27 @@ bun run src/neural-net/runner train 40 200 --assistGain=2 --oracleRelabelFrac=0.
 bun run src/neural-net/runner resume 30 200 --assistGain=2 --oracleRelabelFrac=0.5 --elitePercentile=0.1
 
 # Hybrid test (no sample file):
-bun run src/neural-net/runner test "" --mode=hybrid
-
-# Score-only (to see the heuristic baseline):
-bun run src/neural-net/runner test "" --mode=score
-
 # Pure bouncer (to gauge net-only progress):
+# Score-only (to see the heuristic baseline):
+bun run src/neural-net/runner test "" --mode=hybrid
+bun run src/neural-net/runner test "" --mode=score
 bun run src/neural-net/runner test "" --mode=bouncer
 
 # aggressive oracle distillation
 bun run src/neural-net/runner train 30 200 --oracleRelabelFrac=1.0 --elitePercentile=0.1
+
+### --- train mode ---
+
+# (A) Train with strong oracle relabel + bigger elite slice
+bun run src/neural-net/runner train 30 200 --oracleRelabelFrac=1.0 --elitePercentile=0.1
+
+# (B) Resume with slightly gentler relabel (keeps exploring)
+bun run src/neural-net/runner resume 20 200 --oracleRelabelFrac=0.6 --elitePercentile=0.1
+
+# (C) Test – pure net vs hybrid vs heuristic
+bun run src/neural-net/runner test "" --mode=bouncer
+bun run src/neural-net/runner test "" --mode=hybrid
+bun run src/neural-net/runner test "" --mode=score
 ```
 
 Keep policy fusion ON during training (already the default in `SelfPlayTrainer.runEpisode`) but OFF in `test()` to see pure-net progress.

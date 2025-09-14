@@ -322,31 +322,10 @@ export class NeuralNetBouncerRunner {
           rejectedCount: rejected,
           nextPerson: { personIndex, attributes },
         }
-
-        // --- FINISHER: if any quota needs just 1 head, only admit if guest hits it ---
-        const critical = scoring
-          .quotas() // unmet only
-          .map((q) => ({ q, need: q.needed() }))
-          .sort((a, b) => a.need - b.need)[0]
-
-        if (critical && critical.need <= 1) {
-          admit = !!guest[critical.q.attribute]
-        } else {
-          // regular hybrid gating
-          const nnAdmit = this.bouncer.admit(status)
-          const policyAdmit = scoring.shouldAdmit(guest, 0.9, 0.45)
-          const quotasOutstanding = scoring.quotas().length > 0
-          if (quotasOutstanding) {
-            admit = policyAdmit && nnAdmit
-            // Optional soft guard: block low-urgency slip-throughs
-            if (!policyAdmit && admit) {
-              const minimalTheta = 1.0 + 0.5 * scoring.seatScarcity()
-              if (scoring.guestScore(guest) < minimalTheta) admit = false
-            }
-          } else {
-            admit = nnAdmit || policyAdmit
-          }
-        }
+        const policyVote = scoring.shouldAdmit(guest, 1.0, 0.5)
+        const netVote = this.bouncer.admit(status)
+        // Gate by policy: only admit when policy says YES; net adds extra conservatism
+        admit = policyVote && netVote
       } else {
         // score-only
         admit = scoring.shouldAdmit(guest, 1.0, 0.5)
