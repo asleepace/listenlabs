@@ -22,7 +22,8 @@ export class NeuralNet {
   private learningRate: number
   private l2Lambda: number
 
-  constructor(learningRate = 0.001, l2Lambda = 0.0001) {
+  // ↓ default LR lowered for stability
+  constructor(learningRate = 0.0003, l2Lambda = 0.0001) {
     this.learningRate = learningRate
     this.l2Lambda = l2Lambda
   }
@@ -56,20 +57,29 @@ export class NeuralNet {
     this.layerInputs = [current.copy()]
     this.layerOutputs = []
 
+    const CLIP_ACT = (v: number) => Math.max(-60, Math.min(60, v)) // guard exp()/tanh() blowups
+
     for (let li = 0; li < this.layers.length; li++) {
       const layer = this.layers[li]
+      if (!layer) {
+        throw new Error(`NeuralNet: Missing layer (${li}) in forward.`)
+      }
+
       const z = current.dot(layer.weights).add(layer.bias)
 
       let output: Matrix
       switch (layer.activation) {
         case 'relu':
+          // ReLU is safe without clipping
           output = z.map(activations.relu)
           break
         case 'sigmoid':
-          output = z.map(activations.sigmoid)
+          // clip pre-activations before exp
+          output = z.map((v) => activations.sigmoid(CLIP_ACT(v)))
           break
         case 'tanh':
-          output = z.map(activations.tanh)
+          // clip pre-activations before tanh
+          output = z.map((v) => activations.tanh(CLIP_ACT(v)))
           break
         case 'linear':
           output = z
@@ -95,7 +105,7 @@ export class NeuralNet {
 
   backward(target: number[] | number, _predicted?: number[]): void {
     if (!this.layerOutputs.length) {
-      throw new Error('Must call forward() before backward()')
+      throw new Error('NeuralNet: Must call forward() before backward()')
     }
 
     const targetArray = typeof target === 'number' ? [target] : (target as number[])
@@ -106,8 +116,7 @@ export class NeuralNet {
     const output = this.layerOutputs[this.layerOutputs.length - 1]
 
     // Loss gradient:
-    // For sigmoid output, use BCE-style gradient: dL/dz = (ŷ - y)
-    // BCE + sigmoid head: dL/dz = y_hat - y_smooth
+    // For sigmoid output, use BCE-style gradient: dL/dz = (ŷ - y_smooth)
     let delta: Matrix
     if (outputLayer.activation === 'sigmoid') {
       delta = output.subtract(targetMatrix)
@@ -122,11 +131,16 @@ export class NeuralNet {
     const CLIP = 5
     delta = delta.map((v) => Math.max(-CLIP, Math.min(CLIP, v)))
 
-    // (relu for the output is handled in the loop below if present)
-
     for (let i = this.layers.length - 1; i >= 0; i--) {
       const layer = this.layers[i]
       const layerInput = this.layerInputs[i]
+
+      if (!layer || !layerInput) {
+        throw new Error(`NeuralNet: Missing layer (${i}) in backward.`)
+      }
+
+      // snapshot weights BEFORE updating (for correct chain rule)
+      const Wprev = layer.weights.copy()
 
       let weightGrad = layerInput.transpose().dot(delta)
       let biasGrad = delta.copy()
@@ -158,7 +172,8 @@ export class NeuralNet {
       }
 
       if (i > 0) {
-        delta = delta.dot(layer.weights.transpose())
+        // propagate with pre-update weights
+        delta = delta.dot(Wprev.transpose())
 
         const prevLayer = this.layers[i - 1]
         const prevOutput = this.layerOutputs[i - 1]
@@ -241,7 +256,7 @@ export class NeuralNet {
 
   /** Static constructor (kept for backwards compatibility). */
   static fromJSON(json: any): NeuralNet {
-    const net = new NeuralNet(json.learningRate ?? 0.001, json.l2Lambda ?? 0.0001)
+    const net = new NeuralNet(json.learningRate ?? 0.0003, json.l2Lambda ?? 0.0001)
     net.fromJSON(json)
     return net
   }

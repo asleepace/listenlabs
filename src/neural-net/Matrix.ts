@@ -5,7 +5,11 @@ export class Matrix {
   readonly cols: number
   readonly data: Float32Array
 
+  // --- constructor guard ---
   constructor(rows: number, cols: number, data?: number[] | Float32Array) {
+    if (!Number.isInteger(rows) || !Number.isInteger(cols) || rows <= 0 || cols <= 0) {
+      throw new Error(`Invalid matrix shape ${rows}x${cols}`)
+    }
     this.rows = rows
     this.cols = cols
 
@@ -19,6 +23,21 @@ export class Matrix {
     }
   }
 
+  // --- safer/faster max/min ---
+  max(): number {
+    let m = -Infinity
+    const a = this.data
+    for (let i = 0; i < a.length; i++) if (a[i] > m) m = a[i]
+    return m
+  }
+
+  min(): number {
+    let m = Infinity
+    const a = this.data
+    for (let i = 0; i < a.length; i++) if (a[i] < m) m = a[i]
+    return m
+  }
+
   get(row: number, col: number): number {
     return this.data[row * this.cols + col]
   }
@@ -27,25 +46,30 @@ export class Matrix {
     this.data[row * this.cols + col] = value
   }
 
+  // --- faster dot (no get()/set() in inner loops) ---
   dot(other: Matrix): Matrix {
     if (this.cols !== other.rows) {
-      console.log({ ...this, other })
       throw new Error(`Cannot multiply ${this.rows}x${this.cols} with ${other.rows}x${other.cols}`)
     }
+    const A = this.data,
+      B = other.data
+    const r = this.rows,
+      kdim = this.cols,
+      c = other.cols
+    const out = new Matrix(r, c)
+    const C = out.data
 
-    const result = new Matrix(this.rows, other.cols)
-
-    for (let i = 0; i < this.rows; i++) {
-      for (let j = 0; j < other.cols; j++) {
+    for (let i = 0; i < r; i++) {
+      const ai = i * kdim
+      for (let j = 0; j < c; j++) {
         let sum = 0
-        for (let k = 0; k < this.cols; k++) {
-          sum += this.get(i, k) * other.get(k, j)
+        for (let k = 0; k < kdim; k++) {
+          sum += A[ai + k] * B[k * c + j]
         }
-        result.set(i, j, sum)
+        C[i * c + j] = sum
       }
     }
-
-    return result
+    return out
   }
 
   add(other: Matrix | number): Matrix {
@@ -108,14 +132,6 @@ export class Matrix {
     return sum
   }
 
-  max(): number {
-    return Math.max(...this.data)
-  }
-
-  min(): number {
-    return Math.min(...this.data)
-  }
-
   copy(): Matrix {
     return new Matrix(this.rows, this.cols, this.data)
   }
@@ -156,22 +172,20 @@ export class Matrix {
     return Matrix.random(rows, cols, -limit, limit)
   }
 
+  // --- He init guard (fan-in must be > 0) ---
   static he(rows: number, cols: number): Matrix {
+    if (rows <= 0) throw new Error(`He init requires rows (fan_in) > 0, got ${rows}`)
     const std = Math.sqrt(2 / rows)
     const m = new Matrix(rows, cols)
     for (let i = 0; i < m.data.length; i++) {
-      // const u1 = Math.random()
-      // const u2 = Math.random()
-      // const z0 = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2)
-      // m.data[i] = z0 * std
       let u1 = 0
       do {
         u1 = Math.random()
       } while (u1 <= 1e-12)
       const u2 = Math.random()
       const z0 = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2)
-      m.data[i] = z0 * std
-      if (!Number.isFinite(m.data[i])) m.data[i] = 0
+      const v = z0 * std
+      m.data[i] = Number.isFinite(v) ? v : 0
     }
     return m
   }
@@ -186,11 +200,20 @@ export class Matrix {
     return new Matrix(arr.length, 1, arr)
   }
 
+  // --- robust from2D ---
   static from2D(arr: number[][]): Matrix {
     const rows = arr.length
+    if (rows === 0) throw new Error('from2D: empty array')
     const cols = arr[0].length
+    if (!Number.isInteger(cols) || cols <= 0) throw new Error('from2D: empty inner array')
+    for (let i = 1; i < rows; i++) {
+      if (arr[i].length !== cols) throw new Error('from2D: ragged rows')
+    }
     const data = new Float32Array(rows * cols)
-    for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) data[i * cols + j] = arr[i][j]
+    for (let i = 0; i < rows; i++) {
+      const row = arr[i]
+      for (let j = 0; j < cols; j++) data[i * cols + j] = row[j]
+    }
     return new Matrix(rows, cols, data)
   }
 }

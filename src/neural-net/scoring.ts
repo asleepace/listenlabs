@@ -154,25 +154,28 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
     /**
      * Start tightening admits when projected demand risks exceeding seats left.
      * - If only one quota remains → allow a 1-seat slack (off-by-one guard).
-     * - Otherwise, start being stricter roughly ~200 seats before the end when all 4 quotas are unmet:
+     * - Otherwise, start being stricter roughly ~100 seats before the end when all 4 quotas are unmet:
      *   breathingRoom = CUSHION_PER_QUOTA (5) * unmetQuotas * BREATH_MULTIPLIER (10)
-     *   => 5 * 4 * 10 = 200
+     *   => 1 x 4(cushion) x 8(breath_multi) * 10 = 200
      */
     isRunningOutOfAvailableSpots(): boolean {
       if (this.isComplete()) return false
       if (this.isUnderFilled()) return false
 
       const totalUnmet = this.unmetQuotasCount()
-      const spotsReserved = this.getMaxPeopleNeeded()
+      const spotsReserved = this.getMinPeopleNeeded()
       const totalSpots = this.getTotalSpotsAvailable()
 
-      if (totalUnmet < 2) {
+      if (totalUnmet === 1) {
         // one quota left → allow off-by-one tolerance
-        return spotsReserved + 1 >= totalSpots
+        return spotsReserved >= totalSpots
       }
 
-      const breathingRoom = CUSHION * CUSHION_PER_QUOTA * BREATH_MULTIPLIER * totalUnmet
-      return spotsReserved + breathingRoom >= totalSpots
+      return totalSpots * 20 + spotsReserved >= totalSpots
+
+      // cap breathing room at ~100 spots
+      // const breathingRoom = Math.min(100, CUSHION * CUSHION_PER_QUOTA * BREATH_MULTIPLIER * totalUnmet)
+      // return spotsReserved + breathingRoom >= totalSpots
     },
     unmetQuotasCount(): number {
       return this.quotas().length
@@ -182,7 +185,7 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
       for (const q of this.quotas()) {
         const cur = q.count + (guest && guest[q.attribute] ? 1 : 0)
         const expectedFuture = Math.max(0, peopleLeftInLine) * Math.max(0, q.frequency)
-        const target = q.minCount // ✅ no cushion in the gate
+        const target = q.minCount
         const gap = Math.max(0, target - (cur + expectedFuture))
         if (gap > worst) worst = gap
       }

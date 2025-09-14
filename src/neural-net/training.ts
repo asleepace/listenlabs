@@ -60,7 +60,7 @@ export class SelfPlayTrainer {
     this.config = {
       episodes: 100,
       batchSize: 32,
-      learningRate: 0.001,
+      learningRate: 0.003,
       explorationStart: 0.9,
       explorationEnd: 0.2,
       explorationDecay: 0.97,
@@ -471,6 +471,7 @@ export class SelfPlayTrainer {
       console.log(`  Best rejections: ${this.bestEpisode?.rejections || 'N/A'}`)
       console.log(`  Training loss: ${loss.toFixed(4)}`)
       console.log(`  Exploration rate: ${exploration.toFixed(3)}`)
+      console.log(`  Success:`, successRate !== 0)
       const label = bestEp.completed ? 'SUCCESS' : 'FAIL'
       console.log(
         `  Best episode — (${label}) admitted: ${bestEp.admittedAtEnd}, rejections: ${bestEp.rejections}, reward: ${bestEp.reward}`
