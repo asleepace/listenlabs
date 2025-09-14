@@ -281,7 +281,7 @@ export class SelfPlayTrainer {
   private scoreEpisode(
     counts: Record<string, number>,
     rejected: number,
-    isSuccesful: boolean
+    isCompleted: boolean
   ): { reward: number; completed: boolean; shortfalls: Array<{ attr: string; need: number }> } {
     let totalShortfall = 0,
       quadShortfall = 0,
@@ -308,9 +308,9 @@ export class SelfPlayTrainer {
     reward -= Conf.TRAINING.BETA_SURPLUS * totalSurplus
 
     const satisfiedAll = shortfalls.length === 0
-    if (!satisfiedAll || !isSuccesful) reward -= Conf.TRAINING.LOSS_PENALTY
+    if (!satisfiedAll || !isCompleted) reward -= Conf.TRAINING.LOSS_PENALTY
 
-    return { reward, completed: satisfiedAll && isSuccesful, shortfalls }
+    return { reward, completed: satisfiedAll && isCompleted, shortfalls }
   }
 
   // ---------- training over elite episodes ----------
@@ -456,7 +456,7 @@ export class SelfPlayTrainer {
       const totalNudges = batch.reduce((s, e) => s + (e.nudgeCount ?? 0), 0)
       const bestEp = batch.reduce((b, e) => (e.reward > b.reward ? e : b), batch[0])
       const bestEpInfo = this.scoreEpisode(
-        batch[0].countsPerStep.at(-1) ?? {}, // or track final counts explicitly
+        bestEp.countsPerStep.at(-1) ?? {}, // or track final counts explicitly
         bestEp.rejections,
         bestEp.completed
       )

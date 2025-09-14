@@ -48,7 +48,7 @@ export const getAttributes = (guest: ScenarioAttributes): string[] => {
 }
 
 /**
- * Returns a number with specified amout of percision.
+ * Returns a number with specified amount of precision.
  */
 export const toFixed = (x: number, fractionDigits = 0): number => {
   return +x.toFixed(fractionDigits)

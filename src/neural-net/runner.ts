@@ -188,10 +188,16 @@ export class NeuralNetBouncerRunner {
       let net: NeuralNet
       try {
         net = NeuralNet.fromJSON(weights)
-      } catch {
+      } catch (e) {
+        console.warn('[runner] failed to load neural net from JSON:', e)
         net = createBerghainNet(Conf.FEATURES)
         ;(net as any).fromJSON?.(weights) || (net as any).loadJSON?.(weights) || (net as any).load?.(weights)
       }
+
+      if (!net) {
+        throw new Error('Runner: Failed to create neural net!')
+      }
+
       this.bouncer.setNetwork(net)
 
       console.log('Weights loaded successfully!')
@@ -311,9 +317,9 @@ export class NeuralNetBouncerRunner {
 
     // --- initialize scoring for all bookkeeping ---
     const scoring = initializeScoring(this.game, {
-      maxRejections: 20_000,
-      maxAdmissions: 1_000,
-      targetRejections: 5_500,
+      maxRejections: Conf.MAX_REJECTIONS,
+      maxAdmissions: Conf.MAX_ADMISSIONS,
+      targetRejections: Conf.TARGET_REJECTIONS,
       safetyCushion: 1,
     })
 
