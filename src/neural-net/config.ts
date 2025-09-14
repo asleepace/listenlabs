@@ -42,6 +42,12 @@ export namespace Conf {
   export const POS_MIN = 0.55
 
   /**
+   * Default learning rate for the model.
+   * @default 0.0003
+   */
+  export const LEARING_RATE = 0.0003
+
+  /**
    * Training specific configuration.
    */
   export const TRAINING = Object.freeze({
