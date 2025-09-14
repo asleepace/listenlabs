@@ -5,6 +5,8 @@ import { NeuralNet, createBerghainNet } from './neural-net'
 import { NeuralNetBouncer } from './neural-net-bouncer'
 import { StateEncoder } from './state-encoder'
 import { initializeScoring } from './scoring'
+import { Conf } from './config'
+import { clamp, toFixed } from './util'
 
 interface Episode {
   admittedPrefix: number[] // admitted count before each decision
@@ -31,27 +33,6 @@ interface TrainingConfig {
   teacherAssistProb?: number // legacy; not used directly
   assistGain?: number // k for adaptive assist
   oracleRelabelFrac?: number // fraction of elite samples to relabel with oracle [0..1]
-}
-
-const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x))
-
-// ----- Reward shaping knobs -----
-const LAMBDA_SHORTFALL = 50 // linear penalty per missing head
-const QUAD_SHORTFALL = 0.05 // extra penalty for concentrated gaps
-const BETA_SURPLUS = 1.0 // mild penalty per head above required
-const LOSS_PENALTY = 100000 // flat penalty for losing (unmet or reject cap)
-
-/** Per-attribute weights to nudge the policy where we were systematically off. */
-const SHORTFALL_WEIGHTS: Record<string, number> = {
-  creative: 1.6, // push scarce 'creative'
-  techno_lover: 1.2, // mild bump to avoid TL misses
-  // others default to 1.0
-}
-
-const SURPLUS_WEIGHTS: Record<string, number> = {
-  // creative: 1.6, // penalize 'creative' overshoot
-  well_connected: 1.8,
-  // others default to 1.0
 }
 
 export class SelfPlayTrainer {
@@ -118,7 +99,7 @@ export class SelfPlayTrainer {
       if (samples[a1]) {
         for (const [a2, corr] of Object.entries(correlations)) {
           if (a1 !== a2 && Math.abs(corr) > 0.3) {
-            const p = clamp((stats.relativeFrequencies as any)[a2] * (1 + corr * 0.5), 0, 1)
+            const p = clamp(stats.relativeFrequencies[a2] * (1 + corr * 0.5), [0, 1])
             samples[a2] = Math.random() < p
           }
         }
@@ -154,7 +135,7 @@ export class SelfPlayTrainer {
     person: Record<string, boolean>,
     admitted: number
   ): boolean {
-    const remaining = Math.max(1, 1000 - admitted)
+    const remaining = Math.max(1, Conf.MAX_ADMISSIONS - admitted)
     const { gap: before } = this.worstExpectedGap(counts, remaining)
 
     const afterCounts: Record<string, number> = { ...counts }
@@ -168,10 +149,10 @@ export class SelfPlayTrainer {
 
   /** Adaptive assist probability driven by current expected-gap. */
   private assistProb(counts: Record<string, number>, admitted: number): number {
-    const remaining = Math.max(1, 1000 - admitted)
+    const remaining = Math.max(1, Conf.MAX_ADMISSIONS - admitted)
     const { gap } = this.worstExpectedGap(counts, remaining)
     const g = gap / remaining // normalized [0..1+]
-    return clamp(this.config.assistGain! * g, 0, 0.5)
+    return clamp(this.config.assistGain! * g, [0, 0.5])
   }
 
   // ---------- run one episode ----------
@@ -205,52 +186,47 @@ export class SelfPlayTrainer {
     const peoplePerStep: Array<Record<string, boolean>> = []
     const admittedPrefix: number[] = []
 
-    let admitted = 0
-    let rejected = 0
     let nudgeCount = 0
-
-    // ground-truth running counts for reward shaping
-    const trueCounts: Record<string, number> = {}
-    Object.keys(this.game.attributeStatistics.relativeFrequencies).forEach((k) => (trueCounts[k] = 0))
 
     // seat/urgency scoring engine
     const scoring = initializeScoring(this.game, {
-      maxAdmissions: 1_000,
-      maxRejections: 20_000,
-      targetRejections: 5_500, // steer to desired reject band
-      safetyCushion: 1, // +1 cushion to avoid off-by-one misses near the end
+      maxAdmissions: Conf.MAX_ADMISSIONS,
+      maxRejections: Conf.MAX_REJECTIONS,
+      targetRejections: Conf.TARGET_REJECTIONS,
+      safetyCushion: Conf.SAFETY_CUSHION,
       weights: {
-        // leave empty unless you want to override scoring weights here
+        // add overrides here
       },
     })
 
     while (scoring.inProgress()) {
       // ONE person per step: same sample for scoring + NN
-      const person = this.generatePerson(admitted + rejected)
+      const person = this.generatePerson(scoring.nextIndex)
+      const counts = scoring.getCounts()
 
       // snapshots (pre-action)
-      countsPerStep.push({ ...trueCounts })
+      countsPerStep.push({ ...counts })
       peoplePerStep.push({ ...person.attributes })
-      admittedPrefix.push(admitted)
+      admittedPrefix.push(scoring.admitted)
 
       const status: GameStatusRunning<PersonAttributesScenario2> = {
         status: 'running',
-        admittedCount: admitted,
-        rejectedCount: rejected,
+        admittedCount: scoring.admitted,
+        rejectedCount: scoring.rejected,
         nextPerson: person,
       }
 
       // encode state with current true counts
-      const state = this.encoder.encode(status, trueCounts)
+      const state = this.encoder.encode(status, counts)
       states.push(state)
 
       // --- hybrid decision (scoring + network) ---
       const guest = person.attributes as ScenarioAttributes
-      let admit = bouncer.admit(status, trueCounts)
+      let admit = bouncer.admit(status, counts)
 
       if (usePolicyFusion) {
         const policyVote = scoring.shouldAdmit(guest, 1.0, 0.5)
-        const helpsWorstGap = this.oracleShouldAdmit(trueCounts, person.attributes, admitted)
+        const helpsWorstGap = this.oracleShouldAdmit(counts, person.attributes, scoring.admitted)
         const scarce = scoring.isRunningOutOfAvailableSpots()
 
         if (!scarce) {
@@ -263,9 +239,9 @@ export class SelfPlayTrainer {
       }
       // teacher assist (oracle) during training only
       if (useTeacherAssist) {
-        const pAssist = this.assistProb(trueCounts, admitted)
+        const pAssist = this.assistProb(counts, scoring.admitted)
         if (Math.random() < pAssist) {
-          const oracle = this.oracleShouldAdmit(trueCounts, person.attributes, admitted)
+          const oracle = this.oracleShouldAdmit(counts, person.attributes, scoring.admitted)
           if (oracle !== admit) {
             admit = oracle
             if (admit) nudgeCount++
@@ -276,43 +252,24 @@ export class SelfPlayTrainer {
       actions.push(admit)
 
       // apply decision to both trackers
-      if (admit) {
-        admitted++
-        for (const [attr, has] of Object.entries(person.attributes)) {
-          if (has) trueCounts[attr] = (trueCounts[attr] || 0) + 1
-        }
-      } else {
-        rejected++
-      }
       scoring.update({ guest, admit })
-
-      // filled venue → score episode
-      if (admitted === 1000) {
-        const { reward, completed } = this.scoreEpisode(trueCounts, rejected, /*hitRejectCap=*/ false)
-        return {
-          admittedPrefix,
-          states,
-          actions,
-          reward,
-          rejections: rejected,
-          completed,
-          admittedAtEnd: admitted,
-          nudgeCount,
-          countsPerStep,
-          peoplePerStep,
-        }
-      }
     }
 
-    // hit reject cap / line ended
-    const { reward, completed } = this.scoreEpisode(trueCounts, rejected, /*hitRejectCap=*/ true)
+    // the game is considered won if we have finished all of our quotas by the
+    // time we run out of space for admissions or rejections.
+    const isSuccess = scoring.isFinishedWithQuotas()
+    const counts = scoring.getCounts()
+    const rejected = scoring.rejected
+    const admitted = scoring.admitted
+
+    const { reward, completed } = this.scoreEpisode(counts, rejected, isSuccess)
     return {
       admittedPrefix,
+      completed,
       states,
       actions,
       reward,
       rejections: rejected,
-      completed,
       admittedAtEnd: admitted,
       nudgeCount,
       countsPerStep,
@@ -324,7 +281,7 @@ export class SelfPlayTrainer {
   private scoreEpisode(
     counts: Record<string, number>,
     rejected: number,
-    hitRejectCap: boolean
+    isSuccesful: boolean
   ): { reward: number; completed: boolean; shortfalls: Array<{ attr: string; need: number }> } {
     let totalShortfall = 0,
       quadShortfall = 0,
@@ -337,8 +294,8 @@ export class SelfPlayTrainer {
       const surplus = Math.max(0, cur - c.minCount)
       if (deficit > 0) shortfalls.push({ attr: c.attribute, need: deficit })
 
-      const sw = SHORTFALL_WEIGHTS[c.attribute] ?? 1.0
-      const vw = SURPLUS_WEIGHTS[c.attribute] ?? 1.0
+      const sw = Conf.TRAINING.getShortfallWeight({ attribute: c.attribute, default: 1.0 })
+      const vw = Conf.TRAINING.getSurplusWeight({ attribute: c.attribute, default: 1.0 })
 
       totalShortfall += sw * deficit
       quadShortfall += sw * deficit * deficit
@@ -346,14 +303,14 @@ export class SelfPlayTrainer {
     }
 
     let reward = -rejected
-    reward -= LAMBDA_SHORTFALL * totalShortfall
-    reward -= QUAD_SHORTFALL * quadShortfall
-    reward -= BETA_SURPLUS * totalSurplus
+    reward -= Conf.TRAINING.LAMBDA_SHORTFALL * totalShortfall
+    reward -= Conf.TRAINING.QUAD_SHORTFALL * quadShortfall
+    reward -= Conf.TRAINING.BETA_SURPLUS * totalSurplus
 
     const satisfiedAll = shortfalls.length === 0
-    if (!satisfiedAll || hitRejectCap) reward -= LOSS_PENALTY
+    if (!satisfiedAll || !isSuccesful) reward -= Conf.TRAINING.LOSS_PENALTY
 
-    return { reward, completed: satisfiedAll && !hitRejectCap, shortfalls }
+    return { reward, completed: satisfiedAll && isSuccesful, shortfalls }
   }
 
   // ---------- training over elite episodes ----------
@@ -368,7 +325,7 @@ export class SelfPlayTrainer {
 
     const X: number[][] = []
     const y: number[] = []
-    const relabelFrac = clamp(this.config.oracleRelabelFrac ?? 0, 0, 1)
+    const relabelFrac = clamp(this.config.oracleRelabelFrac ?? 0, [0, 1])
 
     const pushSample = (state: number[], label: number, repeats = 1) => {
       for (let r = 0; r < repeats; r++) {
@@ -488,7 +445,7 @@ export class SelfPlayTrainer {
         }
       }
 
-      const avgRejections = successCount > 0 ? totalRejections / successCount : 20000
+      const avgRejections = successCount > 0 ? totalRejections / successCount : Conf.MAX_REJECTIONS
       const successRate = successCount / this.config.episodes
       const loss = this.trainOnEpisodes(batch)
 
@@ -501,7 +458,7 @@ export class SelfPlayTrainer {
       const bestEpInfo = this.scoreEpisode(
         batch[0].countsPerStep.at(-1) ?? {}, // or track final counts explicitly
         bestEp.rejections,
-        bestEp.admittedAtEnd < 1000 // crude: reject-cap equivalent in your loop
+        bestEp.completed
       )
 
       console.log(`Epoch ${epoch + 1}/${epochs}:`)
@@ -527,7 +484,7 @@ export class SelfPlayTrainer {
         avgReward: -avgRejections,
         avgRejections,
         successRate,
-        bestRejections: this.bestEpisode?.rejections || 20000,
+        bestRejections: this.bestEpisode?.rejections || Conf.MAX_REJECTIONS,
       })
 
       onEpochEnd?.({
@@ -544,7 +501,7 @@ export class SelfPlayTrainer {
         },
       })
 
-      if (successRate > 0.9 && avgRejections < 1000) {
+      if (successRate > 0.9 && avgRejections < Conf.TARGET_REJECTIONS) {
         console.log('Early stopping - excellent performance achieved!')
         break
       }
@@ -606,16 +563,12 @@ export class SelfPlayTrainer {
 
     return {
       successRate: successes / episodes,
-      avgRejections: successes > 0 ? totalRejections / successes : 20000,
-      avgAdmissions: successes < 1 ? totalAdmissions / episodes : 1_000,
-      minRejections: minRejections === Infinity ? 20000 + minRejections : minRejections,
-      maxRejections: successes > 0 ? maxRejections : 20000,
+      avgRejections: successes > 0 ? totalRejections / successes : Conf.MAX_REJECTIONS,
+      avgAdmissions: successes > 0 ? totalAdmissions / successes : 0,
+      minRejections: successes > 0 ? minRejections : Conf.MAX_REJECTIONS,
+      maxRejections: successes > 0 ? maxRejections : Conf.MAX_REJECTIONS,
     }
   }
-}
-
-const toFixed = (x: number, dec = 0): number => {
-  return +x.toFixed(dec)
 }
 
 export async function trainBouncer(game: Game): Promise<NeuralNetBouncer> {
@@ -638,7 +591,7 @@ export async function trainBouncer(game: Game): Promise<NeuralNetBouncer> {
   console.log(`Success rate: ${(results.successRate * 100).toFixed(1)}%`)
   console.log(`Average admissions:`, toFixed(results.avgAdmissions))
   console.log(`Average rejections:`, toFixed(results.avgRejections))
-  console.log(`Best: ${results.minRejections}, Worst: ${results.maxRejections}`)
+  console.log(`Rejections Worst=${results.maxRejections}, Best=${results.minRejections}`)
 
   const bouncer = new NeuralNetBouncer(game)
   bouncer.setNetwork(trainer.getNetwork())

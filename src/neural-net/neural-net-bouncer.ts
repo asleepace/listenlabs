@@ -1,9 +1,8 @@
-// neural-net-bouncer.ts
+/** @file neural-net-bouncer.ts */
 
 import type { BerghainBouncer, Game, GameStatusCompleted, GameStatusFailed, GameStatusRunning } from '../types'
-import type { NeuralNet } from './neural-net'
+import { NeuralNet } from './neural-net'
 import { StateEncoder } from './state-encoder'
-// ... imports for types
 
 export class NeuralNetBouncer implements BerghainBouncer {
   private encoder: StateEncoder
@@ -107,12 +106,19 @@ export class NeuralNetBouncer implements BerghainBouncer {
    */
   public admit(status: GameStatusRunning<any>, countsOverride?: Record<string, number>): boolean {
     const counts = countsOverride ?? this.counts
+
+    if (!counts) {
+      throw new Error('NeuralNetBouncer: Missing counts!')
+    }
+
     const x = this.encoder.encode(status, counts)
 
-    // Call your NN. Prefer `forward`, else fall back to `inference`.
-    const raw =
-      typeof (this.net as any).forward === 'function' ? (this.net as any).forward(x) : (this.net as any).inference(x)
+    if (!NeuralNet.isNeuralNet(this.net)) {
+      throw new Error('NeuralNetBouncer: Neural net is not defined!')
+    }
 
+    // Call your NN. Prefer `forward`, else fall back to `inference`.
+    const raw = this.net.forward?.(x) ?? this.net.infer(x)
     const p = this.toProbability(raw)
     const theta = this.dynamicThreshold(status)
 

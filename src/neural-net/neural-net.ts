@@ -9,6 +9,12 @@ export interface Layer {
 }
 
 export class NeuralNet {
+  /** checks if the given object is a neural net instance. */
+  static isNeuralNet(obj: unknown): obj is NeuralNet {
+    if (!obj) return false
+    return obj instanceof NeuralNet
+  }
+
   private layers: Layer[] = []
   private layerOutputs: Matrix[] = []
   private layerInputs: Matrix[] = []

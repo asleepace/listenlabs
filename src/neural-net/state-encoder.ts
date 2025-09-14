@@ -1,9 +1,10 @@
 import type { Game, GameStatusRunning, PersonAttributesScenario2 } from '../types'
+import { Conf } from './config'
 
 export class StateEncoder {
   private attributeKeys: string[]
-  private maxAdmitted = 1000
-  private maxRejected = 20000
+  private maxAdmitted = Conf.MAX_ADMISSIONS
+  private maxRejected = Conf.MAX_REJECTIONS
 
   constructor(private game: Game) {
     this.attributeKeys = Object.keys(game.attributeStatistics.relativeFrequencies)
@@ -14,7 +15,7 @@ export class StateEncoder {
    * @param status game status
    * @param countsOverride (optional) real counts of admitted attributes to use instead of estimates
    */
-  encode(status: GameStatusRunning<PersonAttributesScenario2>, countsOverride?: Record<string, number>): number[] {
+  encode(status: GameStatusRunning<PersonAttributesScenario2>, countsOverride: Record<string, number>): number[] {
     // Precompute once
     const personFeatures = this.encodePersonAttributes(status.nextPerson.attributes)
     const satisfactionRatios = this.getConstraintSatisfactionRatios(status, countsOverride)

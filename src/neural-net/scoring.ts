@@ -1,6 +1,7 @@
 /** @file scoring.ts */
 
 import type { GameConstraints, GameState, ScenarioAttributes } from '../types'
+import { average, sum, clamp, getAttributes } from './util'
 
 export type Correlation = GameState['game']['attributeStatistics']['correlations'][string]
 export type Quota = ReturnType<typeof createQuota>
@@ -20,29 +21,6 @@ export type ScoringConfig = {
     targetBonusCap?: number // default 1000 (cap reward for finishing early)
     targetPenaltyCap?: number // default 5000 (cap penalty for finishing late)
   }
-}
-
-export const average = (values: number[]): number => {
-  if (!values.length) return 0
-  return values.reduce((a, b) => a + b, 0) / values.length
-}
-
-export const diff = (v1: number, v2: number) => {
-  return (v1 - v2) / 2
-}
-
-// NOTE: in this file we use clamp(lo, val, hi) because many call sites read naturally as clamp(0, value, 1)
-export const clamp = (lo: number, val: number, hi: number): number => {
-  return Math.max(lo, Math.min(val, hi))
-}
-
-export const sum = (vals: number[]): number => vals.reduce((a, b) => a + b, 0) || 0
-
-/** Extract true attributes as an array. */
-export const getAttributes = (scenarioAttributes: ScenarioAttributes): string[] => {
-  return Object.entries(scenarioAttributes)
-    .filter(([_, value]) => value)
-    .map(([key]) => key)
 }
 
 /** Creates a quota tracker. */
@@ -154,6 +132,10 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
     },
     get frequencies() {
       return frequencies
+    },
+    /** returns the total number of people seen (admitted + rejected). */
+    get nextIndex() {
+      return this.admitted + this.rejected
     },
     /**
      * Returns true when the venue has more spots available than the sum of all people
@@ -302,9 +284,9 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
 
       const seatProgress = this.getTotalProgress()
       const quotaProgress = this.getQuotaProgress() // 1.0 = on pace; >1 behind
-      const progressDelta = clamp(-1, 1 - quotaProgress - seatProgress, 1)
+      const progressDelta = clamp(1 - quotaProgress - seatProgress, [-1, 1])
 
-      const tighten = 0.15 * scarcity * clamp(0, -progressDelta, 1)
+      const tighten = 0.15 * scarcity * clamp(-progressDelta, [0, 1])
       const needFrac = Math.min(0.95, baseFrac + tighten)
 
       return this.guestFractionHit(guest) >= needFrac
@@ -322,17 +304,13 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
     isComplete() {
       return !this.inProgress()
     },
-    /** returns true when under or equal to max admissions and max rejections. */
+    /** returns true when under max admissions and max rejections. */
     inProgress() {
       return this.admitted < config.maxAdmissions && this.rejected < config.maxRejections
     },
     /** returns the total number of people admitted and rejected. */
     getTotalPeopleSeen() {
       return this.admitted + this.rejected
-    },
-    /** returns the total number of people seen + 1 (useful for status) */
-    nextIndex() {
-      return this.getTotalPeopleSeen() + 1
     },
     /** returns the total number of people left in line. */
     getPeopleLeftInLine(): number {
@@ -353,7 +331,7 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
      */
     getQuotaProgress() {
       const peopleLeftInLine = this.getPeopleLeftInLine()
-      const vals = this.quotas().map((q) => clamp(0, q.relativeProgress(peopleLeftInLine), 3))
+      const vals = this.quotas().map((q) => clamp(q.relativeProgress(peopleLeftInLine), [0, 3]))
       return average(vals) || 1.0
     },
     /** Returns true when all quotas have been met. */

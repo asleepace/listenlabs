@@ -15,8 +15,8 @@
     "neural": "bun run src/neural-net/runner --",
     "neural:train": "bun run src/neural-net/runner train 10 50 --assistGain=2.0 --oracleRelabelFrac=0.6 --elitePercentile=0.2 --resume",
     "neural:resume": "bun run src/neural-net/runner resume 6 100 --assistGain=1.0 --oracleRelabelFrac=0.4 --elitePercentile=0.2",
-    "neural:test:score":  "bun run src/neural-net/runner test \"\" --mode=score",
-    "neural:test:bouncer":"bun run src/neural-net/runner test \"\" --mode=bouncer",
+    "neural:test:score": "bun run src/neural-net/runner test \"\" --mode=score",
+    "neural:test:bouncer": "bun run src/neural-net/runner test \"\" --mode=bouncer",
     "neural:test:hybrid": "bun run src/neural-net/runner test \"\" --mode=hybrid",
     "neural:sanity": "bun run src/neural-net/runner sanity",
     "neural:diagnose": "bun run src/neural-net/runner diagnose",
@@ -29,6 +29,7 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "@asleepace/try": "^0.2.1",
     "axios": "^1.11.0"
   }
 }

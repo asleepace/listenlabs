@@ -8,28 +8,12 @@ import { initializeScoring } from './scoring'
 import * as fs from 'fs'
 import * as path from 'path'
 import { createBerghainNet, NeuralNet } from './neural-net'
-
-const FEATURE_SIZE = 17 // encoder feature size for scenario 2
-const MAX_ADMISSIONS = 1_000
-const MAX_REJECTIONS = 20_000
+import { clamp, parseFlags } from './util'
+import { Conf } from './config'
 
 type RunGameIteration = {
   status: GameStatusRunning<ScenarioAttributes>
   scoring: ReturnType<typeof initializeScoring>
-}
-
-const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x))
-
-function parseFlags(args: string[]) {
-  const flags: Record<string, string> = {}
-  for (const a of args) {
-    if (a.startsWith('--')) {
-      const i = a.indexOf('=')
-      if (i > 2) flags[a.slice(2, i)] = a.slice(i + 1)
-      else flags[a.slice(2)] = 'true'
-    }
-  }
-  return flags
 }
 
 export class NeuralNetBouncerRunner {
@@ -83,7 +67,9 @@ export class NeuralNetBouncerRunner {
     if (fs.existsSync(this.logPath)) {
       try {
         log = JSON.parse(fs.readFileSync(this.logPath, 'utf-8'))
-      } catch {}
+      } catch (e) {
+        console.warn(e)
+      }
     }
     if (!log) log = { runs: [] }
     if (!log?.runs) log.runs = []
@@ -203,7 +189,7 @@ export class NeuralNetBouncerRunner {
       try {
         net = NeuralNet.fromJSON(weights)
       } catch {
-        net = createBerghainNet(FEATURE_SIZE)
+        net = createBerghainNet(Conf.FEATURES)
         ;(net as any).fromJSON?.(weights) || (net as any).loadJSON?.(weights) || (net as any).load?.(weights)
       }
       this.bouncer.setNetwork(net)
@@ -223,7 +209,7 @@ export class NeuralNetBouncerRunner {
     game: Game,
     admitted: number
   ): number {
-    const remaining = Math.max(0, MAX_ADMISSIONS - admitted)
+    const remaining = Math.max(0, Conf.MAX_ADMISSIONS - admitted)
     let score = 0
     for (const c of game.constraints) {
       const current = counts[c.attribute] || 0
@@ -254,7 +240,7 @@ export class NeuralNetBouncerRunner {
 
     // greedy pick
     const chosen: PersonAttributesScenario2[] = []
-    while (chosen.length < MAX_ADMISSIONS && pool.length > 0) {
+    while (chosen.length < Conf.MAX_ADMISSIONS && pool.length > 0) {
       let bestIdx = -1
       let bestScore = -Infinity
       for (let i = 0; i < pool.length; i++) {
@@ -317,14 +303,21 @@ export class NeuralNetBouncerRunner {
     scoring.update({ guest, admit })
   }
 
+  /**
+   *  ========= RUN GAME =========
+   */
   runGame(sampleData?: any[], mode: 'score' | 'bouncer' | 'hybrid' = 'score') {
     if (!this.game) throw new Error('Game not initialized')
 
-    let admitted = 0
-    let rejected = 0
-    let personIndex = 0
+    // --- initialize scoring for all bookkeeping ---
+    const scoring = initializeScoring(this.game, {
+      maxRejections: 20_000,
+      maxAdmissions: 1_000,
+      targetRejections: 5_500,
+      safetyCushion: 1,
+    })
 
-    const getData = sampleData ? () => sampleData[personIndex++] : () => this.generatePerson(personIndex++)
+    const getData = sampleData ? () => sampleData[scoring.nextIndex] : () => this.generatePerson(scoring.nextIndex)
 
     const getOrGenerateNextGuest = (): ScenarioAttributes => {
       if (!this.game) throw new Error('Game not initialized')
@@ -347,15 +340,7 @@ export class NeuralNetBouncerRunner {
       return attributes as ScenarioAttributes
     }
 
-    // --- initialize scoring for all bookkeeping ---
-    const scoring = initializeScoring(this.game, {
-      maxRejections: 20_000,
-      maxAdmissions: 1_000,
-      targetRejections: 5_500,
-      safetyCushion: 1,
-    })
-
-    while (scoring.inProgress() && (!sampleData || personIndex < sampleData.length)) {
+    while (scoring.inProgress() && (!sampleData || scoring.nextIndex < sampleData.length)) {
       // --- get or generate the next guest ---
       const guest = getOrGenerateNextGuest()
 
@@ -370,7 +355,7 @@ export class NeuralNetBouncerRunner {
         status: 'running',
         admittedCount: scoring.admitted,
         rejectedCount: scoring.rejected,
-        nextPerson: { personIndex, attributes: guest },
+        nextPerson: { personIndex: scoring.nextIndex + 1, attributes: guest },
       }
 
       // --- handle each mode ---
@@ -407,7 +392,7 @@ export class NeuralNetBouncerRunner {
 
     // base samples
     for (const [attr, freq] of Object.entries(stats.relativeFrequencies)) {
-      samples[attr] = Math.random() < clamp(freq, 0, 1)
+      samples[attr] = Math.random() < clamp(freq, [0, 1])
     }
 
     // apply correlations (positive -> boost, negative -> reduce)
@@ -416,7 +401,7 @@ export class NeuralNetBouncerRunner {
         for (const [attr2, corr] of Object.entries(correlations)) {
           if (attr1 !== attr2 && Math.abs(corr) > 0.3) {
             const base = stats.relativeFrequencies[attr2] ?? 0
-            const adjustedProb = clamp(base * (1 + corr * 0.5), 0, 1)
+            const adjustedProb = clamp(base * (1 + corr * 0.5), [0, 1])
             samples[attr2] = Math.random() < adjustedProb
           }
         }
