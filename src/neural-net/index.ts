@@ -8,10 +8,13 @@ import type { BerghainBouncer, GameState, ScenarioAttributes } from '../types'
 import { initializeScoring } from './scoring'
 import { Conf } from './config'
 import { getAttributes } from './util'
+import { Disk } from '../utils/disk'
 
 // ESM __dirname shim
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
+
+const trainingData: string[][] = []
 
 export async function initializeNeuralNetwork(initialState: GameState): Promise<BerghainBouncer> {
   const weightsPath = path.resolve(__dirname, `../bouncer-data/weights-s2.best-4407avg.json`)
@@ -50,19 +53,23 @@ export async function initializeNeuralNetwork(initialState: GameState): Promise<
 
   let lastPerson: ScenarioAttributes = {} as ScenarioAttributes
   let lastAdmit = false
+  let randomSample = true // allow game to progress to 10,000
 
   return {
     admit(next) {
       lastPerson = next.nextPerson.attributes
+      if (randomSample) return false
       const admit = bouncer.admit(next, scoring.getCounts())
       scoring.update({ guest: next.nextPerson.attributes, admit })
       lastAdmit = admit
       return admit
     },
     getProgress() {
-      const attributes = getAttributes(lastPerson).join(',')
+      const attributes = getAttributes(lastPerson)
+      trainingData.push(attributes)
       return {
-        decision: `[${attributes}]=${lastAdmit}`,
+        decision: lastAdmit,
+        attributes,
         admitted: scoring.admitted,
         rejected: scoring.rejected,
         quotas: scoring.quotas().map((quota) => ({
@@ -74,10 +81,13 @@ export async function initializeNeuralNetwork(initialState: GameState): Promise<
       }
     },
     getOutput(lastStatus) {
+      Disk.saveJsonFile(`data/random-sample-${+new Date()}.json`, trainingData).catch(console.warn)
+
       return {
         ...initialState,
         status: lastStatus.status,
         summary: scoring.getSummary(),
+        training: trainingData.map((row) => row.join(',')).join('\n\n'),
       }
     },
   }

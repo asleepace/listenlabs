@@ -4,6 +4,7 @@ import type { BerghainBouncer, Game, GameStatusCompleted, GameStatusFailed, Game
 import { Conf } from './config'
 import { NeuralNet } from './neural-net'
 import { StateEncoder } from './state-encoder'
+import { sum, sum } from './util'
 
 export class NeuralNetBouncer implements BerghainBouncer {
   private encoder: StateEncoder
@@ -106,6 +107,71 @@ export class NeuralNetBouncer implements BerghainBouncer {
     return Math.max(minT, Math.min(maxT, theta))
   }
 
+  /** Gets the total quota counts needed for each quota (omitted if none needed). */
+  private getTotalQuotas() {
+    return this.game.constraints.reduce((output, constraint) => {
+      const count = this.counts[constraint.attribute]
+      const total = Math.max(0, constraint.minCount - count)
+      if (total === 0) return output
+      return {
+        ...output,
+        [constraint.attribute]: total,
+      }
+    }, {} as Record<string, number>)
+  }
+
+  /**
+   * Returns a tuple containing [required, critical] attributes, which should be
+   * used as hard limits on letting people in the venue.
+   *
+   *  - required: next admitted person must have all of these attributes
+   *  - critical: next admitted person must have some of these attributes
+   *
+   * NOTE: Often times two negatively correlated attributes will become the bottlekneck
+   * at the end and so each turn this will pick an odd or even strategy for filtering
+   * critical attributes, this way they don't become stuck.
+   */
+  private getSafetyGates(): [required: string[], critical: string[]] {
+    const quotas = this.getTotalQuotas()
+    const values = Object.values(quotas)
+    const maxPeopleNeeded = sum(values)
+    const minPeopleNeeded = Math.max(...values)
+    const attributes = Object.keys(quotas)
+
+    const totalAdmitted = Object.values(this.counts).reduce((a, b) => a + b, 0)
+    const totalSpotsLeft = Math.max(0, Conf.MAX_ADMISSIONS - totalAdmitted)
+
+    // if the sum of all quotas needed is less than the total amount of spots
+    // available, then no attribute is needed.
+    if (maxPeopleNeeded < totalSpotsLeft) return [[], []]
+
+    // if we only have one more quota to fill then just return the counts for
+    // that quota, or any empty array if none is present.
+    if (attributes.length <= 1) {
+      return [attributes, attributes]
+    }
+
+    const required: string[] = []
+    const critical: string[] = []
+
+    // a simple binary flag which prevents any one attribute from getting stuck
+    // in required, basically if it is required on one turn, it should be filled
+    // and moved back down to critical.
+    const oddOrEvenBuffer = totalAdmitted % 2 === 1 ? 1 : 2
+    const requiredThreshold = totalSpotsLeft + oddOrEvenBuffer * attributes.length
+    const criticalThreshold = totalSpotsLeft - minPeopleNeeded
+
+    // first pass check all attributes which must  be included in the next admission,
+    // ideally we should try to prevent this from happening.
+    for (const attribute in quotas) {
+      const needed = quotas[attribute]
+      if (needed >= criticalThreshold) critical.push(attribute)
+      if (needed >= requiredThreshold) required.push(attribute)
+    }
+
+    return [required, critical]
+  }
+
   /**
    * IMPORTANT: countsOverride lets the trainer pass the same counts it used to
    * encode the state, so train/test features match.
@@ -113,20 +179,24 @@ export class NeuralNetBouncer implements BerghainBouncer {
   public admit(status: GameStatusRunning<any>, countsOverride?: Record<string, number>): boolean {
     const counts = countsOverride ?? this.counts
 
+    if (!NeuralNet.isNeuralNet(this.net)) {
+      throw new Error('NeuralNetBouncer: Neural net is not defined!')
+    }
+
     if (!counts) {
       throw new Error('NeuralNetBouncer: Missing counts!')
     }
 
+    // Encode the current status (person) and conuts
     const x = this.encoder.encode(status, counts)
-
-    if (!NeuralNet.isNeuralNet(this.net)) {
-      throw new Error('NeuralNetBouncer: Neural net is not defined!')
-    }
 
     // Call your NN. Prefer `forward`, else fall back to `inference`.
     const raw = this.net.forward?.(x) ?? this.net.infer(x)
     const p = this.toProbability(raw)
     const theta = this.dynamicThreshold(status)
+
+    // Check the current quotas to prevent overfilling
+    const quotas = this.getTotalQuotas()
 
     // epsilon-greedy exploration (if you keep it here)
     const eps = this.cfg.explorationRate ?? 0
