@@ -177,19 +177,9 @@ export class NeuralNetBouncerRunner {
     }
     try {
       const weights = JSON.parse(fs.readFileSync(this.weightsPath, 'utf-8'))
-
       this.game = this.initializeGame()
 
-      // Build a net with the right input size and load the weights JSON
-      const encoder = new StateEncoder(this.game)
-      const net = createBerghainNet(encoder.getFeatureSize())
-      const n: any = net as any
-      if (typeof n.fromJSON === 'function') n.fromJSON(weights)
-      else if (typeof n.loadJSON === 'function') n.loadJSON(weights)
-      else if (typeof n.load === 'function') n.load(weights)
-      else console.warn('[runner.load] Unable to load weights: no fromJSON/loadJSON/load on NeuralNet')
-
-      // Create bouncer and attach the net
+      // Build a fresh bouncer with zero exploration
       this.bouncer = new NeuralNetBouncer(this.game, {
         explorationRate: 0,
         baseThreshold: 0.35,
@@ -197,12 +187,16 @@ export class NeuralNetBouncerRunner {
         maxThreshold: 0.7,
         urgencyFactor: 2.0,
       })
+
+      // 🔑 Instead of bouncer.loadWeights(...), instantiate a net and load into it:
+      const net = createBerghainNet(17) // or encoder.getFeatureSize() if available here
+      ;(net as any).fromJSON?.(weights) || (net as any).loadJSON?.(weights) || (net as any).load?.(weights)
       this.bouncer.setNetwork(net)
 
       console.log('Weights loaded successfully!')
       return true
     } catch (error) {
-      console.error('Error loading weights:', error)
+      console.error('[runner.load] Failed to load weights:', (error as Error).message)
       return false
     }
   }
@@ -272,7 +266,7 @@ export class NeuralNetBouncerRunner {
     return this.bouncer
   }
 
-  runGame(sampleData?: any[]): any {
+  runGame(sampleData?: any[], mode: 'score' | 'bouncer' | 'hybrid' = 'score'): any {
     if (!this.game) throw new Error('Game not initialized')
 
     let admitted = 0
@@ -281,7 +275,6 @@ export class NeuralNetBouncerRunner {
 
     const getData = sampleData ? () => sampleData[personIndex++] : () => this.generatePerson(personIndex++)
 
-    // Seat/line model for decisions
     const scoring = initializeScoring(this.game, {
       maxRejections: 20_000,
       maxAdmissions: 1_000,
@@ -290,33 +283,54 @@ export class NeuralNetBouncerRunner {
     while (scoring.inProgress() && (!sampleData || personIndex < sampleData.length)) {
       const personData = getData()
 
-      // normalize into a full attributes object of booleans
+      // normalize
       const attributes: PersonAttributesScenario2 = {} as any
       for (const key of Object.keys(this.game.attributeStatistics.relativeFrequencies)) {
         attributes[key as keyof PersonAttributesScenario2] = false
       }
       if (Array.isArray(personData)) {
-        for (const a of personData) {
-          if (a in attributes) attributes[a as keyof PersonAttributesScenario2] = true
-        }
+        for (const a of personData) if (a in attributes) attributes[a as keyof PersonAttributesScenario2] = true
       } else if (personData && typeof personData === 'object') {
-        for (const [k, v] of Object.entries(personData)) {
+        for (const [k, v] of Object.entries(personData))
           if (k in attributes) attributes[k as keyof PersonAttributesScenario2] = !!v
-        }
       }
 
       const guest = attributes as ScenarioAttributes
-      const admit = scoring.shouldAdmit(guest, /*baseTheta=*/ 1.0, /*baseFrac=*/ 0.5)
+
+      // --- pick decision source ---
+      let admit: boolean
+      if (mode === 'bouncer') {
+        if (!this.bouncer) throw new Error('Bouncer not initialized')
+        const status: GameStatusRunning<PersonAttributesScenario2> = {
+          status: 'running',
+          admittedCount: admitted,
+          rejectedCount: rejected,
+          nextPerson: { personIndex, attributes },
+        }
+        admit = this.bouncer.admit(status)
+      } else if (mode === 'hybrid') {
+        if (!this.bouncer) throw new Error('Bouncer not initialized')
+        const status: GameStatusRunning<PersonAttributesScenario2> = {
+          status: 'running',
+          admittedCount: admitted,
+          rejectedCount: rejected,
+          nextPerson: { personIndex, attributes },
+        }
+        admit = this.bouncer.admit(status)
+        if (!admit) admit = scoring.shouldAdmit(guest, 1.0, 0.5) // fusion overrule
+      } else {
+        // score-only
+        admit = scoring.shouldAdmit(guest, 1.0, 0.5)
+      }
 
       if (admit) admitted++
       else rejected++
 
       scoring.update({ guest, admit })
-
       if (admitted >= 1000 || scoring.isFinishedWithQuotas()) break
     }
 
-    // summarize constraints from scoring’s quota counts
+    // summarize
     const constraints = this.game.constraints.map((c) => {
       const q = scoring.get(c.attribute)
       const current = q?.count ?? 0
@@ -325,22 +339,15 @@ export class NeuralNetBouncerRunner {
     const allMet = constraints.every((c) => c.satisfied)
 
     if (admitted >= 1000 && allMet) {
-      const result = {
-        status: 'completed',
-        finalRejections: rejected,
-        constraints,
-      }
-      return result
+      return { status: 'completed', finalRejections: rejected, constraints }
     }
-
     const hitRejectionCap = rejected >= 20000
-    const result = {
+    return {
       status: 'failed',
       reason: hitRejectionCap ? 'Too many rejections' : 'Constraints not satisfied',
       finalRejections: rejected,
       constraints,
     }
-    return result
   }
 
   /** Sample a synthetic person as a list of attribute names set to true. */
@@ -379,19 +386,19 @@ export async function main() {
 
   const args = process.argv.slice(2)
   const command = args[0] || 'help'
+  const flags = parseFlags(args.slice(2))
+  const mode = (flags.mode as 'score' | 'bouncer' | 'hybrid') || 'score'
 
   switch (command) {
     case 'train': {
       const epochs = parseInt(args[1] || '20', 10)
       const episodes = parseInt(args[2] || '50', 10)
-      const flags = parseFlags(args.slice(3))
       await runner.train(epochs, episodes, flags)
       break
     }
     case 'resume': {
       const epochs = parseInt(args[1] || '10', 10)
       const episodes = parseInt(args[2] || '50', 10)
-      const flags = parseFlags(args.slice(3))
       await runner.resume(epochs, episodes, flags)
       break
     }
@@ -459,10 +466,10 @@ export async function main() {
       console.log(
         '  train [epochs] [episodes] [--assistGain=2] [--oracleRelabelFrac=0.35] [--elitePercentile=0.2] [--resume]'
       )
-      console.log('  resume [epochs] [episodes]  - Continue training from saved weights')
-      console.log('  test [datafile]             - Run a single test game')
-      console.log('  benchmark                   - Run 10 games and show statistics')
-      console.log('  diagnose                    - Greedy feasibility check over a sampled pool')
+      console.log('  test [datafile] [--mode=score|bouncer|hybrid]    - Run a single test game')
+      console.log('  resume [epochs] [episodes]                       - Continue training from saved weights')
+      console.log('  benchmark                                        - Run 10 games and show statistics')
+      console.log('  diagnose                                         - Greedy feasibility check over a sampled pool')
     }
   }
 }

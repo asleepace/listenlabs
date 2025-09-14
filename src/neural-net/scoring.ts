@@ -145,12 +145,30 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
     },
 
     /** Worst expected shortfall given people left, optionally adding this guest. */
+    // worstExpectedShortfall(peopleLeftInLine: number, guest?: ScenarioAttributes): number {
+    //   let worst = 0
+    //   for (const q of this.quotas()) {
+    //     const cur = q.count + (guest && guest[q.attribute] ? 1 : 0)
+    //     const expectedFuture = Math.max(0, peopleLeftInLine) * Math.max(0, q.frequency)
+    //     const gap = Math.max(0, q.minCount - (cur + expectedFuture))
+    //     if (gap > worst) worst = gap
+    //   }
+    //   return worst
+    // },
     worstExpectedShortfall(peopleLeftInLine: number, guest?: ScenarioAttributes): number {
       let worst = 0
+      const seatsLeft = this.getTotalSpotsAvailable()
+
       for (const q of this.quotas()) {
         const cur = q.count + (guest && guest[q.attribute] ? 1 : 0)
-        const expectedFuture = Math.max(0, peopleLeftInLine) * Math.max(0, q.frequency)
-        const gap = Math.max(0, q.minCount - (cur + expectedFuture))
+
+        // How many arrivals with this attr are likely to show up…
+        const arrivalsWithAttr = Math.max(0, peopleLeftInLine) * Math.max(0, q.frequency)
+
+        // …but we can only ADMIT up to seatsLeft total.
+        const bestWeCanStillAdmit = Math.min(seatsLeft, arrivalsWithAttr)
+
+        const gap = Math.max(0, q.minCount - (cur + bestWeCanStillAdmit))
         if (gap > worst) worst = gap
       }
       return worst
