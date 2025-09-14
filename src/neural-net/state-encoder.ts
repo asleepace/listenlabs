@@ -1,4 +1,4 @@
-import type { Game, GameStatusRunning, PersonAttributesScenario2 } from '../types'
+import type { Game, GameStatusRunning, ScenarioAttributes } from '../types'
 import { Conf } from './config'
 
 export class StateEncoder {
@@ -15,7 +15,7 @@ export class StateEncoder {
    * @param status game status
    * @param countsOverride (optional) real counts of admitted attributes to use instead of estimates
    */
-  encode(status: GameStatusRunning<PersonAttributesScenario2>, countsOverride: Record<string, number>): number[] {
+  encode(status: GameStatusRunning<ScenarioAttributes>, countsOverride: Record<string, number>): number[] {
     // Precompute once
     const personFeatures = this.encodePersonAttributes(status.nextPerson.attributes)
     const satisfactionRatios = this.getConstraintSatisfactionRatios(status, countsOverride)
@@ -46,12 +46,12 @@ export class StateEncoder {
     return features
   }
 
-  private encodePersonAttributes(attributes: PersonAttributesScenario2): number[] {
+  private encodePersonAttributes(attributes: ScenarioAttributes): number[] {
     return this.attributeKeys.map((key) => (attributes[key] ? 1 : 0))
   }
 
   private getConstraintSatisfactionRatios(
-    status: GameStatusRunning<PersonAttributesScenario2>,
+    status: GameStatusRunning<ScenarioAttributes>,
     countsOverride?: Record<string, number>
   ): number[] {
     const currentCounts = countsOverride ?? this.getEstimatedCounts(status)
@@ -63,7 +63,7 @@ export class StateEncoder {
   }
 
   private getConstraintPressure(
-    status: GameStatusRunning<PersonAttributesScenario2>,
+    status: GameStatusRunning<ScenarioAttributes>,
     countsOverride?: Record<string, number>
   ): number[] {
     const remaining = this.maxAdmitted - status.admittedCount
@@ -78,7 +78,7 @@ export class StateEncoder {
   }
 
   private getAlignmentScore(
-    status: GameStatusRunning<PersonAttributesScenario2>,
+    status: GameStatusRunning<ScenarioAttributes>,
     countsOverride?: Record<string, number>
   ): number {
     const pressures = this.getConstraintPressure(status, countsOverride)
@@ -94,7 +94,7 @@ export class StateEncoder {
   }
 
   private getCorrelationScore(
-    status: GameStatusRunning<PersonAttributesScenario2>,
+    status: GameStatusRunning<ScenarioAttributes>,
     countsOverride?: Record<string, number> // kept for symmetry
   ): number {
     const pressures = this.getConstraintPressure(status, countsOverride)
@@ -116,7 +116,7 @@ export class StateEncoder {
   }
 
   /** Old heuristic: keep for fallback when no override is provided */
-  private getEstimatedCounts(status: GameStatusRunning<PersonAttributesScenario2>): Record<string, number> {
+  private getEstimatedCounts(status: GameStatusRunning<ScenarioAttributes>): Record<string, number> {
     const counts: Record<string, number> = {}
     this.attributeKeys.forEach((attr) => {
       const freq = this.game.attributeStatistics.relativeFrequencies[attr]

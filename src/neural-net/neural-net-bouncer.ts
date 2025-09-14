@@ -3,7 +3,6 @@
 import type {
   BerghainBouncer,
   Game,
-  GameStatus,
   GameStatusCompleted,
   GameStatusFailed,
   GameStatusRunning,
@@ -117,19 +116,21 @@ export class NeuralNetBouncer implements BerghainBouncer {
    *  - required: next admitted person must have all of these attributes
    *  - critical: next admitted person must have some of these attributes
    *
-   * NOTE: Often times two negatively correlated attributes will become the bottlekneck
+   * NOTE: Often times two negatively correlated attributes will become the bottleneck
    * at the end and so each turn this will pick an odd or even strategy for filtering
    * critical attributes, this way they don't become stuck.
    */
   private getSafetyGates(
     status: GameStatusRunning<ScenarioAttributes>,
-    counts: Record<string, number>
+    needed: Record<string, number>
   ): [required: string[], critical: string[]] {
-    const needs = this.unmetNeeds(counts)
-    const attrs = Object.keys(needs)
+    const attrs = Object.keys(needed)
     if (attrs.length === 0) return [[], []]
 
-    const seatsLeft = Math.max(0, Conf.MAX_ADMISSIONS - status.admittedCount)
+    // Add a small buffer which oscillates to prevent any one attributes from becoming stuck
+    // as required.
+    const wiggleRoom = attrs.length * (status.admittedCount % 2 === 1 ? 2 : 1)
+    const seatsLeft = Math.max(0, Conf.MAX_ADMISSIONS - status.admittedCount - wiggleRoom)
     if (seatsLeft <= 0) return [[], []]
 
     if (attrs.length === 1) {
@@ -137,9 +138,9 @@ export class NeuralNetBouncer implements BerghainBouncer {
       return [[attrs[0]], [attrs[0]]]
     }
 
-    const totalNeed = sum(Object.values(needs))
-    const topAttr = attrs.reduce((best, a) => (needs[a] > needs[best] ? a : best), attrs[0])
-    const maxNeed = needs[topAttr]
+    const totalNeed = sum(Object.values(needed))
+    const topAttr = attrs.reduce((best, a) => (needed[a] > needed[best] ? a : best), attrs[0])
+    const maxNeed = needed[topAttr]
 
     // If the top-need alone equals/exceeds remaining seats, we must target it.
     if (maxNeed >= seatsLeft) {
@@ -158,7 +159,7 @@ export class NeuralNetBouncer implements BerghainBouncer {
    * IMPORTANT: countsOverride lets the trainer pass the same counts it used to
    * encode the state, so train/test features match.
    */
-  public admit(status: GameStatusRunning<any>, countsOverride?: Record<string, number>): boolean {
+  public admit(status: GameStatusRunning<ScenarioAttributes>, countsOverride?: Record<string, number>): boolean {
     const counts = countsOverride ?? this.counts
 
     if (!NeuralNet.isNeuralNet(this.net)) {
@@ -172,7 +173,7 @@ export class NeuralNetBouncer implements BerghainBouncer {
     // Extract the next person we need to determine
     const guest = status.nextPerson.attributes
 
-    // Encode the current status (person) and conuts
+    // Encode the current status (person) and counts
     const x = this.encoder.encode(status, counts)
 
     // Call your NN. Prefer `forward`, else fall back to `inference`.
@@ -181,10 +182,16 @@ export class NeuralNetBouncer implements BerghainBouncer {
     const theta = this.dynamicThreshold(status)
 
     // Check the current quotas to prevent overfilling
-    const [required, critical] = this.getSafetyGates(status, counts)
+    const needed = this.unmetNeeds(counts)
+    const [required, critical] = this.getSafetyGates(status, needed)
+
+    // If no more people are needed then just auto-admit
+    if (Object.keys(needed).length === 0) {
+      return true
+    }
 
     if (required.length) {
-      const hasRequired = required.some((a) => guest[a])
+      const hasRequired = required.every((a) => guest[a])
       if (!hasRequired) return false
     }
     if (critical.length) {
