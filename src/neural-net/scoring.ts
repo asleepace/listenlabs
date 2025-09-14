@@ -92,8 +92,8 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
   const pw: NonNullable<ScoringConfig['weights']> = {
     shortfallPerHead: 3.0, // ↑ was 2.0
     overagePerHead: 0.25, // ↓ was 0.5
-    unmetQuotaConstant: 300, // ↑ was 100
-    targetPerPerson: 1.0,
+    unmetQuotaConstant: 200, // ↑ was 100
+    targetPerPerson: 2.0,
     targetBonusCap: 1000,
     targetPenaltyCap: 5000,
     ...(config.weights ?? {}),

@@ -334,7 +334,7 @@ export class NeuralNetBouncerRunner {
         } else {
           // regular hybrid gating
           const nnAdmit = this.bouncer.admit(status)
-          const policyAdmit = scoring.shouldAdmit(guest, 1.0, 0.5)
+          const policyAdmit = scoring.shouldAdmit(guest, 0.9, 0.45)
           const quotasOutstanding = scoring.quotas().length > 0
           if (quotasOutstanding) {
             admit = policyAdmit && nnAdmit

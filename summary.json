@@ -1,10 +1,10 @@
 {
   "model": 3.4,
   "status": "failed",
-  "gameId": "d36ff2c1-fc58-4d6e-946e-1e5007af3c08",
-  "finalScore": 6323,
+  "gameId": "e0f76473-1c4d-4cf0-b144-875e749da5af",
+  "finalScore": 6346,
   "totalAdmitted": 999,
-  "totalRejected": 3229,
-  "admitRate": 0.7743868321644168,
-  "threshold": 0.08001550636395435
+  "totalRejected": 3065,
+  "admitRate": 0.5184060911516283,
+  "threshold": 1.1934707446531438
 }

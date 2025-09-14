@@ -26,6 +26,31 @@ bun run src/neural-net/runner benchmark --mode=hybrid
 bun run src/neural-net/runner test ./fixtures/samples.json --mode=hybrid
 ```
 
+## Example Flow
+
+```bash
+# Train longer & bigger batches of experience
+bun run src/neural-net/runner train 40 200 --assistGain=2 --oracleRelabelFrac=0.8 --elitePercentile=0.1
+
+# After ~10–15 epochs, anneal oracle relabel:
+bun run src/neural-net/runner resume 30 200 --assistGain=2 --oracleRelabelFrac=0.5 --elitePercentile=0.1
+
+# Hybrid test (no sample file):
+bun run src/neural-net/runner test "" --mode=hybrid
+
+# Score-only (to see the heuristic baseline):
+bun run src/neural-net/runner test "" --mode=score
+
+# Pure bouncer (to gauge net-only progress):
+bun run src/neural-net/runner test "" --mode=bouncer
+```
+
+Keep policy fusion ON during training (already the default in `SelfPlayTrainer.runEpisode`) but OFF in `test()` to see pure-net progress.
+Hybrid success means the scoring policy is good; the net just needs more supervised signal. The high `oracleRelabelFrac` + larger episode counts do that.
+
+Match scoring config between training & run
+Make sure `initializeScoring` in training uses the same `targetRejections` and `weights` you use in the runner. Consistency improves transfer to test/inference.
+
 ## What’s in here
 
 - **`neural-net.ts`** – Lightweight MLP with JSON (de)serialization (`toJSON` / `fromJSON`) and batch training.
