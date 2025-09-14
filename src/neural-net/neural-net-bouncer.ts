@@ -1,10 +1,18 @@
 /** @file neural-net-bouncer.ts */
 
-import type { BerghainBouncer, Game, GameStatusCompleted, GameStatusFailed, GameStatusRunning } from '../types'
+import type {
+  BerghainBouncer,
+  Game,
+  GameStatus,
+  GameStatusCompleted,
+  GameStatusFailed,
+  GameStatusRunning,
+  ScenarioAttributes,
+} from '../types'
 import { Conf } from './config'
 import { NeuralNet } from './neural-net'
 import { StateEncoder } from './state-encoder'
-import { sum, sum } from './util'
+import { sum } from './util'
 
 export class NeuralNetBouncer implements BerghainBouncer {
   private encoder: StateEncoder
@@ -27,31 +35,23 @@ export class NeuralNetBouncer implements BerghainBouncer {
   public setNetwork(net: NeuralNet) {
     this.net = net
   }
-
   public setCounts(counts: Record<string, number>) {
     this.counts = { ...counts }
   }
 
   private sigmoid(z: number): number {
-    // stable-ish sigmoid
     if (z >= 0) {
       const ez = Math.exp(-z)
       return 1 / (1 + ez)
-    } else {
-      const ez = Math.exp(z)
-      return ez / (1 + ez)
     }
+    const ez = Math.exp(z)
+    return ez / (1 + ez)
   }
 
   /** Convert various NN outputs to a single admit probability in [0,1] */
-  private toProbability(raw: unknown): number {
-    // 1) scalar number (either prob or logit)
-    if (typeof raw === 'number') {
-      // if outside [0,1], treat as logit
-      return raw < 0 || raw > 1 ? this.sigmoid(raw) : raw
-    }
 
-    // 2) array of numbers
+  private toProbability(raw: unknown): number {
+    if (typeof raw === 'number') return raw < 0 || raw > 1 ? this.sigmoid(raw) : raw
     if (Array.isArray(raw)) {
       const arr = raw as number[]
       if (arr.length === 0) return 0.5
@@ -59,19 +59,14 @@ export class NeuralNetBouncer implements BerghainBouncer {
         const v = arr[0]
         return v < 0 || v > 1 ? this.sigmoid(v) : v
       }
-      // assume 2-way softmax [p(reject), p(admit)] or [logit0, logit1]
       const [a, b] = arr
-      // if they already look like probs that sum≈1, use b
       const s = a + b
       if (s > 0.999 && s < 1.001 && a >= 0 && b >= 0) return b
-      // otherwise treat as two logits -> softmax(1)
       const m = Math.max(a, b)
       const ea = Math.exp(a - m),
         eb = Math.exp(b - m)
       return eb / (ea + eb)
     }
-
-    // 3) object-shaped outputs (rare) — try common fields
     if (raw && typeof raw === 'object') {
       const o = raw as Record<string, any>
       if (typeof o.prob === 'number') return clamp01(o.prob)
@@ -87,10 +82,7 @@ export class NeuralNetBouncer implements BerghainBouncer {
         return eb / (ea + eb)
       }
     }
-
-    // fallback
     return 0.5
-
     function clamp01(x: number) {
       return Math.max(0, Math.min(1, x))
     }
@@ -107,17 +99,15 @@ export class NeuralNetBouncer implements BerghainBouncer {
     return Math.max(minT, Math.min(maxT, theta))
   }
 
-  /** Gets the total quota counts needed for each quota (omitted if none needed). */
-  private getTotalQuotas() {
-    return this.game.constraints.reduce((output, constraint) => {
-      const count = this.counts[constraint.attribute]
-      const total = Math.max(0, constraint.minCount - count)
-      if (total === 0) return output
-      return {
-        ...output,
-        [constraint.attribute]: total,
-      }
-    }, {} as Record<string, number>)
+  /** Remaining need per constraint (only unmet). */
+  private unmetNeeds(counts: Record<string, number>): Record<string, number> {
+    const out: Record<string, number> = {}
+    for (const c of this.game.constraints) {
+      const cur = counts[c.attribute] || 0
+      const need = Math.max(0, c.minCount - cur)
+      if (need > 0) out[c.attribute] = need
+    }
+    return out
   }
 
   /**
@@ -131,45 +121,37 @@ export class NeuralNetBouncer implements BerghainBouncer {
    * at the end and so each turn this will pick an odd or even strategy for filtering
    * critical attributes, this way they don't become stuck.
    */
-  private getSafetyGates(): [required: string[], critical: string[]] {
-    const quotas = this.getTotalQuotas()
-    const values = Object.values(quotas)
-    const maxPeopleNeeded = sum(values)
-    const minPeopleNeeded = Math.max(...values)
-    const attributes = Object.keys(quotas)
+  private getSafetyGates(
+    status: GameStatusRunning<ScenarioAttributes>,
+    counts: Record<string, number>
+  ): [required: string[], critical: string[]] {
+    const needs = this.unmetNeeds(counts)
+    const attrs = Object.keys(needs)
+    if (attrs.length === 0) return [[], []]
 
-    const totalAdmitted = Object.values(this.counts).reduce((a, b) => a + b, 0)
-    const totalSpotsLeft = Math.max(0, Conf.MAX_ADMISSIONS - totalAdmitted)
+    const seatsLeft = Math.max(0, Conf.MAX_ADMISSIONS - status.admittedCount)
+    if (seatsLeft <= 0) return [[], []]
 
-    // if the sum of all quotas needed is less than the total amount of spots
-    // available, then no attribute is needed.
-    if (maxPeopleNeeded < totalSpotsLeft) return [[], []]
-
-    // if we only have one more quota to fill then just return the counts for
-    // that quota, or any empty array if none is present.
-    if (attributes.length <= 1) {
-      return [attributes, attributes]
+    if (attrs.length === 1) {
+      // Only one unmet quota → every remaining seat must help it
+      return [[attrs[0]], [attrs[0]]]
     }
 
-    const required: string[] = []
-    const critical: string[] = []
+    const totalNeed = sum(Object.values(needs))
+    const topAttr = attrs.reduce((best, a) => (needs[a] > needs[best] ? a : best), attrs[0])
+    const maxNeed = needs[topAttr]
 
-    // a simple binary flag which prevents any one attribute from getting stuck
-    // in required, basically if it is required on one turn, it should be filled
-    // and moved back down to critical.
-    const oddOrEvenBuffer = totalAdmitted % 2 === 1 ? 1 : 2
-    const requiredThreshold = totalSpotsLeft + oddOrEvenBuffer * attributes.length
-    const criticalThreshold = totalSpotsLeft - minPeopleNeeded
-
-    // first pass check all attributes which must  be included in the next admission,
-    // ideally we should try to prevent this from happening.
-    for (const attribute in quotas) {
-      const needed = quotas[attribute]
-      if (needed >= criticalThreshold) critical.push(attribute)
-      if (needed >= requiredThreshold) required.push(attribute)
+    // If the top-need alone equals/exceeds remaining seats, we must target it.
+    if (maxNeed >= seatsLeft) {
+      return [[topAttr], attrs] // require top; critical = any unmet
     }
 
-    return [required, critical]
+    // If total unmet equals/exceeds remaining seats, every seat must hit some unmet attr.
+    if (totalNeed >= seatsLeft) {
+      return [[], attrs] // any unmet attribute is acceptable, but at least one is required
+    }
+
+    return [[], []]
   }
 
   /**
@@ -187,6 +169,9 @@ export class NeuralNetBouncer implements BerghainBouncer {
       throw new Error('NeuralNetBouncer: Missing counts!')
     }
 
+    // Extract the next person we need to determine
+    const guest = status.nextPerson.attributes
+
     // Encode the current status (person) and conuts
     const x = this.encoder.encode(status, counts)
 
@@ -196,19 +181,28 @@ export class NeuralNetBouncer implements BerghainBouncer {
     const theta = this.dynamicThreshold(status)
 
     // Check the current quotas to prevent overfilling
-    const quotas = this.getTotalQuotas()
+    const [required, critical] = this.getSafetyGates(status, counts)
 
-    // epsilon-greedy exploration (if you keep it here)
-    const eps = this.cfg.explorationRate ?? 0
-    if (eps > 0 && Math.random() < eps) {
-      return Math.random() < 0.5
+    if (required.length) {
+      const hasRequired = required.some((a) => guest[a])
+      if (!hasRequired) return false
     }
+    if (critical.length) {
+      const hasCritical = critical.some((a) => guest[a])
+      if (!hasCritical) return false
+    }
+
+    // epsilon-greedy
+    const eps = this.cfg.explorationRate ?? 0
+    if (eps > 0 && Math.random() < eps) return Math.random() < 0.5
+
+    // decide to let them in or not
     return p >= theta
   }
 
   // required by interface...
 
-  public getOutput(lastStatus: GameStatusCompleted | GameStatusFailed) {
+  public getOutput(_lastStatus: GameStatusCompleted | GameStatusFailed) {
     return {}
   }
 
