@@ -8,6 +8,10 @@ export interface Layer {
   activation: 'relu' | 'sigmoid' | 'tanh' | 'linear'
 }
 
+function safeMap(m: Matrix, cap = 1e6): Matrix {
+  return m.map((v) => (Number.isFinite(v) ? Math.max(-cap, Math.min(cap, v)) : 0))
+}
+
 export class NeuralNet {
   /** checks if the given object is a neural net instance. */
   static isNeuralNet(obj: unknown): obj is NeuralNet {
@@ -85,6 +89,8 @@ export class NeuralNet {
           output = z
           break
       }
+
+      output = safeMap(output)
 
       this.layerOutputs.push(output.copy())
       if (li < this.layers.length - 1) {

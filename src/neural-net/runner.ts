@@ -90,7 +90,7 @@ export class NeuralNetBouncerRunner {
     const trainer = new SelfPlayTrainer(this.game, {
       episodes: episodesPerEpoch,
       batchSize: 32,
-      learningRate: 0.001,
+      learningRate: 0.0003,
       explorationStart: 0.9,
       explorationEnd: 0.2,
       explorationDecay: 0.97,

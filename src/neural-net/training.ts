@@ -60,15 +60,15 @@ export class SelfPlayTrainer {
     this.config = {
       episodes: 100,
       batchSize: 32,
-      learningRate: 0.003,
-      explorationStart: 0.9,
+      learningRate: 0.0003, // was 0.001
+      explorationStart: 0.7, // a bit lower to stabilize early play
       explorationEnd: 0.2,
-      explorationDecay: 0.97,
+      explorationDecay: 0.95, // slightly slower anneal
       successThreshold: 5000,
-      elitePercentile: 0.2,
+      elitePercentile: 0.1, // was 0.2 (more variety than 0.05, still selective)
       teacherAssistProb: 0.0,
-      assistGain: 2.0,
-      oracleRelabelFrac: 0.35,
+      assistGain: 3.0,
+      oracleRelabelFrac: 0.5, // was 0.35/1.0 — 0.5 is a stable middle ground
       ...config,
     }
 
@@ -579,7 +579,7 @@ export async function trainBouncer(game: Game): Promise<NeuralNetBouncer> {
   const trainer = new SelfPlayTrainer(game, {
     episodes: 50,
     batchSize: 32,
-    learningRate: 0.001,
+    learningRate: 0.0003,
     explorationStart: 0.9,
     explorationEnd: 0.2,
     explorationDecay: 0.97,
