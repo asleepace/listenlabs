@@ -297,10 +297,15 @@ export class NeuralNetBouncerRunner {
       }
 
       const guest = attributes as ScenarioAttributes
+      const quotasCompleted = scoring.isFinishedWithQuotas()
 
       // --- pick decision source ---
-      let admit: boolean
-      if (mode === 'bouncer') {
+      let admit: boolean = quotasCompleted
+
+      if (quotasCompleted && admitted < 1000) {
+        // Seats left and quotas are complete -> admit everyone to finish with zero extra rejections
+        admit = true
+      } else if (mode === 'bouncer') {
         if (!this.bouncer) throw new Error('Bouncer not initialized')
         const status: GameStatusRunning<PersonAttributesScenario2> = {
           status: 'running',
@@ -351,7 +356,7 @@ export class NeuralNetBouncerRunner {
       else rejected++
 
       scoring.update({ guest, admit })
-      if (admitted >= MAX_ADMISSIONS || scoring.isFinishedWithQuotas()) break
+      if (admitted >= MAX_ADMISSIONS || rejected >= MAX_REJECTIONS) break
     }
 
     // summarize
