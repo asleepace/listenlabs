@@ -87,7 +87,11 @@ export class NeuralNetBouncerRunner {
     const assistGain = flags.assistGain ? Number(flags.assistGain) : 2.0
     const oracleRelabelFrac = flags.oracleRelabelFrac ? Number(flags.oracleRelabelFrac) : 0.35
     const elitePercentile = flags.elitePercentile ? Number(flags.elitePercentile) : 0.2
-    const resumeFlag = flags.resume === 'true' // also supported via separate "resume" command
+    const resumeFlag = flags.resume === 'true'
+
+    const explorationStart = flags.explorationStart ? Number(flags.explorationStart) : 0.4
+    const explorationEnd = flags.explorationEnd ? Number(flags.explorationEnd) : 0.1
+    const explorationDecay = flags.explorationDecay ? Number(flags.explorationDecay) : 0.9
 
     // optional dataset for training
     const datafile = (flags.datafile || flags.data || '') as string
@@ -97,12 +101,12 @@ export class NeuralNetBouncerRunner {
 
     const trainer = new SelfPlayTrainer(this.game, {
       episodes: episodesPerEpoch,
-      batchSize: 32,
+      batchSize: 64,
       learningRate: 0.0003,
-      explorationStart: 0.9,
-      explorationEnd: 0.2,
-      explorationDecay: 0.97,
-      successThreshold: Conf.TARGET_REJECTIONS,
+      explorationStart,
+      explorationEnd,
+      explorationDecay,
+      successThreshold: 5_000,
       elitePercentile,
       assistGain,
       oracleRelabelFrac,

@@ -25,8 +25,8 @@ bun run src/neural-net/runner train 20 150 \
 
 Tips while it runs:
 
-- You’ll get per-epoch checkpoints at bouncer-data/weights-scenario-2.epoch-<N>.json and “latest” at weights-scenario-2.json.
-- Watch for the “Success rate” climbing and “Avg rejections (successful)” trending toward ≤4k. If it’s already excellent (success >90% and avg rejections < TARGET_REJECTIONS), you can jump to Phase 3.
+- You’ll get per-epoch checkpoints at `bouncer-data/weights-scenario-2.epoch-<N>.json` and “latest” at `weights-scenario-2.json`.
+- Watch for the **“Success rate”** climbing and **“Avg rejections (successful)”** trending toward **≤4k**. If it’s already excellent (success >90% and avg `rejections < TARGET_REJECTIONS`), you can jump to Phase 3.
 
 ## Phase 2 — stabilize & sharpen (≈40–50 min)
 
@@ -44,7 +44,7 @@ What this does:
 
 - Your trainer already decays LR every 3 epochs (×0.7), so you’ll get fine-tuning automatically.
 - The elite slice is a bit tighter; training batches stay focused.
-- MAX_SAMPLES_PER_EPOCH cap keeps memory/time sane.
+- `MAX_SAMPLES_PER_EPOCH` cap keeps memory/time sane.
 
 ## Phase 3 — quick reality checks (5–10 min total)
 
