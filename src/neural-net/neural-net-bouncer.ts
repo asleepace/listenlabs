@@ -100,8 +100,9 @@ export class NeuralNetBouncer implements BerghainBouncer {
     const base = this.cfg.baseThreshold ?? 0.32
     const minT = this.cfg.minThreshold ?? 0.22
     const maxT = this.cfg.maxThreshold ?? 0.62
+    const urgency = this.cfg.urgencyFactor ?? 1.0
     const progress = Math.min(1, status.admittedCount / Math.max(1, Conf.MAX_ADMISSIONS))
-    const theta = base + 0.18 * progress
+    const theta = base + 0.18 * urgency * progress
     return Math.max(minT, Math.min(maxT, theta))
   }
 

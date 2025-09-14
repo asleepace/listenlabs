@@ -153,9 +153,6 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
     },
     /**
      * Start tightening admits when projected demand risks exceeding seats left (simplified.)
-     *  - if all quotas completed this will return false
-     *  - if only one quota needed this will return true if quota >= available spots
-     *  - otherwise we estimate min needed x 20 seats per unfilled quota
      */
     isRunningOutOfAvailableSpots(): boolean {
       if (this.isComplete()) return false
@@ -170,10 +167,9 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
         return spotsReserved >= totalSpots
       }
 
-      return totalSpots * 20 + spotsReserved >= totalSpots
-      // cap breathing room at ~100 spots
-      // const breathingRoom = Math.min(100, CUSHION * CUSHION_PER_QUOTA * BREATH_MULTIPLIER * totalUnmet)
-      // return spotsReserved + breathingRoom >= totalSpots
+      // Replace the current return with this:
+      const breathingRoom = Math.min(100, CUSHION * CUSHION_PER_QUOTA * BREATH_MULTIPLIER * totalUnmet)
+      return spotsReserved + breathingRoom >= totalSpots
     },
     unmetQuotasCount(): number {
       return this.quotas().length
