@@ -12,7 +12,7 @@ import type {
 
 import { NeuralNetBouncer } from './neural-net-bouncer'
 import { SelfPlayTrainer } from './training'
-import { initializeScoring } from './scoring' // adjust path
+import { initializeScoring } from './scoring'
 import * as fs from 'fs'
 import * as path from 'path'
 
@@ -84,9 +84,7 @@ export class NeuralNetBouncerRunner {
       } catch {}
     }
     if (!log) log = { runs: [] }
-    if (!log?.runs) {
-      log.runs = []
-    }
+    if (!log?.runs) log.runs = []
     console.log(log.runs)
     log.runs.push(entry)
     fs.writeFileSync(this.logPath, JSON.stringify(log, null, 2))
@@ -169,7 +167,7 @@ export class NeuralNetBouncerRunner {
     await this.train(epochs, episodesPerEpoch, flags)
   }
 
-  // ---------- load / diagnose / runGame (unchanged except for small guards) ----------
+  // ---------- load / diagnose / runGame ----------
   load(): boolean {
     if (!fs.existsSync(this.weightsPath)) {
       console.log('No saved weights found. Please train first.')
@@ -261,8 +259,6 @@ export class NeuralNetBouncerRunner {
 
   runGame(sampleData?: any[]): any {
     if (!this.game) throw new Error('Game not initialized')
-    // We won't rely on this.bouncer’s internal tracker since we decide via scoring.
-    // (You can still load it for other commands.)
 
     let admitted = 0
     let rejected = 0
@@ -274,18 +270,13 @@ export class NeuralNetBouncerRunner {
     const scoring = initializeScoring(this.game, {
       maxRejections: 20_000,
       maxAdmissions: 1_000,
-      targetRejections: 5_000,
-      weights: {
-        // .. override here
-      },
     })
 
     while (scoring.inProgress() && (!sampleData || personIndex < sampleData.length)) {
       const personData = getData()
 
-      // --- normalize into a full attributes object of booleans ---
+      // normalize into a full attributes object of booleans
       const attributes: PersonAttributesScenario2 = {} as any
-      // start all attrs as false
       for (const key of Object.keys(this.game.attributeStatistics.relativeFrequencies)) {
         attributes[key as keyof PersonAttributesScenario2] = false
       }
@@ -299,22 +290,18 @@ export class NeuralNetBouncerRunner {
         }
       }
 
-      // --- decision (your rule-of-thumb combo) ---
       const guest = attributes as ScenarioAttributes
       const admit = scoring.shouldAdmit(guest, /*baseTheta=*/ 1.0, /*baseFrac=*/ 0.5)
 
-      // keep global counters for logging and termination
       if (admit) admitted++
       else rejected++
 
-      // keep the scorer in sync (it maintains per-quota counts)
       scoring.update({ guest, admit })
 
-      // optional early exit: if all quotas met and room is full, we can stop
       if (admitted >= 1000 || scoring.isFinishedWithQuotas()) break
     }
 
-    // --- summarize constraints from scoring’s quota counts ---
+    // summarize constraints from scoring’s quota counts
     const constraints = this.game.constraints.map((c) => {
       const q = scoring.get(c.attribute)
       const current = q?.count ?? 0
@@ -322,10 +309,6 @@ export class NeuralNetBouncerRunner {
     })
     const allMet = constraints.every((c) => c.satisfied)
 
-    const totalScore = scoring.getLossScore()
-    console.log(`  Score (diagnostic): ${totalScore.toFixed(2)}`)
-
-    // Decide final status
     if (admitted >= 1000 && allMet) {
       const result = {
         status: 'completed',
@@ -371,7 +354,6 @@ export class NeuralNetBouncerRunner {
       }
     }
 
-    // pack true attrs
     for (const [attr, hasAttr] of Object.entries(samples)) if (hasAttr) attributes.push(attr)
     return attributes
   }
@@ -392,7 +374,6 @@ export async function main() {
       break
     }
     case 'resume': {
-      // <-- NEW
       const epochs = parseInt(args[1] || '10', 10)
       const episodes = parseInt(args[2] || '50', 10)
       const flags = parseFlags(args.slice(3))

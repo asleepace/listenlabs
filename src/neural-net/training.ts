@@ -4,7 +4,6 @@ import type { Game, GameStatusRunning, PersonAttributesScenario2, Person, Scenar
 import { NeuralNet, createBerghainNet } from './neural-net'
 import { NeuralNetBouncer } from './neural-net-bouncer'
 import { StateEncoder } from './state-encoder'
-
 import { initializeScoring } from './scoring'
 
 interface Episode {
@@ -37,17 +36,17 @@ interface TrainingConfig {
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x))
 
 // ----- Reward shaping knobs -----
-const LAMBDA_SHORTFALL = 50 // ↑ linear penalty per missing head
-const QUAD_SHORTFALL = 0.05 // ↑ extra penalty for concentrated gaps
-const BETA_SURPLUS = 1.0 // ↑ mild penalty per head above required
-const LOSS_PENALTY = 100000 // ↑↑ flat penalty for losing (unmet or reject cap)
+const LAMBDA_SHORTFALL = 50 // linear penalty per missing head
+const QUAD_SHORTFALL = 0.05 // extra penalty for concentrated gaps
+const BETA_SURPLUS = 1.0 // mild penalty per head above required
+const LOSS_PENALTY = 100000 // flat penalty for losing (unmet or reject cap)
 
 export class SelfPlayTrainer {
   private net: NeuralNet
   private game: Game
   private encoder: StateEncoder
   private config: TrainingConfig
-  private resumedFromWeights = false // <-- NEW
+  private resumedFromWeights = false
 
   private bestEpisode: Episode | null = null
   private trainingStats: {
@@ -83,17 +82,11 @@ export class SelfPlayTrainer {
   }
 
   loadWeights(weights: any): void {
-    // <-- NEW
     const n: any = this.net as any
-    if (typeof n.fromJSON === 'function') {
-      n.fromJSON(weights)
-    } else if (typeof n.loadJSON === 'function') {
-      n.loadJSON(weights)
-    } else if (typeof n.load === 'function') {
-      n.load(weights)
-    } else {
-      console.warn('[trainer] Unable to load weights: no fromJSON/loadJSON/load on NeuralNet')
-    }
+    if (typeof n.fromJSON === 'function') n.fromJSON(weights)
+    else if (typeof n.loadJSON === 'function') n.loadJSON(weights)
+    else if (typeof n.load === 'function') n.load(weights)
+    else console.warn('[trainer] Unable to load weights: no fromJSON/loadJSON/load on NeuralNet')
     this.resumedFromWeights = true
   }
 
@@ -167,7 +160,21 @@ export class SelfPlayTrainer {
   }
 
   // ---------- run one episode ----------
-  private runEpisode(explorationRate: number, useTeacherAssist: boolean = true): Episode {
+  /**
+   * Run one self-play episode.
+   * - explorationRate:  ε for the network's exploration (passed into NeuralNetBouncer)
+   * - usePolicyFusion:  allow seat/urgency scoring to overrule a deny from the network (training-friendly)
+   * - useTeacherAssist: allow oracle nudges to correct decisions probabilistically
+   */
+  private runEpisode({
+    explorationRate,
+    usePolicyFusion = true,
+    useTeacherAssist = true,
+  }: {
+    explorationRate: number
+    useTeacherAssist?: boolean
+    usePolicyFusion?: boolean
+  }): Episode {
     const bouncer = new NeuralNetBouncer(this.game, {
       explorationRate,
       baseThreshold: 0.35,
@@ -195,6 +202,10 @@ export class SelfPlayTrainer {
     const scoring = initializeScoring(this.game, {
       maxAdmissions: 1_000,
       maxRejections: 20_000,
+      targetRejections: 5_000,
+      weights: {
+        // override here...
+      },
     })
 
     while (scoring.inProgress()) {
@@ -220,11 +231,11 @@ export class SelfPlayTrainer {
       // --- hybrid decision (scoring + network) ---
       const guest = person.attributes as ScenarioAttributes
       let admit = bouncer.admit(status)
-      const policyVote = scoring.shouldAdmit(guest, 1.0, 0.5)
-      if (!admit && policyVote) admit = true
 
-      // simple fusion: let scoring overrule a deny (helps early training)
-      if (!admit && policyVote) admit = true
+      if (usePolicyFusion) {
+        const policyVote = scoring.shouldAdmit(guest, 1.0, 0.5)
+        if (!admit && policyVote) admit = true
+      }
 
       // teacher assist (oracle) during training only
       if (useTeacherAssist) {
@@ -420,7 +431,11 @@ export class SelfPlayTrainer {
       let totalRejections = 0
 
       for (let ep = 0; ep < this.config.episodes; ep++) {
-        const episode = this.runEpisode(exploration, true)
+        const episode = this.runEpisode({
+          explorationRate: exploration,
+          usePolicyFusion: true,
+          useTeacherAssist: true,
+        })
         batch.push(episode)
 
         if (episode.completed) {
@@ -463,7 +478,6 @@ export class SelfPlayTrainer {
         bestRejections: this.bestEpisode?.rejections || 20000,
       })
 
-      // NEW: per-epoch callback (for checkpoints)
       onEpochEnd?.({
         epoch: epoch + 1,
         loss,
@@ -516,7 +530,12 @@ export class SelfPlayTrainer {
     let maxRejections = 0
 
     for (let i = 0; i < episodes; i++) {
-      const episode = this.runEpisode(0, false) // no exploration, no teacher assist
+      // pure-network evaluation: no exploration, no policy fusion, no teacher assist
+      const episode = this.runEpisode({
+        explorationRate: 0,
+        usePolicyFusion: false,
+        useTeacherAssist: false,
+      })
       if (episode.completed) {
         successes++
         totalRejections += episode.rejections

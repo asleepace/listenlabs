@@ -29,26 +29,21 @@ export const diff = (v1: number, v2: number) => {
   return (v1 - v2) / 2
 }
 
+// NOTE: in this file we use clamp(lo, val, hi) because many call sites read naturally as clamp(0, value, 1)
 export const clamp = (lo: number, val: number, hi: number): number => {
   return Math.max(lo, Math.min(val, hi))
 }
 
-export const sum = (vals: number[]): number => {
-  return vals.reduce((a, b) => a + b, 0) || 0
-}
+export const sum = (vals: number[]): number => vals.reduce((a, b) => a + b, 0) || 0
 
-/**
- *  Extract only attributes attributes as an array.
- */
+/** Extract true attributes as an array. */
 export const getAttributes = (scenarioAttributes: ScenarioAttributes): string[] => {
   return Object.entries(scenarioAttributes)
-    .filter(([key, value]) => value)
+    .filter(([_, value]) => value)
     .map(([key]) => key)
 }
 
-/**
- *  Creates a quota which is used to track overall progress.
- */
+/** Creates a quota tracker. */
 export function createQuota(constraint: GameConstraints, frequency: number, correlations: Correlation) {
   return {
     attribute: constraint.attribute,
@@ -77,14 +72,11 @@ export function createQuota(constraint: GameConstraints, frequency: number, corr
   }
 }
 
-/**
- *  Create a scoring object which is used to track quotas, guests, and progress.
- */
+/** Create a scoring object used to track quotas, guests, and progress. */
 export function initializeScoring(game: GameState['game'], config: ScoringConfig) {
   const correlations = game.attributeStatistics.correlations
   const frequencies = game.attributeStatistics.relativeFrequencies
 
-  // target threshold we want to hit all quotas by
   const TARGET_REJECTIONS = config.targetRejections ?? 5_000
 
   const quotas = Object.fromEntries(
@@ -96,7 +88,7 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
     })
   )
 
-  // --- local helpers for scoring ---
+  // penalty weights
   const pw = {
     shortfallPerHead: 2.0,
     overagePerHead: 0.5,
@@ -124,7 +116,6 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
           b = attrs[j]
         const corr = quotas[a]?.correlations?.[b] ?? 0
         if (corr < -0.15) {
-          // weight by combined urgency; scale modestly so it’s a nudge not a flood
           const ua = quotaUrgency(quotas[a], peopleLeftInLine)
           const ub = quotaUrgency(quotas[b], peopleLeftInLine)
           bonus += -corr * (ua + ub) * 0.25
@@ -136,12 +127,10 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
 
   /** Seat scarcity in [0..1]: closer to 1 when seats are getting scarce. */
   const seatScarcity = (seatsLeft: number): number => {
-    // start tightening once under ~200 seats; feel free to tune this
     return clamp(0, 200 / Math.max(1, seatsLeft), 1)
   }
 
   return {
-    // treat this as *line size*; it’s fine to set equal to the reject cap if you like
     peopleInLine: config.maxRejections,
     admitted: 0,
     rejected: 0,
@@ -161,20 +150,19 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
       for (const q of this.quotas()) {
         const cur = q.count + (guest && guest[q.attribute] ? 1 : 0)
         const expectedFuture = Math.max(0, peopleLeftInLine) * Math.max(0, q.frequency)
-        const gap = Math.max(0, q.minCount - (cur + expectedFuture)) // shortfall after all remaining arrivals
+        const gap = Math.max(0, q.minCount - (cur + expectedFuture))
         if (gap > worst) worst = gap
       }
       return worst
     },
 
-    /** Seat scarcity in [0..1]; higher when seats are scarce. */
+    /** Seat scarcity (recomputed from current seats left). */
     seatScarcity(): number {
       const seats = Math.max(1, this.getTotalSpotsAvailable())
-      // start tightening under ~200 seats (tunable)
       return Math.min(1, 200 / seats)
     },
-    // keep your existing constants + pw as-is
 
+    /** Penalty-style score (lower is better) you can log or use for shaping. */
     getLossScore() {
       let unmet = 0
       const terms: number[] = []
@@ -182,58 +170,43 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
       for (const q of Object.values(quotas)) {
         const gap = Math.abs(q.count - q.minCount)
         if (q.isComplete()) {
-          // small penalty for overfilling
-          terms.push(gap * pw.overagePerHead)
+          terms.push(gap * pw.overagePerHead) // mild overage cost
         } else {
           unmet++
-          // larger penalty for being short
-          terms.push(gap * pw.shortfallPerHead)
+          terms.push(gap * pw.shortfallPerHead) // stronger shortfall cost
         }
       }
 
-      // If all met: use average overage; else: sum + flat per-unmet penalty
       const completionPenalty = unmet === 0 ? average(terms) : sum(terms) + pw.unmetQuotaConstant * unmet
 
-      // Rejection-based term (positive if beyond target, negative if earlier)
-      // (This matches "target rejections" semantics.)
-      const overUnder = (this.rejected - TARGET_REJECTIONS) * pw.targetPerPerson
-
-      // Optional guard: don’t reward early finishing unless all quotas are met
-      // const gatedOverUnder = unmet === 0 ? overUnder : Math.max(0, overUnder)
-
-      // Cap so this term can't explode
-      let delta = overUnder
+      const peopleSeen = this.getTotalPeopleSeen()
+      let delta = (peopleSeen - TARGET_REJECTIONS) * pw.targetPerPerson
       if (delta < 0) delta = Math.max(delta, -pw.targetBonusCap)
       else delta = Math.min(delta, pw.targetPenaltyCap)
 
-      // Total penalty-style score (lower is better)
       return completionPenalty + delta
     },
 
     /**
-     * Single, conflict-free decision:
-     * 1) If there’s any expected shortfall, admit only if this guest *reduces* the worst shortfall
-     *    by at least a scarcity-weighted amount.
-     * 2) If no shortfall remains, use your heuristic (score/fraction) to keep the mix tight.
+     * Conflict-free decision:
+     * 1) If any expected shortfall remains, admit only if this guest reduces the worst shortfall
+     *    by a scarcity-weighted amount.
+     * 2) If no shortfall remains, use heuristic (score/fraction) to keep mix tight.
      */
     shouldAdmit(guest: ScenarioAttributes, baseTheta = 1.0, baseFrac = 0.5): boolean {
       const peopleLeft = this.getPeopleLeftInLine()
       const seatsLeft = this.getTotalSpotsAvailable()
-
-      // If no seats, trivially false
       if (seatsLeft <= 0) return false
 
       const before = this.worstExpectedShortfall(peopleLeft)
       const after = this.worstExpectedShortfall(Math.max(0, peopleLeft - 1), guest)
-      const delta = before - after // improvement in worst gap (>=0 is non-worsening)
+      const delta = before - after
 
       if (before > 0) {
-        // We still have expected shortfall: require *meaningful* improvement.
-        const tighten = 0.15 + 0.35 * this.seatScarcity() // tunable threshold
+        const tighten = 0.15 + 0.35 * this.seatScarcity() // tunable
         return delta >= tighten
       }
 
-      // No shortfall expected → use your heuristics
       const byScore = this.admitByScore(guest, baseTheta)
       const byFraction = this.admitByFraction(guest, baseFrac)
       return byScore || byFraction
@@ -257,22 +230,14 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
     guestScore(guest: ScenarioAttributes): number {
       const attrs = getAttributes(guest).filter((a) => quotas[a].inProgress())
       if (!attrs.length) return 0
-
       const peopleLeft = this.getPeopleLeftInLine()
-      // sum of urgencies for each unmet quota the guest hits
       let score = 0
       for (const a of attrs) score += quotaUrgency(quotas[a], peopleLeft)
-
-      // add pair bonus for neg-correlated combos
       score += pairBonus(attrs, peopleLeft)
-
       return score
     },
 
-    /**
-     * Admit if the guest covers at least `baseFrac` of the currently unmet quotas.
-     * We keep your rule, but also provide a seat/urgency-aware numeric path (`admitByScore` below).
-     */
+    /** Admit if guest covers ≥ baseFrac of current unmet quotas; tighten if scarce/behind. */
     admitByFraction(guest: ScenarioAttributes, baseFrac: number): boolean {
       const totalQuotas = this.quotas()
       if (totalQuotas.length === 0) return true
@@ -280,52 +245,38 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
       const seats = Math.max(1, this.getTotalSpotsAvailable())
       const scarcity = seatScarcity(seats)
 
-      // “how we’re pacing seats” vs “how we’re pacing quotas”
-      const seatProgress = this.getTotalProgress() // seats used ratio
+      const seatProgress = this.getTotalProgress()
       const quotaProgress = this.getQuotaProgress() // 1.0 = on pace; >1 behind
-      // map these to [-1,1] intuition: positive => ahead on quotas vs seats, negative => behind
       const progressDelta = clamp(-1, 1 - quotaProgress - seatProgress, 1)
 
-      // tighten threshold if seats are scarce *and* we’re behind
       const tighten = 0.15 * scarcity * clamp(0, -progressDelta, 1)
       const needFrac = Math.min(0.95, baseFrac + tighten)
 
       return this.guestFractionHit(guest) >= needFrac
     },
-    /**
-     * Admit using numeric urgency score.
-     * Base idea: one “strong” unmet quota (urgency≈1) should usually be enough early,
-     * but as seats get scarce, demand either higher urgency or multiple hits.
-     */
+
+    /** Admit using numeric urgency score with dynamic threshold. */
     admitByScore(guest: ScenarioAttributes, baseTheta = 1.0): boolean {
       const seats = Math.max(1, this.getTotalSpotsAvailable())
       const scarcity = seatScarcity(seats)
-
-      // compute score
       const score = this.guestScore(guest)
-
-      // dynamic threshold: raise it when seats are scarce or quotas are still badly behind
-      const quotaBehind = Math.max(0, this.getQuotaProgress() - 1.0) // 0 when on pace/ahead; grows if behind
+      const quotaBehind = Math.max(0, this.getQuotaProgress() - 1.0)
       const theta = baseTheta + 0.6 * scarcity + 0.4 * Math.min(1, quotaBehind)
-
       return score >= theta
     },
+
     isComplete() {
       return this.quotas().length === 0
     },
-    /** Returns true if we are below the max admissions and rejections. */
     inProgress() {
       return this.admitted < config.maxAdmissions && this.rejected < config.maxRejections
     },
-    /** Returns the total number people we have seen and processed. */
     getTotalPeopleSeen() {
       return this.admitted + this.rejected
     },
-    /** returns the total number of people left in line. */
     getPeopleLeftInLine(): number {
       return Math.max(0, config.maxRejections - this.getTotalPeopleSeen())
     },
-    /** Returns the total number of spots availble in the venue. */
     getTotalSpotsAvailable() {
       return Math.max(0, config.maxAdmissions - this.admitted)
     },
@@ -343,19 +294,15 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
       const vals = this.quotas().map((q) => clamp(0, q.relativeProgress(peopleLeftInLine), 3))
       return average(vals) || 1.0
     },
-    /** Returns true when finished meeting quotas. */
     isFinishedWithQuotas(): boolean {
       return this.quotas().length === 0
     },
-    /** Returns an array of quotas which are currently in progress. */
     quotas() {
       return Object.values(quotas).filter((quota) => quota.inProgress())
     },
-    /** Returns the specific quota for the attribute. */
     get(attr: string): Quota {
       return quotas[attr]
     },
-    /** Returns a helper object for common interactions with guests. */
     forGuest(guest: ScenarioAttributes) {
       return {
         attributes: getAttributes(guest)
@@ -365,35 +312,26 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
           return this.attributes.length
         },
         hasEveryAttribute: (): boolean => {
-          return Object.values(quotas)
-            .filter((q) => q.inProgress())
-            .every((q) => guest[q.attribute])
+          return this.quotas().every((quota) => guest[quota.attribute])
         },
         hasSomeAttribute: (): boolean => {
-          return Object.values(quotas)
-            .filter((q) => q.inProgress())
-            .some((q) => guest[q.attribute])
+          return this.quotas().some((quota) => guest[quota.attribute])
         },
       }
     },
-
-    /** Returns the max number of people used for any of the quotas. */
     getMaxPeopleNeeded() {
       const arr = this.quotas().map((quota) => quota.needed())
       return arr.length ? Math.max(...arr) : 0
     },
-    /** Callback which updates the internal state counters. */
     update({ guest, admit }: { guest: ScenarioAttributes; admit: boolean }): boolean {
       if (admit === false) {
         this.rejected++
         return admit
       }
-      // update individual quota counts
       for (const attr in quotas) {
         if (!guest[attr]) continue
         quotas[attr].count++
       }
-      // update global admitted count
       this.admitted++
       return admit
     },
