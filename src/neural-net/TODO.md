@@ -52,20 +52,23 @@ What this does:
 Run all three modes on the same file you’ll compete on:
 
 ```bash
-# Pure NN
-bun run src/neural-net/runner test data/samples/real-01.json --mode=bouncer
-
-# Hybrid (usually best)
-bun run src/neural-net/runner test data/samples/real-01.json --mode=hybrid
-
-# Policy baseline
-bun run src/neural-net/runner test data/samples/real-01.json --mode=score
-
-# Alias
-bun run neural sanity
+bun run src/neural-net/runner test data/samples/sample-05.json --mode=bouncer
+bun run src/neural-net/runner test data/samples/sample-04.json --mode=bouncer
 ```
 
 If Hybrid is clearly best (it usually is near the endgame), use that for the challenge. If Pure NN is already ≥99% success and ~4k or less rejections, you can go pure for simplicity.
+
+## Phase 5 - Late micro adjustments
+
+If you’re within ~500 rejections of your target and want one more nudge:
+
+```bash
+bun run src/neural-net/runner resume 3 220 \
+  --datafile=data/samples/sample-04.json \
+  --assistGain=2.0 \
+  --oracleRelabelFrac=0.40 \
+  --elitePercentile=0.12
+```
 
 ## Safety valves (use if needed)
 
