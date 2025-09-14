@@ -36,6 +36,8 @@ interface TrainingConfig {
 }
 
 export class SelfPlayTrainer {
+  static readonly DISABLE_FUSION_AT_EPOCH = true
+
   private net: NeuralNet
   private game: Game
   private encoder: StateEncoder
@@ -431,8 +433,7 @@ export class SelfPlayTrainer {
         const finishingStart = Math.max(0, epochs - 3)
 
         // Keep assist/fusion on the whole time for stability during bring-up
-        // const isFinishing = epoch >= finishingStart
-        const isFinishing = false
+        const isFinishing = SelfPlayTrainer.DISABLE_FUSION_AT_EPOCH ? epoch >= finishingStart : false
 
         const episode = this.runEpisode({
           explorationRate: exploration,

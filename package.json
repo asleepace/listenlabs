@@ -20,7 +20,8 @@
     "neural:test:hybrid": "bun run src/neural-net/runner test \"\" --mode=hybrid",
     "neural:sanity": "bun run src/neural-net/runner sanity",
     "neural:diagnose": "bun run src/neural-net/runner diagnose",
-    "neural:diagnostics": "bun run neural diagnose"
+    "neural:diagnostics": "bun run neural diagnose",
+    "neural:checkpoint": "cp bouncer-data/weights-s2.best-4407avg.json bouncer-data/weights-scenario-2.json"
   },
   "devDependencies": {
     "@types/bun": "latest"
