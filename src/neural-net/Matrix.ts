@@ -160,10 +160,18 @@ export class Matrix {
     const std = Math.sqrt(2 / rows)
     const m = new Matrix(rows, cols)
     for (let i = 0; i < m.data.length; i++) {
-      const u1 = Math.random()
+      // const u1 = Math.random()
+      // const u2 = Math.random()
+      // const z0 = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2)
+      // m.data[i] = z0 * std
+      let u1 = 0
+      do {
+        u1 = Math.random()
+      } while (u1 <= 1e-12)
       const u2 = Math.random()
       const z0 = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2)
       m.data[i] = z0 * std
+      if (!Number.isFinite(m.data[i])) m.data[i] = 0
     }
     return m
   }

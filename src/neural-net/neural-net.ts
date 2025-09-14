@@ -103,16 +103,20 @@ export class NeuralNet {
     // Loss gradient:
     // For sigmoid output, use BCE-style gradient: dL/dz = (ŷ - y)
     // For tanh/linear we keep the old chain.
+    // BCE + sigmoid head: dL/dz = y_hat - y  (stable, avoids saturation)
     let delta: Matrix
     if (outputLayer.activation === 'sigmoid') {
-      delta = output.subtract(targetMatrix) // BCE w/ sigmoid
+      delta = output.subtract(targetMatrix)
     } else {
-      // MSE fallback
+      // fallback: MSE for non-sigmoid heads
       delta = output.subtract(targetMatrix).scale(2 / output.cols)
+      if (outputLayer.activation === 'tanh') {
+        delta = delta.hadamard(output.map((y) => gradients.tanh(y)))
+      }
     }
-    if (outputLayer.activation === 'tanh') {
-      delta = delta.hadamard(output.map((y) => gradients.tanh(y)))
-    }
+    // tiny clip to prevent occasional spikes
+    const CLIP = 5
+    delta = delta.map((v) => Math.max(-CLIP, Math.min(CLIP, v)))
 
     // (relu for the output is handled in the loop below if present)
 
@@ -170,33 +174,18 @@ export class NeuralNet {
         }
 
         const output = this.forward(input)
-        // BCE for sigmoid head; else fall back to MSE
-        let loss = 0
-        if (this.layers[this.layers.length - 1].activation === 'sigmoid') {
-          const eps = 1e-7
-          // output is a 1-D array; targets 0/1
-          for (let j = 0; j < output.length; j++) {
-            const yhat = Math.min(1 - eps, Math.max(eps, output[j]))
-            // Label smoothing: 0 -> 0.02, 1 -> 0.98
-            const y = target[j] * 0.96 + 0.02
-            loss += -(y * Math.log(yhat) + (1 - y) * Math.log(1 - yhat))
-          }
-          loss /= output.length
-        } else {
-          loss =
-            output.reduce((sum, val, idx) => {
-              const diff = val - target[idx]
-              return sum + diff * diff
-            }, 0) / output.length
-        }
+        // Label smoothing: 0→0.02, 1→0.98
+        const y = target[0] * 0.96 + 0.02
+        const yhat = output[0]
+        const eps = 1e-7
+        const yhatClamped = Math.min(1 - eps, Math.max(eps, yhat))
+        const loss = -(y * Math.log(yhatClamped) + (1 - y) * Math.log(1 - yhatClamped))
 
         epochLoss += loss
         this.backward(target)
       }
-
       totalLoss = epochLoss / inputs.length
     }
-
     return totalLoss
   }
 
@@ -279,9 +268,9 @@ export class NeuralNet {
 
 // Clean, input-size-first topology.
 export function createBerghainNet(inputSize: number = 17): NeuralNet {
-  const net = new NeuralNet(0.001, 0.0001)
-  net.addLayer(inputSize, 32, 'relu', 'he')
-  net.addLayer(32, 16, 'relu', 'he')
-  net.addLayer(16, 1, 'sigmoid', 'xavier')
+  const net = new NeuralNet(0.0007, 0.0001)
+  net.addLayer(inputSize, 64, 'relu', 'he')
+  net.addLayer(64, 32, 'relu', 'he')
+  net.addLayer(32, 1, 'sigmoid', 'xavier')
   return net
 }
