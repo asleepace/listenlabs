@@ -26,6 +26,7 @@ export class NeuralNetBouncer implements BerghainBouncer {
       minThreshold?: number
       maxThreshold?: number
       urgencyFactor?: number
+      optimism?: number // 0..1 higher = more optimistic (default 0.7)
     } = {}
   ) {
     this.encoder = new StateEncoder(game)
@@ -89,12 +90,13 @@ export class NeuralNetBouncer implements BerghainBouncer {
 
   /** Progress-aware threshold with safe bounds */
   private dynamicThreshold(status: GameStatusRunning<any>): number {
-    const base = this.cfg.baseThreshold ?? 0.3 // a hair lower early
-    const minT = this.cfg.minThreshold ?? 0.22
-    const maxT = this.cfg.maxThreshold ?? 0.65 // allow a tad higher late
-    const urgency = this.cfg.urgencyFactor ?? 2.5 // steeper rise
+    // more optimistic: slightly lower base, gentler slope
+    const base = this.cfg.baseThreshold ?? 0.28 // was 0.32
+    const minT = this.cfg.minThreshold ?? 0.18 // was 0.22
+    const maxT = this.cfg.maxThreshold ?? 0.6 // was 0.62
     const progress = Math.min(1, status.admittedCount / Math.max(1, Conf.MAX_ADMISSIONS))
-    const theta = base + 0.22 * urgency * progress
+    const slope = 0.1 // was 0.18 — less tightening as we fill
+    const theta = base + slope * progress
     return Math.max(minT, Math.min(maxT, theta))
   }
 
@@ -161,63 +163,45 @@ export class NeuralNetBouncer implements BerghainBouncer {
    */
   public admit(status: GameStatusRunning<ScenarioAttributes>, countsOverride?: Record<string, number>): boolean {
     const counts = countsOverride ?? this.counts
+    if (!NeuralNet.isNeuralNet(this.net)) throw new Error('NeuralNetBouncer: Neural net is not defined!')
 
-    if (!NeuralNet.isNeuralNet(this.net)) {
-      throw new Error('NeuralNetBouncer: Neural net is not defined!')
-    }
-    if (!counts) {
-      throw new Error('NeuralNetBouncer: Missing counts!')
-    }
-
-    // Extract the next person we need to determine
     const guest = status.nextPerson.attributes
-
-    // Encode the current status (person) and counts
     const x = this.encoder.encode(status, counts)
-
-    // Call your NN. Prefer `forward`, else fall back to `inference`.
-    const raw = this.net.forward?.(x) ?? this.net.infer(x)
-    const pRaw = this.toProbability(raw)
-    const p = Number.isFinite(pRaw) ? Math.max(0, Math.min(1, pRaw)) : 0.5
-
-    // Base dynamic threshold
+    const p = this.toProbability(this.net.forward?.(x) ?? this.net.infer(x))
     let theta = this.dynamicThreshold(status)
 
-    // Check the current quotas to prevent overfilling
+    // unmet quotas situation
     const needed = this.unmetNeeds(counts)
+    if (Object.keys(needed).length === 0) return true // optimistic finish
+
     const [required, critical] = this.getSafetyGates(status, needed)
 
-    // If no more quotas are unmet, auto-admit.
-    if (Object.keys(needed).length === 0) return true
-
-    // Hard gates
-    if (required.length && !required.every((a) => guest[a])) return false
-    const hasCritical = critical.some((a) => guest[a])
-    if (critical.length && !hasCritical) return false
-
-    // PANIC MODE: if total unmet ≥ seats left, admit any guest who hits any unmet attr
+    // LATE gates only: allow optimism until we’re truly tight
     const seatsLeft = Math.max(0, Conf.MAX_ADMISSIONS - status.admittedCount)
-    const totalNeed = Object.values(needed).reduce((a, b) => a + b, 0)
-    if (totalNeed >= seatsLeft && hasCritical) return true
+    const totalNeed = Object.values(needed).reduce((s, n) => s + n, 0)
 
-    // Soft bias: if guest helps unmet quotas, lower the bar a touch
-    const hasUnmet = Object.keys(needed).some((a) => guest[a])
-    if (hasUnmet) theta -= 0.04
+    // optimism buffer: number of seats we allow for flexibility
+    const optimism = this.cfg.optimism ?? 0.7
+    const buffer = Math.max(12, Math.floor(optimism * 30)) // ~12–30 seats of slack
 
-    // Extra nudge if guest matches the single most-needed attribute
-    const topAttr = Object.entries(needed).sort((a, b) => b[1] - a[1])[0]?.[0]
-    if (topAttr && guest[topAttr]) theta -= 0.03
+    // Only enforce gates when we’re inside the danger zone.
+    const inDanger = seatsLeft <= totalNeed + Math.ceil(buffer * 0.25)
 
-    // Clamp final threshold to safe bounds
-    const minT = this.cfg.minThreshold ?? 0.22
-    const maxT = this.cfg.maxThreshold ?? 0.62
-    theta = Math.max(minT, Math.min(maxT, theta))
+    if (inDanger) {
+      if (required.length && !required.every((a) => guest[a])) return false
+      const hits = critical.filter((a) => guest[a]).length
+      if (critical.length && hits === 0) return false
+      // Friendly nudge if we do help: drop theta a bit
+      if (hits > 0) theta -= 0.06 * hits
+    }
 
-    // epsilon-greedy (disabled in prod via cfg.explorationRate=0)
+    // modest bias for rare attr still unmet
+    if ((needed['creative'] ?? 0) > 0 && guest['creative']) theta -= 0.05
+
+    // exploration (likely 0 in prod)
     const eps = this.cfg.explorationRate ?? 0
     if (eps > 0 && Math.random() < eps) return Math.random() < 0.5
 
-    // Final decision
     return p >= theta
   }
 
