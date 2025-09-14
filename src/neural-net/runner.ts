@@ -10,6 +10,7 @@ import * as path from 'path'
 import { createBerghainNet, NeuralNet } from './neural-net'
 import { clamp, parseFlags } from './util'
 import { Conf } from './config'
+import { StateEncoder } from './state-encoder'
 
 type RunGameIteration = {
   status: GameStatusRunning<ScenarioAttributes>
@@ -136,8 +137,8 @@ export class NeuralNetBouncerRunner {
     const hybridEval = trainer.test(100, { explorationRate: 0, usePolicyFusion: true, useTeacherAssist: false })
     console.log('\nHybrid (policy fusion on, no assist):')
     console.log(`  Success Rate: ${(hybridEval.successRate * 100).toFixed(1)}%`)
-    console.log(`  Average Rejections:`, +pure.avgRejections.toFixed(0))
-    console.log(`  Average Admissions:`, +pure.avgAdmissions.toFixed(0))
+    console.log(`  Average Rejections:`, +hybridEval.avgRejections.toFixed(0))
+    console.log(`  Average Admissions:`, +hybridEval.avgAdmissions.toFixed(0))
     console.log(`  Best Performance: ${hybridEval.minRejections} rejections`)
     console.log(`  Worst Performance: ${hybridEval.maxRejections} rejections`)
 
@@ -190,7 +191,8 @@ export class NeuralNetBouncerRunner {
         net = NeuralNet.fromJSON(weights)
       } catch (e) {
         console.warn('[runner] failed to load neural net from JSON:', e)
-        net = createBerghainNet(Conf.FEATURES)
+        const enc = new StateEncoder(this.game)
+        net = createBerghainNet(enc.getFeatureSize())
         ;(net as any).fromJSON?.(weights) || (net as any).loadJSON?.(weights) || (net as any).load?.(weights)
       }
 

@@ -1,6 +1,7 @@
 /** @file neural-net-bouncer.ts */
 
 import type { BerghainBouncer, Game, GameStatusCompleted, GameStatusFailed, GameStatusRunning } from '../types'
+import { Conf } from './config'
 import { NeuralNet } from './neural-net'
 import { StateEncoder } from './state-encoder'
 
@@ -96,8 +97,13 @@ export class NeuralNetBouncer implements BerghainBouncer {
 
   /** Your existing threshold policy; keep whatever logic you had */
   private dynamicThreshold(status: GameStatusRunning<any>): number {
-    // a simple baseline; replace with your real logic if you had one
-    return this.cfg.baseThreshold ?? 0.5
+    const base = this.cfg.baseThreshold ?? 0.42
+    const minT = this.cfg.minThreshold ?? 0.25
+    const maxT = this.cfg.maxThreshold ?? 0.75
+    const progress = Math.min(1, status.admittedCount / Math.max(1, Conf.MAX_ADMISSIONS)) // 0→1
+    // become stricter as we fill up (up to +0.25)
+    const theta = base + 0.25 * progress
+    return Math.max(minT, Math.min(maxT, theta))
   }
 
   /**

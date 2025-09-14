@@ -100,15 +100,20 @@ export class NeuralNet {
     const outputLayer = this.layers[this.layers.length - 1]
     const output = this.layerOutputs[this.layerOutputs.length - 1]
 
-    // MSE loss gradient dL/dy
-    let delta = output.subtract(targetMatrix).scale(2 / output.cols)
-
-    // Output activation gradient
+    // Loss gradient:
+    // For sigmoid output, use BCE-style gradient: dL/dz = (ŷ - y)
+    // For tanh/linear we keep the old chain.
+    let delta: Matrix
     if (outputLayer.activation === 'sigmoid') {
-      delta = delta.hadamard(output.map((y) => gradients.sigmoid(y)))
-    } else if (outputLayer.activation === 'tanh') {
+      delta = output.subtract(targetMatrix) // BCE w/ sigmoid
+    } else {
+      // MSE fallback
+      delta = output.subtract(targetMatrix).scale(2 / output.cols)
+    }
+    if (outputLayer.activation === 'tanh') {
       delta = delta.hadamard(output.map((y) => gradients.tanh(y)))
     }
+
     // (relu for the output is handled in the loop below if present)
 
     for (let i = this.layers.length - 1; i >= 0; i--) {
@@ -165,12 +170,24 @@ export class NeuralNet {
         }
 
         const output = this.forward(input)
-
-        const loss =
-          output.reduce((sum, val, idx) => {
-            const diff = val - target[idx]
-            return sum + diff * diff
-          }, 0) / output.length
+        // BCE for sigmoid head; else fall back to MSE
+        let loss = 0
+        if (this.layers[this.layers.length - 1].activation === 'sigmoid') {
+          const eps = 1e-7
+          // output is a 1-D array; targets 0/1
+          for (let j = 0; j < output.length; j++) {
+            const yhat = Math.min(1 - eps, Math.max(eps, output[j]))
+            const y = target[j]
+            loss += -(y * Math.log(yhat) + (1 - y) * Math.log(1 - yhat))
+          }
+          loss /= output.length
+        } else {
+          loss =
+            output.reduce((sum, val, idx) => {
+              const diff = val - target[idx]
+              return sum + diff * diff
+            }, 0) / output.length
+        }
 
         epochLoss += loss
         this.backward(target)

@@ -366,7 +366,7 @@ export class SelfPlayTrainer {
     if (X.length === 0) return 0
 
     // ensure at least ~35% positives to avoid collapse to "deny"
-    const POS_MIN = 0.35
+    const POS_MIN = 0.4
     const posIdx: number[] = []
     for (let i = 0; i < y.length; i++) if (y[i] === 1) posIdx.push(i)
     const wantPos = Math.ceil(POS_MIN * y.length)
@@ -429,7 +429,10 @@ export class SelfPlayTrainer {
 
       for (let ep = 0; ep < this.config.episodes; ep++) {
         const finishingStart = Math.max(0, epochs - 3)
-        const isFinishing = epoch >= finishingStart
+
+        // Keep assist/fusion on the whole time for stability during bring-up
+        // const isFinishing = epoch >= finishingStart
+        const isFinishing = false
 
         const episode = this.runEpisode({
           explorationRate: exploration,
