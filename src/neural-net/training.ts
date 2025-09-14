@@ -41,6 +41,18 @@ const QUAD_SHORTFALL = 0.05 // extra penalty for concentrated gaps
 const BETA_SURPLUS = 1.0 // mild penalty per head above required
 const LOSS_PENALTY = 100000 // flat penalty for losing (unmet or reject cap)
 
+/** Per-attribute weights to nudge the policy where we were systematically off. */
+const SHORTFALL_WEIGHTS: Record<string, number> = {
+  creative: 1.6, // push scarce 'creative'
+  techno_lover: 1.2, // mild bump to avoid TL misses
+  // others default to 1.0
+}
+
+const SURPLUS_WEIGHTS: Record<string, number> = {
+  creative: 1.6, // penalize 'creative' overshoot
+  // others default to 1.0
+}
+
 export class SelfPlayTrainer {
   private net: NeuralNet
   private game: Game
@@ -96,21 +108,23 @@ export class SelfPlayTrainer {
     const stats = this.game.attributeStatistics
     const samples: Record<string, boolean> = {}
 
+    // Base sampling
     for (const [attr, freq] of Object.entries(stats.relativeFrequencies)) {
       samples[attr] = Math.random() < freq
     }
+    // Correlation adjustments
     for (const [a1, correlations] of Object.entries(stats.correlations)) {
       if (samples[a1]) {
         for (const [a2, corr] of Object.entries(correlations)) {
           if (a1 !== a2 && Math.abs(corr) > 0.3) {
-            const p = clamp(stats.relativeFrequencies[a2] * (1 + corr * 0.5), 0, 1)
+            const p = clamp((stats.relativeFrequencies as any)[a2] * (1 + corr * 0.5), 0, 1)
             samples[a2] = Math.random() < p
           }
         }
       }
     }
     for (const k of Object.keys(stats.relativeFrequencies)) {
-      attributes[k as keyof PersonAttributesScenario2] = !!samples[k]
+      ;(attributes as any)[k] = !!samples[k]
     }
     return { personIndex: index, attributes }
   }
@@ -163,7 +177,7 @@ export class SelfPlayTrainer {
   /**
    * Run one self-play episode.
    * - explorationRate:  ε for the network's exploration (passed into NeuralNetBouncer)
-   * - usePolicyFusion:  allow seat/urgency scoring to overrule a deny from the network (training-friendly)
+   * - usePolicyFusion:  allow seat/urgency scoring to influence final action
    * - useTeacherAssist: allow oracle nudges to correct decisions probabilistically
    */
   private runEpisode({
@@ -202,10 +216,10 @@ export class SelfPlayTrainer {
     const scoring = initializeScoring(this.game, {
       maxAdmissions: 1_000,
       maxRejections: 20_000,
-      targetRejections: 5_000,
-      safetyCushion: 1,
+      targetRejections: 5_500, // steer to desired reject band
+      safetyCushion: 1, // +1 cushion to avoid off-by-one misses near the end
       weights: {
-        // override here...
+        // leave empty unless you want to override scoring weights here
       },
     })
 
@@ -231,12 +245,20 @@ export class SelfPlayTrainer {
 
       // --- hybrid decision (scoring + network) ---
       const guest = person.attributes as ScenarioAttributes
-      let admit = bouncer.admit(status, trueCounts)
+      let admit = bouncer.admit(status)
 
       if (usePolicyFusion) {
         const policyVote = scoring.shouldAdmit(guest, 1.0, 0.5)
-        // Safe fusion: policy must approve; net can only allow/deny within policy-YES region
-        admit = policyVote && admit
+        const helpsWorstGap = this.oracleShouldAdmit(trueCounts, person.attributes, admitted)
+        const seatsLeft = 1000 - admitted
+
+        // Allow scoring to open doors when NN denied
+        if (!admit && policyVote) admit = true
+
+        // Late-game veto: if NN wants to admit but it doesn't help the worst gap, veto.
+        if (admit && !helpsWorstGap && seatsLeft <= 200) {
+          admit = false
+        }
       }
 
       // teacher assist (oracle) during training only
@@ -259,7 +281,6 @@ export class SelfPlayTrainer {
         for (const [attr, has] of Object.entries(person.attributes)) {
           if (has) trueCounts[attr] = (trueCounts[attr] || 0) + 1
         }
-        bouncer.setCounts(trueCounts) // keep internal copy aligned
       } else {
         rejected++
       }
@@ -313,9 +334,13 @@ export class SelfPlayTrainer {
       const cur = counts[c.attribute] || 0
       const deficit = Math.max(0, c.minCount - cur)
       const surplus = Math.max(0, cur - c.minCount)
-      totalShortfall += deficit
-      quadShortfall += deficit * deficit
-      totalSurplus += surplus
+
+      const sw = SHORTFALL_WEIGHTS[c.attribute] ?? 1.0
+      const vw = SURPLUS_WEIGHTS[c.attribute] ?? 1.0
+
+      totalShortfall += sw * deficit
+      quadShortfall += sw * deficit * deficit
+      totalSurplus += vw * surplus
     }
 
     let reward = -rejected
@@ -323,7 +348,7 @@ export class SelfPlayTrainer {
     reward -= QUAD_SHORTFALL * quadShortfall
     reward -= BETA_SURPLUS * totalSurplus
 
-    // un-comment to see what is being missed the most:
+    // // Uncomment for debugging misses:
     // if (totalShortfall > 0) {
     //   const misses = this.game.constraints
     //     .map((c) => ({ attr: c.attribute, need: Math.max(0, c.minCount - (counts[c.attribute] || 0)) }))
@@ -353,7 +378,6 @@ export class SelfPlayTrainer {
     const X: number[][] = []
     const y: number[] = []
     const relabelFrac = clamp(this.config.oracleRelabelFrac ?? 0, 0, 1)
-    const disagreeBoost = 3 // oversample steps where oracle ≠ model
 
     const pushSample = (state: number[], label: number, repeats = 1) => {
       for (let r = 0; r < repeats; r++) {
@@ -376,15 +400,14 @@ export class SelfPlayTrainer {
         if (Math.random() < relabelFrac) {
           const oracleLabel = this.oracleShouldAdmit(counts, person, admittedSoFar) ? 1 : 0
           label = oracleLabel
-          // disagreements get boosted
-          repeats = oracleLabel !== modelLabel ? 6 : 1
+          // oversample steps where oracle ≠ model
+          if (oracleLabel !== modelLabel) repeats += 5
         }
 
-        // --- Rare-attr boost: creative present & still unmet ---
-        const needCreative =
-          this.game.constraints.find((c) => c.attribute === 'creative')!.minCount - (counts['creative'] || 0)
+        // Rare-attr boost: if 'creative' still unmet and present, upweight
+        const creativeConstraint = this.game.constraints.find((c) => c.attribute === 'creative')
+        const needCreative = (creativeConstraint ? creativeConstraint.minCount : 0) - (counts['creative'] || 0)
         if (person['creative'] && needCreative > 0) {
-          // stronger when oracle says admit
           repeats += label === 1 ? 3 : 1
         }
 
@@ -394,7 +417,7 @@ export class SelfPlayTrainer {
 
     if (X.length === 0) return 0
 
-    // ensure at least 20% positives
+    // ensure at least ~35% positives to avoid collapse to "deny"
     const POS_MIN = 0.35
     const posIdx: number[] = []
     for (let i = 0; i < y.length; i++) if (y[i] === 1) posIdx.push(i)
@@ -457,10 +480,12 @@ export class SelfPlayTrainer {
       let totalRejections = 0
 
       for (let ep = 0; ep < this.config.episodes; ep++) {
+        // Last 3 epochs: evaluate the pure model (no teacher, no fusion) to prevent over-dependence
+        const isFinishing = epoch >= epochs - 3
         const episode = this.runEpisode({
           explorationRate: exploration,
-          usePolicyFusion: true,
-          useTeacherAssist: true,
+          usePolicyFusion: !isFinishing,
+          useTeacherAssist: !isFinishing,
         })
         batch.push(episode)
 
@@ -544,7 +569,7 @@ export class SelfPlayTrainer {
     return this.net.toJSON()
   }
 
-  // Replace your current test(...) with this
+  // Configurable test
   test(
     episodes: number = 100,
     opts?: { explorationRate?: number; usePolicyFusion?: boolean; useTeacherAssist?: boolean }

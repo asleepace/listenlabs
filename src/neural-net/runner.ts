@@ -186,10 +186,10 @@ export class NeuralNetBouncerRunner {
       // Build a fresh bouncer with zero exploration
       this.bouncer = new NeuralNetBouncer(this.game, {
         explorationRate: 0,
-        baseThreshold: 0.35,
-        minThreshold: 0.25,
+        baseThreshold: 0.38,
+        minThreshold: 0.26,
         maxThreshold: 0.7,
-        urgencyFactor: 2.0,
+        urgencyFactor: 2.4,
       })
 
       // Prefer static loader; fall back to instance methods if present.
@@ -287,7 +287,7 @@ export class NeuralNetBouncerRunner {
     const scoring = initializeScoring(this.game, {
       maxRejections: 20_000,
       maxAdmissions: 1_000,
-      targetRejections: 5_000,
+      targetRejections: 5_500,
       safetyCushion: 1,
       weights: {
         // override here...
