@@ -224,18 +224,20 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
      */
     shouldAdmit(guest: ScenarioAttributes, baseTheta = 1.0, baseFrac = 0.5): boolean {
       const peopleLeft = this.getPeopleLeftInLine()
+
+      const totalNeed = this.quotas().reduce((s, q) => s + q.needed(), 0)
       const seatsLeft = this.getTotalSpotsAvailable()
+
       if (seatsLeft <= 0) return false
 
       const before = this.worstExpectedShortfall(peopleLeft)
       const after = this.worstExpectedShortfall(Math.max(0, peopleLeft - 1), guest)
-      const delta = before - after // improvement (heads of shortfall reduced)
+      const delta = before - after
 
-      // optional tiny debug remains...
       if (before > 0) {
         const scarcity = this.seatScarcity()
-        // ↓ require smaller improvement; earlier it was 0.05 + 0.25*scarcity
-        const tighten = 0.02 + 0.15 * scarcity
+        let tighten = 0.02 + 0.15 * scarcity
+        if (totalNeed >= seatsLeft) tighten *= 0.25 // be permissive when deficits exceed seats
         return delta >= tighten * Math.min(1, before)
       }
 

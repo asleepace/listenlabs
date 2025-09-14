@@ -183,26 +183,22 @@ export class NeuralNetBouncer implements BerghainBouncer {
     // Base dynamic threshold
     let theta = this.dynamicThreshold(status)
 
-    // Check current unmet quotas to prevent overfilling
+    // Check the current quotas to prevent overfilling
     const needed = this.unmetNeeds(counts)
     const [required, critical] = this.getSafetyGates(status, needed)
 
-    // If no more people are needed then just auto-admit
-    if (Object.keys(needed).length === 0) {
-      return true
-    }
+    // If no more quotas are unmet, auto-admit.
+    if (Object.keys(needed).length === 0) return true
 
     // Hard gates
-    if (required.length) {
-      // "required" = must have ALL of these attrs
-      const hasAllRequired = required.every((a) => guest[a])
-      if (!hasAllRequired) return false
-    }
-    if (critical.length) {
-      // "critical" = must have AT LEAST ONE of these attrs
-      const hasSomeCritical = critical.some((a) => guest[a])
-      if (!hasSomeCritical) return false
-    }
+    if (required.length && !required.every((a) => guest[a])) return false
+    const hasCritical = critical.some((a) => guest[a])
+    if (critical.length && !hasCritical) return false
+
+    // PANIC MODE: if total unmet ≥ seats left, admit any guest who hits any unmet attr
+    const seatsLeft = Math.max(0, Conf.MAX_ADMISSIONS - status.admittedCount)
+    const totalNeed = Object.values(needed).reduce((a, b) => a + b, 0)
+    if (totalNeed >= seatsLeft && hasCritical) return true
 
     // Soft bias: if guest helps unmet quotas, lower the bar a touch
     const hasUnmet = Object.keys(needed).some((a) => guest[a])
