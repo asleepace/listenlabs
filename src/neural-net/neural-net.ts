@@ -41,13 +41,10 @@ export class NeuralNet {
     }
     const bias = Matrix.zeros(1, outputSize)
 
-    this.layers.push({
-      weights,
-      bias,
-      activation,
-    })
+    this.layers.push({ weights, bias, activation })
   }
 
+  /** Forward pass. Returns an array (usually length 1 for a sigmoid head). */
   forward(input: number[] | Matrix): number[] {
     let current = input instanceof Matrix ? input : Matrix.fromArray(input).transpose()
     this.layerInputs = [current.copy()]
@@ -83,6 +80,11 @@ export class NeuralNet {
     return current.toArray()
   }
 
+  /** Alias for readability in callers that expect `infer(...)`. */
+  infer(input: number[] | Matrix): number[] {
+    return this.forward(input)
+  }
+
   backward(target: number[] | number, _predicted?: number[]): void {
     if (!this.layerOutputs.length) {
       throw new Error('Must call forward() before backward()')
@@ -92,7 +94,7 @@ export class NeuralNet {
     const outputLayer = this.layers[this.layers.length - 1]
     const output = this.layerOutputs[this.layerOutputs.length - 1]
 
-    // MSE loss gradient
+    // MSE loss gradient dL/dy
     let delta = output.subtract(targetMatrix).scale(2 / output.cols)
 
     // Output activation gradient
@@ -101,6 +103,7 @@ export class NeuralNet {
     } else if (outputLayer.activation === 'tanh') {
       delta = delta.hadamard(output.map((y) => gradients.tanh(y)))
     }
+    // (relu for the output is handled in the loop below if present)
 
     for (let i = this.layers.length - 1; i >= 0; i--) {
       const layer = this.layers[i]
@@ -130,6 +133,9 @@ export class NeuralNet {
             break
           case 'tanh':
             delta = delta.hadamard(prevOutput.map((y) => gradients.tanh(y)))
+            break
+          case 'linear':
+            // no-op
             break
         }
       }
@@ -170,15 +176,19 @@ export class NeuralNet {
     return totalLoss
   }
 
+  /** Convenience for thresholding callers. */
   predict(input: number[]): { value: number; confidence: number } {
     const output = this.forward(input)
     const value = output[0]
-    const confidence = Math.abs(value - 0.5) * 2
+    const confidence = Math.min(1, Math.max(0, Math.abs(value - 0.5) * 2))
     return { value, confidence }
   }
 
+  /** Serialize weights, biases, activations and training hyperparams. */
   toJSON(): any {
     return {
+      __kind: 'NeuralNet',
+      version: 1,
       layers: this.layers.map((layer) => ({
         weights: Array.from(layer.weights.data),
         weightsShape: [layer.weights.rows, layer.weights.cols],
@@ -191,16 +201,47 @@ export class NeuralNet {
     }
   }
 
+  /** Static constructor (kept for backwards compatibility). */
   static fromJSON(json: any): NeuralNet {
-    const net = new NeuralNet(json.learningRate, json.l2Lambda)
-    net.layers = json.layers.map((layerData: any) => ({
-      weights: new Matrix(layerData.weightsShape[0], layerData.weightsShape[1], layerData.weights),
-      bias: new Matrix(layerData.biasShape[0], layerData.biasShape[1], layerData.bias),
-      activation: layerData.activation,
-    }))
+    const net = new NeuralNet(json.learningRate ?? 0.001, json.l2Lambda ?? 0.0001)
+    net.fromJSON(json)
     return net
   }
 
+  /**
+   * NEW: Instance deserializer so code that already holds a net can load into it.
+   * Used by trainer/runner via n.fromJSON(...) / n.loadJSON(...) / n.load(...).
+   */
+  fromJSON(json: any): void {
+    if (!json || !Array.isArray(json.layers)) {
+      throw new Error('Invalid network JSON: missing layers')
+    }
+    this.learningRate = json.learningRate ?? this.learningRate
+    this.l2Lambda = json.l2Lambda ?? this.l2Lambda
+
+    this.layers = json.layers.map((layerData: any) => {
+      const [wr, wc] = layerData.weightsShape
+      const [br, bc] = layerData.biasShape
+      return {
+        weights: new Matrix(wr, wc, layerData.weights),
+        bias: new Matrix(br, bc, layerData.bias),
+        activation: layerData.activation as Layer['activation'],
+      }
+    })
+    // clear caches
+    this.layerInputs = []
+    this.layerOutputs = []
+  }
+
+  /** Aliases so different call sites (“loadJSON”, “load”) work too. */
+  loadJSON(json: any): void {
+    this.fromJSON(json)
+  }
+  load(json: any): void {
+    this.fromJSON(json)
+  }
+
+  // --- small utilities ---
   getLearningRate(): number {
     return this.learningRate
   }

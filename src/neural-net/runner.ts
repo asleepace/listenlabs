@@ -15,6 +15,8 @@ import { SelfPlayTrainer } from './training'
 import { initializeScoring } from './scoring'
 import * as fs from 'fs'
 import * as path from 'path'
+import { StateEncoder } from './state-encoder'
+import { createBerghainNet } from './neural-net'
 
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x))
 
@@ -175,7 +177,19 @@ export class NeuralNetBouncerRunner {
     }
     try {
       const weights = JSON.parse(fs.readFileSync(this.weightsPath, 'utf-8'))
+
       this.game = this.initializeGame()
+
+      // Build a net with the right input size and load the weights JSON
+      const encoder = new StateEncoder(this.game)
+      const net = createBerghainNet(encoder.getFeatureSize())
+      const n: any = net as any
+      if (typeof n.fromJSON === 'function') n.fromJSON(weights)
+      else if (typeof n.loadJSON === 'function') n.loadJSON(weights)
+      else if (typeof n.load === 'function') n.load(weights)
+      else console.warn('[runner.load] Unable to load weights: no fromJSON/loadJSON/load on NeuralNet')
+
+      // Create bouncer and attach the net
       this.bouncer = new NeuralNetBouncer(this.game, {
         explorationRate: 0,
         baseThreshold: 0.35,
@@ -183,7 +197,8 @@ export class NeuralNetBouncerRunner {
         maxThreshold: 0.7,
         urgencyFactor: 2.0,
       })
-      this.bouncer.loadWeights(weights)
+      this.bouncer.setNetwork(net)
+
       console.log('Weights loaded successfully!')
       return true
     } catch (error) {

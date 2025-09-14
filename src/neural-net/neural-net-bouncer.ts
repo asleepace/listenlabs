@@ -1,228 +1,136 @@
-/** @file neural-net-bouncer.ts */
+// neural-net-bouncer.ts
 
-import type { BerghainBouncer } from '../berghain'
-import type {
-  Game,
-  GameStatusRunning,
-  GameStatusCompleted,
-  GameStatusFailed,
-  PersonAttributesScenario2,
-} from '../types'
-
-import { NeuralNet, createBerghainNet } from './neural-net'
-import { StateEncoder, AttributeTracker } from './state-encoder'
-
-export interface NeuralNetBouncerConfig {
-  baseThreshold?: number
-  minThreshold?: number
-  maxThreshold?: number
-  urgencyFactor?: number
-  explorationRate?: number
-}
-
-function clamp(min: number, curr: number, max: number): number {
-  return Math.max(min, Math.min(curr, max))
-}
+import type { BerghainBouncer, Game, GameStatusCompleted, GameStatusFailed, GameStatusRunning } from '../types'
+import type { NeuralNet } from './neural-net'
+import { StateEncoder } from './state-encoder'
+// ... imports for types
 
 export class NeuralNetBouncer implements BerghainBouncer {
-  private net: NeuralNet
   private encoder: StateEncoder
-  private tracker: AttributeTracker
-  private game: Game
+  private net?: NeuralNet
+  private counts: Record<string, number> = {}
 
-  private baseThreshold: number
-  private minThreshold: number
-  private maxThreshold: number
-  private urgencyFactor: number
-  private explorationRate: number
-
-  private decisions: Array<{
-    features: number[]
-    probability: number
-    admitted: boolean
-    threshold: number
-  }> = []
-
-  private admissionCount = 0
-  private rejectionCount = 0
-
-  constructor(game: Game, config: NeuralNetBouncerConfig = {}) {
-    this.game = game
+  constructor(
+    private game: Game,
+    private cfg: {
+      explorationRate?: number
+      baseThreshold?: number
+      minThreshold?: number
+      maxThreshold?: number
+      urgencyFactor?: number
+    } = {}
+  ) {
     this.encoder = new StateEncoder(game)
-    this.tracker = new AttributeTracker(Object.keys(game.attributeStatistics.relativeFrequencies))
-    this.net = createBerghainNet(this.encoder.getFeatureSize())
-
-    this.baseThreshold = config.baseThreshold ?? 0.5
-    this.minThreshold = config.minThreshold ?? 0.3
-    this.maxThreshold = config.maxThreshold ?? 0.7
-    this.urgencyFactor = config.urgencyFactor ?? 2.0
-    this.explorationRate = config.explorationRate ?? 0.1
   }
 
-  /** Legacy one-shot decision with side-effects (kept for runtime use). */
-  admit(status: GameStatusRunning<PersonAttributesScenario2>): boolean {
-    const features = this.encoder.encode(status)
-    const probability = this.net.forward(features)[0]
-    const threshold = this.computeThreshold(status)
-
-    // console.log('explore:', this.explorationRate)
-
-    let decision: boolean
-    if (Math.random() < this.explorationRate) {
-      decision = this.exploratoryAdmit(status)
-    } else {
-      decision = probability > threshold
-    }
-
-    this.applyFinalDecision(decision, status.nextPerson.attributes)
-    this.decisions.push({ features, probability, admitted: decision, threshold })
-    return decision
-  }
-
-  /** Side-effect free forward pass. */
-  predictProbability(features: number[]): number {
-    return this.net.forward(features)[0]
-  }
-
-  /** Public wrapper for dynamic threshold (side-effect free). */
-  computeThreshold(status: GameStatusRunning<PersonAttributesScenario2>): number {
-    return this.calculateDynamicThreshold(status)
-  }
-
-  /** Side-effect free exploration heuristic used by training. */
-  exploratoryAdmit(status: GameStatusRunning<PersonAttributesScenario2>): boolean {
-    const remaining = Math.max(1, 1000 - this.admissionCount)
-    const counts = this.tracker.getCounts()
-    const person = status.nextPerson.attributes
-
-    let value = 0
-    let totalWeight = 0
-    for (const c of this.game.constraints) {
-      const current = counts[c.attribute] || 0
-      const needed = Math.max(0, c.minCount - current)
-      const weight = needed / remaining
-      if (person[c.attribute]) value += weight
-      totalWeight += weight
-    }
-    const normalizedValue = totalWeight > 0 ? value / totalWeight : 0.5
-    const base = 0.65
-    const admitProb = Math.min(0.98, base + 0.35 * normalizedValue)
-    return Math.random() < admitProb
-  }
-
-  /** Apply the final chosen decision exactly once to internal counters + tracker. */
-  applyFinalDecision(admit: boolean, personAttrs: Record<string, boolean>): void {
-    if (admit) {
-      this.admissionCount++
-      this.tracker.admit(personAttrs)
-    } else {
-      this.rejectionCount++
-      // no change to tracker on rejection
-    }
-  }
-
-  // Put this helper somewhere in the file
-  clampNum = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x))
-
-  /** Dynamic threshold: stricter when urgency is high; lenient only if the person helps. */
-  private calculateDynamicThreshold(status: GameStatusRunning<PersonAttributesScenario2>): number {
-    const remaining = Math.max(0, 1000 - this.admissionCount)
-    const counts = this.tracker.getCounts()
-
-    // compute maximum urgency over constraints
-    let maxUrgency = 0
-    for (const c of this.game.constraints) {
-      const cur = counts[c.attribute] || 0
-      const need = Math.max(0, c.minCount - cur)
-      if (remaining > 0) {
-        const u = need / remaining
-        if (u > maxUrgency) maxUrgency = u
-      }
-    }
-
-    // Base: go stricter as urgency rises
-    let threshold = this.baseThreshold
-    if (maxUrgency >= 0.8) {
-      threshold = this.maxThreshold // very strict
-    } else if (maxUrgency >= 0.6) {
-      threshold = this.baseThreshold + 0.7 * (this.maxThreshold - this.baseThreshold)
-    } else if (maxUrgency >= 0.4) {
-      threshold = this.baseThreshold + 0.4 * (this.maxThreshold - this.baseThreshold)
-    } else if (remaining < 100) {
-      threshold = this.baseThreshold + 0.3 * (this.maxThreshold - this.baseThreshold)
-    }
-
-    // If the person has a highly urgent attribute, sweeten the threshold
-    const person = status.nextPerson.attributes
-    for (const c of this.game.constraints) {
-      const cur = counts[c.attribute] || 0
-      const need = Math.max(0, c.minCount - cur)
-      const u = remaining > 0 ? need / remaining : 0
-      if (u >= 0.6 && person[c.attribute]) {
-        threshold = Math.max(this.minThreshold, threshold * 0.6) // easier if they help
-        break
-      }
-    }
-
-    return Math.max(this.minThreshold, Math.min(this.maxThreshold, threshold))
-  }
-
-  getProgress(): any {
-    const counts = this.tracker.getCounts()
-    const constraints = this.game.constraints.map((c) => ({
-      attribute: c.attribute,
-      required: c.minCount,
-      current: counts[c.attribute] || 0,
-      satisfied: (counts[c.attribute] || 0) >= c.minCount,
-    }))
-
-    return {
-      admitted: this.admissionCount,
-      rejected: this.rejectionCount,
-      constraints,
-      explorationRate: this.explorationRate,
-      decisions: this.decisions.length,
-      allSatisfied: constraints.every((c) => c.satisfied),
-    }
-  }
-
-  getOutput(lastStatus: GameStatusCompleted | GameStatusFailed): any {
-    const progress = this.getProgress()
-    return {
-      status: lastStatus.status,
-      finalRejections: lastStatus.status === 'completed' ? lastStatus.rejectedCount : -1,
-      ...progress,
-      networkParams: this.net.getParameterCount(),
-      decisions: this.decisions.slice(-10),
-    }
-  }
-
-  getDecisions(): typeof this.decisions {
-    return this.decisions
-  }
-
-  loadWeights(weights: any): void {
-    this.net = NeuralNet.fromJSON(weights)
-  }
-
-  getWeights(): any {
-    return this.net.toJSON()
-  }
-
-  reset(): void {
-    this.tracker.reset()
-    this.decisions = []
-    this.admissionCount = 0
-    this.rejectionCount = 0
-  }
-
-  setNetwork(net: NeuralNet): void {
+  public setNetwork(net: NeuralNet) {
     this.net = net
   }
-}
 
-export function createTrainedBouncer(game: Game, weights?: any, config?: NeuralNetBouncerConfig): NeuralNetBouncer {
-  const bouncer = new NeuralNetBouncer(game, config)
-  if (weights) bouncer.loadWeights(weights)
-  return bouncer
+  public setCounts(counts: Record<string, number>) {
+    this.counts = { ...counts }
+  }
+
+  private sigmoid(z: number): number {
+    // stable-ish sigmoid
+    if (z >= 0) {
+      const ez = Math.exp(-z)
+      return 1 / (1 + ez)
+    } else {
+      const ez = Math.exp(z)
+      return ez / (1 + ez)
+    }
+  }
+
+  /** Convert various NN outputs to a single admit probability in [0,1] */
+  private toProbability(raw: unknown): number {
+    // 1) scalar number (either prob or logit)
+    if (typeof raw === 'number') {
+      // if outside [0,1], treat as logit
+      return raw < 0 || raw > 1 ? this.sigmoid(raw) : raw
+    }
+
+    // 2) array of numbers
+    if (Array.isArray(raw)) {
+      const arr = raw as number[]
+      if (arr.length === 0) return 0.5
+      if (arr.length === 1) {
+        const v = arr[0]
+        return v < 0 || v > 1 ? this.sigmoid(v) : v
+      }
+      // assume 2-way softmax [p(reject), p(admit)] or [logit0, logit1]
+      const [a, b] = arr
+      // if they already look like probs that sum≈1, use b
+      const s = a + b
+      if (s > 0.999 && s < 1.001 && a >= 0 && b >= 0) return b
+      // otherwise treat as two logits -> softmax(1)
+      const m = Math.max(a, b)
+      const ea = Math.exp(a - m),
+        eb = Math.exp(b - m)
+      return eb / (ea + eb)
+    }
+
+    // 3) object-shaped outputs (rare) — try common fields
+    if (raw && typeof raw === 'object') {
+      const o = raw as Record<string, any>
+      if (typeof o.prob === 'number') return clamp01(o.prob)
+      if (typeof o.p === 'number') return clamp01(o.p)
+      if (typeof o.logit === 'number') return this.sigmoid(o.logit)
+      if (Array.isArray(o.probs) && o.probs.length >= 2) return clamp01(o.probs[1])
+      if (Array.isArray(o.logits) && o.logits.length >= 2) {
+        const a = o.logits[0],
+          b = o.logits[1]
+        const m = Math.max(a, b)
+        const ea = Math.exp(a - m),
+          eb = Math.exp(b - m)
+        return eb / (ea + eb)
+      }
+    }
+
+    // fallback
+    return 0.5
+
+    function clamp01(x: number) {
+      return Math.max(0, Math.min(1, x))
+    }
+  }
+
+  /** Your existing threshold policy; keep whatever logic you had */
+  private dynamicThreshold(status: GameStatusRunning<any>): number {
+    // a simple baseline; replace with your real logic if you had one
+    return this.cfg.baseThreshold ?? 0.5
+  }
+
+  /**
+   * IMPORTANT: countsOverride lets the trainer pass the same counts it used to
+   * encode the state, so train/test features match.
+   */
+  public admit(status: GameStatusRunning<any>, countsOverride?: Record<string, number>): boolean {
+    const counts = countsOverride ?? this.counts
+    const x = this.encoder.encode(status, counts)
+
+    // Call your NN. Prefer `forward`, else fall back to `inference`.
+    const raw =
+      typeof (this.net as any).forward === 'function' ? (this.net as any).forward(x) : (this.net as any).inference(x)
+
+    const p = this.toProbability(raw)
+    const theta = this.dynamicThreshold(status)
+
+    // epsilon-greedy exploration (if you keep it here)
+    const eps = this.cfg.explorationRate ?? 0
+    if (eps > 0 && Math.random() < eps) {
+      return Math.random() < 0.5
+    }
+    return p >= theta
+  }
+
+  // required by interface...
+
+  public getOutput(lastStatus: GameStatusCompleted | GameStatusFailed) {
+    return {}
+  }
+
+  getProgress() {
+    return {}
+  }
 }

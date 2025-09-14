@@ -230,7 +230,7 @@ export class SelfPlayTrainer {
 
       // --- hybrid decision (scoring + network) ---
       const guest = person.attributes as ScenarioAttributes
-      let admit = bouncer.admit(status)
+      let admit = bouncer.admit(status, trueCounts)
 
       if (usePolicyFusion) {
         const policyVote = scoring.shouldAdmit(guest, 1.0, 0.5)
@@ -257,6 +257,7 @@ export class SelfPlayTrainer {
         for (const [attr, has] of Object.entries(person.attributes)) {
           if (has) trueCounts[attr] = (trueCounts[attr] || 0) + 1
         }
+        bouncer.setCounts(trueCounts) // keep internal copy aligned
       } else {
         rejected++
       }
