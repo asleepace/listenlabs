@@ -15,12 +15,12 @@ Make sure your real samples file is ready, e.g. `data/samples/real-01.json`.
 No resume; high oracle signal to shape the policy.
 
 ```bash
-bun run src/neural-net/runner train 20 150 \
-  --datafile=data/samples/real-01.json \
-  --assistGain=3 \
-  --oracleRelabelFrac=0.80 \
-  --elitePercentile=0.12
-
+bun run src/neural-net/runner train 12 160 \
+  --datafile=data/samples/sample-04.json \
+  --assistGain=2.5 \
+  --oracleRelabelFrac=0.70 \
+  --elitePercentile=0.10 \
+  --explorationStart=0.35 --explorationEnd=0.10 --explorationDecay=0.90
 ```
 
 Tips while it runs:
@@ -34,10 +34,11 @@ Resume from the latest; lower oracle mixing so the NN stands on its own a bit mo
 
 ```bash
 bun run src/neural-net/runner resume 12 180 \
-  --datafile=data/samples/real-01.json \
-  --assistGain=2.5 \
-  --oracleRelabelFrac=0.45 \
-  --elitePercentile=0.08
+  --datafile=data/samples/sample-04.json \
+  --assistGain=2.0 \
+  --oracleRelabelFrac=0.50 \
+  --elitePercentile=0.08 \
+  --explorationStart=0.25 --explorationEnd=0.08 --explorationDecay=0.90
 ```
 
 What this does:
