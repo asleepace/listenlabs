@@ -267,7 +267,7 @@ export class NeuralNet {
 }
 
 // Clean, input-size-first topology.
-export function createBerghainNet(inputSize: number = 17): NeuralNet {
+export function createBerghainNet(inputSize: number): NeuralNet {
   const net = new NeuralNet(0.0007, 0.0001)
   net.addLayer(inputSize, 64, 'relu', 'he')
   net.addLayer(64, 32, 'relu', 'he')
