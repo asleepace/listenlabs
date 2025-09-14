@@ -323,14 +323,14 @@ export class SelfPlayTrainer {
     reward -= QUAD_SHORTFALL * quadShortfall
     reward -= BETA_SURPLUS * totalSurplus
 
-    // after computing totalShortfall, add:
-    if (totalShortfall > 0) {
-      const misses = this.game.constraints
-        .map((c) => ({ attr: c.attribute, need: Math.max(0, c.minCount - (counts[c.attribute] || 0)) }))
-        .filter((x) => x.need > 0)
-        .sort((a, b) => b.need - a.need)
-      console.log('[episode.miss]', misses.slice(0, 3))
-    }
+    // un-comment to see what is being missed the most:
+    // if (totalShortfall > 0) {
+    //   const misses = this.game.constraints
+    //     .map((c) => ({ attr: c.attribute, need: Math.max(0, c.minCount - (counts[c.attribute] || 0)) }))
+    //     .filter((x) => x.need > 0)
+    //     .sort((a, b) => b.need - a.need)
+    //   console.log('[episode.miss]', misses.slice(0, 3))
+    // }
 
     const satisfiedAll = totalShortfall === 0
     if (!satisfiedAll || hitRejectCap) {

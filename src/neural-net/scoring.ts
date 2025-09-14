@@ -57,7 +57,7 @@ export function createQuota(
     count: 0,
     frequency,
     correlations,
-    relativeProgress(peopleLeftInLine: number): number {
+    relativeProgress(peopleLeftInLine: number) {
       if (this.isComplete()) return 1.0
       const expectedRemaining = Math.max(1, peopleLeftInLine * Math.max(0, this.frequency))
       const need = Math.max(0, this.minCount + cushion - this.count)
@@ -152,24 +152,12 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
     unmetQuotasCount(): number {
       return this.quotas().length
     },
-
-    /** Worst expected shortfall given people left, optionally adding this guest. */
-    // worstExpectedShortfall(peopleLeftInLine: number, guest?: ScenarioAttributes): number {
-    //   let worst = 0
-    //   for (const q of this.quotas()) {
-    //     const cur = q.count + (guest && guest[q.attribute] ? 1 : 0)
-    //     const expectedFuture = Math.max(0, peopleLeftInLine) * Math.max(0, q.frequency)
-    //     const gap = Math.max(0, q.minCount - (cur + expectedFuture))
-    //     if (gap > worst) worst = gap
-    //   }
-    //   return worst
-    // },
     worstExpectedShortfall(peopleLeftInLine: number, guest?: ScenarioAttributes): number {
       let worst = 0
       for (const q of this.quotas()) {
         const cur = q.count + (guest && guest[q.attribute] ? 1 : 0)
         const expectedFuture = Math.max(0, peopleLeftInLine) * Math.max(0, q.frequency)
-        const target = q.minCount + CUSHION
+        const target = q.minCount // ✅ no cushion in the gate
         const gap = Math.max(0, target - (cur + expectedFuture))
         if (gap > worst) worst = gap
       }
@@ -222,9 +210,22 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
       const after = this.worstExpectedShortfall(Math.max(0, peopleLeft - 1), guest)
       const delta = before - after
 
+      // DEBUG (optional)
+      if (before > 0 && Math.random() < 0.0005) {
+        console.log('[gate]', {
+          peopleLeft,
+          seatsLeft,
+          before: before.toFixed(3),
+          after: after.toFixed(3),
+          delta: delta.toFixed(3),
+        })
+      }
+
       if (before > 0) {
-        const tighten = 0.15 + 0.35 * this.seatScarcity() // tunable
-        return delta >= tighten
+        const scarcity = this.seatScarcity()
+        // Early: any improvement is enough. Late: require a modest improvement.
+        const tighten = 0.05 + 0.25 * scarcity
+        return delta > 0 && delta >= tighten * Math.min(1, before)
       }
 
       const byScore = this.admitByScore(guest, baseTheta)
