@@ -321,6 +321,15 @@ export class SelfPlayTrainer {
     reward -= QUAD_SHORTFALL * quadShortfall
     reward -= BETA_SURPLUS * totalSurplus
 
+    // after computing totalShortfall, add:
+    if (totalShortfall > 0) {
+      const misses = this.game.constraints
+        .map((c) => ({ attr: c.attribute, need: Math.max(0, c.minCount - (counts[c.attribute] || 0)) }))
+        .filter((x) => x.need > 0)
+        .sort((a, b) => b.need - a.need)
+      console.log('[episode.miss]', misses.slice(0, 3))
+    }
+
     const satisfiedAll = totalShortfall === 0
     if (!satisfiedAll || hitRejectCap) {
       reward -= LOSS_PENALTY
@@ -370,7 +379,7 @@ export class SelfPlayTrainer {
     if (X.length === 0) return 0
 
     // ensure at least 20% positives
-    const POS_MIN = 0.2
+    const POS_MIN = 0.35
     const posIdx: number[] = []
     for (let i = 0; i < y.length; i++) if (y[i] === 1) posIdx.push(i)
     const wantPos = Math.ceil(POS_MIN * y.length)

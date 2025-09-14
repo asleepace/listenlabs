@@ -43,6 +43,9 @@ bun run src/neural-net/runner test "" --mode=score
 
 # Pure bouncer (to gauge net-only progress):
 bun run src/neural-net/runner test "" --mode=bouncer
+
+# aggressive oracle distillation
+bun run src/neural-net/runner train 30 200 --oracleRelabelFrac=1.0 --elitePercentile=0.1
 ```
 
 Keep policy fusion ON during training (already the default in `SelfPlayTrainer.runEpisode`) but OFF in `test()` to see pure-net progress.
