@@ -6,7 +6,12 @@
   "scripts": {
     "train": "bun run src/neural-net/runner train 100",
     "start": "bun run src/index.ts",
-    "game": "bun run src/index.ts"
+    "game": "bun run src/index.ts",
+    "bouncer:diagnose": "bun run src/neural-net/runner diagnose",
+    "bouncer:train:quick": "bun run src/neural-net/runner train 2 10 --oracleRelabelFrac=1 --assistGain=3 --elitePercentile=0.1",
+    "bouncer:resume": "bun run src/neural-net/runner resume 20 50 --assistGain=3 --oracleRelabelFrac=0.8 --elitePercentile=0.2",
+    "bouncer:test": "bun run src/neural-net/runner test",
+    "bouncer:bench": "bun run src/neural-net/runner benchmark"
   },
   "devDependencies": {
     "@types/bun": "latest"

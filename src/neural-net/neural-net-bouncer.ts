@@ -65,6 +65,8 @@ export class NeuralNetBouncer implements BerghainBouncer {
     const probability = this.net.forward(features)[0]
     const threshold = this.computeThreshold(status)
 
+    // console.log('explore:', this.explorationRate)
+
     let decision: boolean
     if (Math.random() < this.explorationRate) {
       decision = this.exploratoryAdmit(status)
@@ -122,53 +124,47 @@ export class NeuralNetBouncer implements BerghainBouncer {
   // Put this helper somewhere in the file
   clampNum = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x))
 
-  /** Dynamic threshold based on expected shortfall and remaining seats. */
+  /** Dynamic threshold: stricter when urgency is high; lenient only if the person helps. */
   private calculateDynamicThreshold(status: GameStatusRunning<PersonAttributesScenario2>): number {
-    // Avoid div-by-zero; use the tracker’s true counts
-    const remaining = Math.max(1, 1000 - this.admissionCount)
+    const remaining = Math.max(0, 1000 - this.admissionCount)
     const counts = this.tracker.getCounts()
 
-    // 1) Expected-feasibility worst gap across constraints
-    let worstGap = 0
+    // compute maximum urgency over constraints
+    let maxUrgency = 0
     for (const c of this.game.constraints) {
       const cur = counts[c.attribute] || 0
-      const f = this.game.attributeStatistics.relativeFrequencies[c.attribute] || 0
-      const expectedFinalIfDoNothing = cur + f * remaining
-      const gap = Math.max(0, c.minCount - expectedFinalIfDoNothing)
-      if (gap > worstGap) worstGap = gap
+      const need = Math.max(0, c.minCount - cur)
+      if (remaining > 0) {
+        const u = need / remaining
+        if (u > maxUrgency) maxUrgency = u
+      }
     }
 
-    // Normalize gap to [0, 1+] by remaining seats
-    const g = worstGap / remaining
-
-    // 2) Map gap -> interpolation factor with hyperparameter k
-    //    k ≈ 2.0 works well as a starting point.
-    const k = 2.0
-    const t = this.clampNum(k * g, 0, 1) // 0=no gap -> base, 1=big gap -> min
-
-    // 3) Interpolate threshold toward minThreshold as gap grows
-    let threshold = this.baseThreshold - (this.baseThreshold - this.minThreshold) * t
-
-    // 4) Endgame: if we have very few seats left and no gap, be pickier
-    if (remaining < 100 && g === 0) {
-      const endgameT = (100 - remaining) / 100 // 0..1
-      threshold = threshold + (this.maxThreshold - threshold) * endgameT * 0.5 // blend up to max a bit
+    // Base: go stricter as urgency rises
+    let threshold = this.baseThreshold
+    if (maxUrgency >= 0.8) {
+      threshold = this.maxThreshold // very strict
+    } else if (maxUrgency >= 0.6) {
+      threshold = this.baseThreshold + 0.7 * (this.maxThreshold - this.baseThreshold)
+    } else if (maxUrgency >= 0.4) {
+      threshold = this.baseThreshold + 0.4 * (this.maxThreshold - this.baseThreshold)
+    } else if (remaining < 100) {
+      threshold = this.baseThreshold + 0.3 * (this.maxThreshold - this.baseThreshold)
     }
 
-    // 5) Sweeten if person helps a currently urgent attribute (based on NEED/remaining)
+    // If the person has a highly urgent attribute, sweeten the threshold
     const person = status.nextPerson.attributes
     for (const c of this.game.constraints) {
       const cur = counts[c.attribute] || 0
       const need = Math.max(0, c.minCount - cur)
-      const urgency = need / remaining // not expected-gap; just "need now"
-      if (urgency > 0.7 && person[c.attribute]) {
-        threshold *= 0.7 // nudge down
+      const u = remaining > 0 ? need / remaining : 0
+      if (u >= 0.6 && person[c.attribute]) {
+        threshold = Math.max(this.minThreshold, threshold * 0.6) // easier if they help
         break
       }
     }
 
-    // 6) Final clamp to absolute bounds
-    return this.clampNum(threshold, this.minThreshold, this.maxThreshold)
+    return Math.max(this.minThreshold, Math.min(this.maxThreshold, threshold))
   }
 
   getProgress(): any {

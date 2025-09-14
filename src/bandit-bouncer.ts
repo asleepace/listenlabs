@@ -97,6 +97,17 @@ const CFG = {
     ctrlGains: { kP: 1.8, kI: 0.6, boostEdge: 0.1, boostFactor: 1.25 }, // ↑ stronger control
   },
 
+  // in CFG (top)
+  AUX: {
+    names: ['well_connected'], // attributes that tend to fill as a side-effect
+    priceScale: 0.25, // default downscale
+    priceWhenOthersUnmet: 0.1, // even lower when any other constraint is unmet
+    hintScale: 0.2, // weaker positive hints
+    antiHintExtra: 0.5, // stronger negative hints when abundant/ahead
+    overshootSlackPeople: 0, // overshoot guard has zero slack for aux attrs
+    corrGate: 0.25, // if corr(aux, unmet) >= this → treat as autofill
+  },
+
   // Feasibility-based late gate
   GATE: {
     hardCutUsed: 0.95,
@@ -1105,6 +1116,25 @@ export class BanditBouncer<T> implements BerghainBouncer {
       if (!best || ratio > best.ratio) best = { c, ratio, lag }
     }
     return { attr: best?.c?.attribute ?? null, ratio: best?.ratio ?? 0, lag: best?.lag ?? 0 }
+  }
+
+  private isAuxAttr(attr: keyof T): boolean {
+    return (CFG.AUX?.names || []).includes(String(attr))
+  }
+
+  private maxPositiveCorrToUnmet(attr: keyof T, unmet: Constraint<T>[]): number {
+    try {
+      const corr = (this.state.game.attributeStatistics?.correlations || {}) as Record<string, Record<string, number>>
+      const row = corr[String(attr)] || {}
+      let m = 0
+      for (const u of unmet) {
+        const v = row[String(u.attribute)]
+        if (typeof v === 'number' && v > m) m = v
+      }
+      return m
+    } catch {
+      return 0
+    }
   }
 
   /* --- bouncer API --- */

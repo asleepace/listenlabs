@@ -7,12 +7,28 @@ import type {
   GameStatusFailed,
   PersonAttributesScenario2,
   BerghainBouncer,
+  ScenarioAttributes,
 } from '../types'
 
 import { NeuralNetBouncer } from './neural-net-bouncer'
 import { SelfPlayTrainer } from './training'
+import { initializeScoring } from './scoring' // adjust path
 import * as fs from 'fs'
 import * as path from 'path'
+
+const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x))
+
+function parseFlags(args: string[]) {
+  const flags: Record<string, string> = {}
+  for (const a of args) {
+    if (a.startsWith('--')) {
+      const i = a.indexOf('=')
+      if (i > 2) flags[a.slice(2, i)] = a.slice(i + 1)
+      else flags[a.slice(2)] = 'true'
+    }
+  }
+  return flags
+}
 
 export class NeuralNetBouncerRunner {
   private bouncer: NeuralNetBouncer | null = null
@@ -20,10 +36,10 @@ export class NeuralNetBouncerRunner {
   private weightsPath: string
   private logPath: string
 
-  constructor(private dataDir: string = '../training', private scenario: '2' = '2') {
+  constructor(private dataDir: string = './bouncer-data', private scenario: '2' = '2') {
     if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true })
-    this.weightsPath = path.join(dataDir, `weights-scenario-${scenario}.json`)
-    this.logPath = path.join(dataDir, `training-log-${scenario}.json`)
+    this.weightsPath = path.resolve(path.join(dataDir, `weights-scenario-${scenario}.json`))
+    this.logPath = path.resolve(path.join(dataDir, `training-log-${scenario}.json`))
   }
 
   private initializeGame(): Game {
@@ -52,9 +68,38 @@ export class NeuralNetBouncerRunner {
     }
   }
 
-  async train(epochs: number = 20, episodesPerEpoch: number = 50): Promise<void> {
+  // ---------- training / resume ----------
+  private writeCheckpoint(trainer: SelfPlayTrainer, epoch: number) {
+    const ckptPath = this.weightsPath.replace(/\.json$/, `.epoch-${epoch}.json`)
+    fs.writeFileSync(ckptPath, JSON.stringify(trainer.getBestWeights(), null, 2))
+    // also refresh "latest" weights each epoch
+    fs.writeFileSync(this.weightsPath, JSON.stringify(trainer.getBestWeights(), null, 2))
+  }
+
+  private appendLog(entry: any) {
+    let log: any = null
+    if (fs.existsSync(this.logPath)) {
+      try {
+        log = JSON.parse(fs.readFileSync(this.logPath, 'utf-8'))
+      } catch {}
+    }
+    if (!log) log = { runs: [] }
+    if (!log?.runs) {
+      log.runs = []
+    }
+    console.log(log.runs)
+    log.runs.push(entry)
+    fs.writeFileSync(this.logPath, JSON.stringify(log, null, 2))
+  }
+
+  async train(epochs = 20, episodesPerEpoch = 50, flags: Record<string, string> = {}): Promise<void> {
     console.log('=== Neural Network Bouncer Training ===\n')
     this.game = this.initializeGame()
+
+    const assistGain = flags.assistGain ? Number(flags.assistGain) : 2.0
+    const oracleRelabelFrac = flags.oracleRelabelFrac ? Number(flags.oracleRelabelFrac) : 0.35
+    const elitePercentile = flags.elitePercentile ? Number(flags.elitePercentile) : 0.2
+    const resumeFlag = flags.resume === 'true' // also supported via separate "resume" command
 
     const trainer = new SelfPlayTrainer(this.game, {
       episodes: episodesPerEpoch,
@@ -62,12 +107,35 @@ export class NeuralNetBouncerRunner {
       learningRate: 0.001,
       explorationStart: 0.9,
       explorationEnd: 0.2,
-      explorationDecay: 0.97, // per-epoch
+      explorationDecay: 0.97,
       successThreshold: 5000,
-      elitePercentile: 0.2,
+      elitePercentile,
+      assistGain,
+      oracleRelabelFrac,
     })
 
-    await trainer.train(epochs)
+    if (resumeFlag && fs.existsSync(this.weightsPath)) {
+      try {
+        const weights = JSON.parse(fs.readFileSync(this.weightsPath, 'utf-8'))
+        trainer.loadWeights(weights)
+        console.log(`[resume] Warm-started from ${this.weightsPath}`)
+      } catch (e) {
+        console.warn('[resume] Failed to load saved weights; starting fresh.', (e as Error).message)
+      }
+    }
+
+    const startedAt = new Date().toISOString()
+
+    await trainer.train(epochs, (summary) => {
+      this.writeCheckpoint(trainer, summary.epoch)
+      this.appendLog({
+        type: 'epoch',
+        scenario: this.scenario,
+        startedAt,
+        timestamp: new Date().toISOString(),
+        summary,
+      })
+    })
 
     console.log('\n=== Testing Trained Network ===\n')
     const testResults = trainer.test(100)
@@ -77,30 +145,36 @@ export class NeuralNetBouncerRunner {
     console.log(`  Best Performance: ${testResults.minRejections} rejections`)
     console.log(`  Worst Performance: ${testResults.maxRejections} rejections`)
 
-    const weights = trainer.getBestWeights()
-    fs.writeFileSync(this.weightsPath, JSON.stringify(weights, null, 2))
+    // Save final weights (+ run summary)
+    fs.writeFileSync(this.weightsPath, JSON.stringify(trainer.getBestWeights(), null, 2))
     console.log(`\nWeights saved to: ${this.weightsPath}`)
 
-    const stats = {
-      timestamp: new Date().toISOString(),
-      epochs,
-      episodesPerEpoch,
+    this.appendLog({
+      type: 'run',
+      scenario: this.scenario,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      params: { epochs, episodesPerEpoch, assistGain, oracleRelabelFrac, elitePercentile, resumeFlag },
       testResults,
       trainingStats: trainer.getStats(),
-    }
-    fs.writeFileSync(this.logPath, JSON.stringify(stats, null, 2))
-    console.log(`Training log saved to: ${this.logPath}`)
+    })
 
     this.bouncer = new NeuralNetBouncer(this.game, { explorationRate: 0, baseThreshold: 0.5 })
     this.bouncer.setNetwork(trainer.getNetwork())
   }
 
+  /** Explicit resume command: always attempts to load weights first. */
+  async resume(epochs = 10, episodesPerEpoch = 50, flags: Record<string, string> = {}): Promise<void> {
+    flags.resume = 'true'
+    await this.train(epochs, episodesPerEpoch, flags)
+  }
+
+  // ---------- load / diagnose / runGame (unchanged except for small guards) ----------
   load(): boolean {
     if (!fs.existsSync(this.weightsPath)) {
       console.log('No saved weights found. Please train first.')
       return false
     }
-
     try {
       const weights = JSON.parse(fs.readFileSync(this.weightsPath, 'utf-8'))
       this.game = this.initializeGame()
@@ -120,21 +194,21 @@ export class NeuralNetBouncerRunner {
     }
   }
 
-  // runner.ts — add inside class NeuralNetBouncerRunner
+  // Greedy score used by diagnose()
   private greedyOracleScore(
     personAttrs: Record<string, boolean>,
     counts: Record<string, number>,
     game: Game,
     admitted: number
   ): number {
-    const remaining = 1000 - admitted
+    const remaining = Math.max(0, 1000 - admitted)
     let score = 0
     for (const c of game.constraints) {
       const current = counts[c.attribute] || 0
       const need = Math.max(0, c.minCount - current)
       if (need <= 0) continue
       const pressure = remaining > 0 ? need / remaining : 0
-      if (personAttrs[c.attribute]) score += 1 + 3 * pressure // matches urgent needs
+      if (personAttrs[c.attribute]) score += 1 + 3 * pressure // favor urgent attributes
     }
     return score
   }
@@ -145,7 +219,7 @@ export class NeuralNetBouncerRunner {
     Object.keys(this.game.attributeStatistics.relativeFrequencies).forEach((k) => (counts[k] = 0))
 
     // build a candidate pool
-    const pool = []
+    const pool: PersonAttributesScenario2[] = []
     for (let i = 0; i < samples; i++) {
       const attrs = this.generatePerson(i)
       const person: PersonAttributesScenario2 = {} as any
@@ -159,7 +233,6 @@ export class NeuralNetBouncerRunner {
     // greedy pick
     const chosen: PersonAttributesScenario2[] = []
     while (chosen.length < 1000 && pool.length > 0) {
-      // rescoring each round keeps urgency updated
       let bestIdx = -1
       let bestScore = -Infinity
       for (let i = 0; i < pool.length; i++) {
@@ -174,7 +247,7 @@ export class NeuralNetBouncerRunner {
       for (const [k, v] of Object.entries(pick)) if (v) counts[k] = (counts[k] || 0) + 1
     }
 
-    console.log('\n=== Feasibility (Greedy Oracle) ===')
+    console.log('\n=== Feasibility (Greedy Oracle over sampled pool) ===')
     for (const c of this.game.constraints) {
       console.log(`  ${c.attribute}: ${counts[c.attribute] || 0}/${c.minCount}`)
     }
@@ -187,9 +260,9 @@ export class NeuralNetBouncerRunner {
   }
 
   runGame(sampleData?: any[]): any {
-    if (!this.bouncer || !this.game) throw new Error('Bouncer not initialized. Call train() or load() first.')
-
-    this.bouncer.reset()
+    if (!this.game) throw new Error('Game not initialized')
+    // We won't rely on this.bouncer’s internal tracker since we decide via scoring.
+    // (You can still load it for other commands.)
 
     let admitted = 0
     let rejected = 0
@@ -197,47 +270,76 @@ export class NeuralNetBouncerRunner {
 
     const getData = sampleData ? () => sampleData[personIndex++] : () => this.generatePerson(personIndex++)
 
-    while (admitted < 1000 && rejected < 20000 && (!sampleData || personIndex < sampleData.length)) {
+    // Seat/line model for decisions
+    const scoring = initializeScoring(this.game, {
+      maxRejections: 20_000,
+      maxAdmissions: 1_000,
+    })
+
+    while (scoring.inProgress() && (!sampleData || personIndex < sampleData.length)) {
       const personData = getData()
 
+      // --- normalize into a full attributes object of booleans ---
       const attributes: PersonAttributesScenario2 = {} as any
-      for (const attr of personData) attributes[attr as keyof PersonAttributesScenario2] = true
+      // start all attrs as false
       for (const key of Object.keys(this.game.attributeStatistics.relativeFrequencies)) {
-        if (!(key in attributes)) attributes[key as keyof PersonAttributesScenario2] = false
+        attributes[key as keyof PersonAttributesScenario2] = false
+      }
+      if (Array.isArray(personData)) {
+        for (const a of personData) {
+          if (a in attributes) attributes[a as keyof PersonAttributesScenario2] = true
+        }
+      } else if (personData && typeof personData === 'object') {
+        for (const [k, v] of Object.entries(personData)) {
+          if (k in attributes) attributes[k as keyof PersonAttributesScenario2] = !!v
+        }
       }
 
-      const status: GameStatusRunning<PersonAttributesScenario2> = {
-        status: 'running',
-        admittedCount: admitted,
-        rejectedCount: rejected,
-        nextPerson: { personIndex, attributes },
-      }
+      // --- decision (your rule-of-thumb combo) ---
 
-      const admit = this.bouncer.admit(status)
+      const guest = attributes as ScenarioAttributes
+      const admit = scoring.shouldAdmit(guest, /*baseTheta=*/ 1.0, /*baseFrac=*/ 0.5)
+
+      // keep global counters for logging and termination
       if (admit) admitted++
       else rejected++
 
-      if (admitted === 1000) {
-        const progress = this.bouncer.getProgress()
-        const satisfied = progress.constraints.every((c: any) => c.satisfied)
-        if (satisfied) {
-          const finalStatus: GameStatusCompleted = { status: 'completed', rejectedCount: rejected, nextPerson: null }
-          return this.bouncer.getOutput(finalStatus)
-        } else {
-          const finalStatus: GameStatusFailed = {
-            status: 'failed',
-            reason: 'Constraints not satisfied',
-            nextPerson: null,
-          }
-          return this.bouncer.getOutput(finalStatus)
-        }
-      }
+      // keep the scorer in sync (it maintains per-quota counts)
+      scoring.update({ guest, admit })
+
+      // optional early exit: if all quotas met and room is full, we can stop
+      if (admitted >= 1000 || scoring.isFinishedWithQuotas()) break
     }
 
-    const finalStatus: GameStatusFailed = { status: 'failed', reason: 'Too many rejections', nextPerson: null }
-    return this.bouncer.getOutput(finalStatus)
+    // --- summarize constraints from scoring’s quota counts ---
+    const constraints = this.game.constraints.map((c) => {
+      const q = scoring.get(c.attribute)
+      const current = q?.count ?? 0
+      return { attribute: c.attribute, current, required: c.minCount, satisfied: current >= c.minCount }
+    })
+    const allMet = constraints.every((c) => c.satisfied)
+
+    // Decide final status
+    if (admitted >= 1000 && allMet) {
+      const result = {
+        status: 'completed',
+        finalRejections: rejected,
+        constraints,
+      }
+      return result
+    }
+
+    const hitRejectionCap = rejected >= 20000
+    const result = {
+      status: 'failed',
+      reason: hitRejectionCap ? 'Too many rejections' : 'Constraints not satisfied',
+      finalRejections: rejected,
+      constraints,
+    }
+    return result
   }
 
+  /** Sample a synthetic person as a list of attribute names set to true. */
   private generatePerson(index: number): string[] {
     if (!this.game) throw new Error('Game not initialized')
 
@@ -245,19 +347,25 @@ export class NeuralNetBouncerRunner {
     const stats = this.game.attributeStatistics
     const samples: Record<string, boolean> = {}
 
-    for (const [attr, freq] of Object.entries(stats.relativeFrequencies)) samples[attr] = Math.random() < freq
+    // base samples
+    for (const [attr, freq] of Object.entries(stats.relativeFrequencies)) {
+      samples[attr] = Math.random() < clamp(freq, 0, 1)
+    }
 
+    // apply correlations (positive -> boost, negative -> reduce)
     for (const [attr1, correlations] of Object.entries(stats.correlations)) {
       if (samples[attr1]) {
         for (const [attr2, corr] of Object.entries(correlations)) {
           if (attr1 !== attr2 && Math.abs(corr) > 0.3) {
-            const adjustedProb = stats.relativeFrequencies[attr2] * (1 + corr * 0.5)
+            const base = stats.relativeFrequencies[attr2] ?? 0
+            const adjustedProb = clamp(base * (1 + corr * 0.5), 0, 1)
             samples[attr2] = Math.random() < adjustedProb
           }
         }
       }
     }
 
+    // pack true attrs
     for (const [attr, hasAttr] of Object.entries(samples)) if (hasAttr) attributes.push(attr)
     return attributes
   }
@@ -271,32 +379,41 @@ export async function main() {
 
   switch (command) {
     case 'train': {
-      const epochs = parseInt(args[1] || '20')
-      const episodes = parseInt(args[2] || '50')
-      await runner.train(epochs, episodes)
+      const epochs = parseInt(args[1] || '20', 10)
+      const episodes = parseInt(args[2] || '50', 10)
+      const flags = parseFlags(args.slice(3))
+      await runner.train(epochs, episodes, flags)
+      break
+    }
+    case 'resume': {
+      // <-- NEW
+      const epochs = parseInt(args[1] || '10', 10)
+      const episodes = parseInt(args[2] || '50', 10)
+      const flags = parseFlags(args.slice(3))
+      await runner.resume(epochs, episodes, flags)
       break
     }
     case 'test': {
       if (!runner.load()) {
-        console.log('Please train the model first: npm run bouncer train')
+        console.log('Please train the model first: bun run src/neural-net/runner train 20')
         break
       }
-      let sampleData = null
+      let sampleData: any[] | null = null
       if (args[1]) {
         try {
           const data = fs.readFileSync(args[1], 'utf-8')
           sampleData = JSON.parse(data)
-          console.log(`Loaded ${sampleData.length} samples from ${args[1]}`)
+          console.log(`Loaded ${sampleData?.length} samples from ${args[1]}`)
         } catch (error) {
-          console.error('Error loading sample data:', error)
+          console.error('Error loading sample data:', (error as Error).message)
         }
       }
       console.log('\n=== Running Test Game ===\n')
-      const result = runner.runGame(sampleData)
+      const result = runner.runGame(sampleData || undefined)
       console.log('Game Result:')
       console.log(`  Status: ${result.status}`)
       console.log(`  Final Rejections: ${result.finalRejections}`)
-      console.log(`  Constraints:`)
+      console.log('  Constraints:')
       result.constraints.forEach((c: any) => {
         const ok = c.satisfied ? '✓' : '✗'
         console.log(`    ${ok} ${c.attribute}: ${c.current}/${c.required}`)
@@ -305,11 +422,11 @@ export async function main() {
     }
     case 'benchmark': {
       if (!runner.load()) {
-        console.log('Please train the model first: npm run bouncer train')
+        console.log('Please train the model first: bun run src/neural-net/runner train 20')
         break
       }
       console.log('\n=== Running Benchmark (10 games) ===\n')
-      const results = []
+      const results: any[] = []
       let successes = 0
       for (let i = 0; i < 10; i++) {
         const result = runner.runGame()
@@ -328,19 +445,22 @@ export async function main() {
           : 0
       console.log(`\nBenchmark Results:`)
       console.log(`  Success Rate: ${((successes / 10) * 100).toFixed(0)}%`)
-      console.log(`  Average Rejections: ${avgRejections.toFixed(0)}`)
+      console.log(`  Average Rejections (successful only): ${avgRejections.toFixed(0)}`)
       break
     }
     case 'diagnose':
-      runner.diagnose(100000)
+      runner.diagnose(100_000)
       break
     default: {
       console.log('Neural Network Bouncer Runner')
       console.log('\nCommands:')
-      console.log('  train [epochs] [episodes]  - Train a new neural network')
-      console.log('  test [datafile]            - Run a single test game')
-      console.log('  benchmark                  - Run 10 games and show statistics')
-      console.log('  diagnose                   - Run 100000 games and show diagnostics')
+      console.log(
+        '  train [epochs] [episodes] [--assistGain=2] [--oracleRelabelFrac=0.35] [--elitePercentile=0.2] [--resume]'
+      )
+      console.log('  resume [epochs] [episodes]  - Continue training from saved weights')
+      console.log('  test [datafile]             - Run a single test game')
+      console.log('  benchmark                   - Run 10 games and show statistics')
+      console.log('  diagnose                    - Greedy feasibility check over a sampled pool')
     }
   }
 }
