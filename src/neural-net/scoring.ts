@@ -186,7 +186,7 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
     /** Seat scarcity (recomputed from current seats left). */
     seatScarcity(): number {
       const seats = Math.max(1, this.getTotalSpotsAvailable())
-      return Math.min(1, 200 / seats)
+      return Math.min(1, 120 / seats)
     },
 
     /** Penalty-style score (lower is better) you can log or use for shaping. */

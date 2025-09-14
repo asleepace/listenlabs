@@ -125,7 +125,7 @@ export class SelfPlayTrainer {
       }
     }
     for (const k of Object.keys(stats.relativeFrequencies)) {
-      ;(attributes as any)[k] = !!samples[k]
+      attributes[k] = !!samples[k]
     }
     return { personIndex: index, attributes }
   }
@@ -325,15 +325,17 @@ export class SelfPlayTrainer {
     counts: Record<string, number>,
     rejected: number,
     hitRejectCap: boolean
-  ): { reward: number; completed: boolean } {
-    let totalShortfall = 0
-    let quadShortfall = 0
-    let totalSurplus = 0
+  ): { reward: number; completed: boolean; shortfalls: Array<{ attr: string; need: number }> } {
+    let totalShortfall = 0,
+      quadShortfall = 0,
+      totalSurplus = 0
+    const shortfalls: Array<{ attr: string; need: number }> = []
 
     for (const c of this.game.constraints) {
       const cur = counts[c.attribute] || 0
       const deficit = Math.max(0, c.minCount - cur)
       const surplus = Math.max(0, cur - c.minCount)
+      if (deficit > 0) shortfalls.push({ attr: c.attribute, need: deficit })
 
       const sw = SHORTFALL_WEIGHTS[c.attribute] ?? 1.0
       const vw = SURPLUS_WEIGHTS[c.attribute] ?? 1.0
@@ -348,21 +350,10 @@ export class SelfPlayTrainer {
     reward -= QUAD_SHORTFALL * quadShortfall
     reward -= BETA_SURPLUS * totalSurplus
 
-    // // Uncomment for debugging misses:
-    // if (totalShortfall > 0) {
-    //   const misses = this.game.constraints
-    //     .map((c) => ({ attr: c.attribute, need: Math.max(0, c.minCount - (counts[c.attribute] || 0)) }))
-    //     .filter((x) => x.need > 0)
-    //     .sort((a, b) => b.need - a.need)
-    //   console.log('[episode.miss]', misses.slice(0, 3))
-    // }
+    const satisfiedAll = shortfalls.length === 0
+    if (!satisfiedAll || hitRejectCap) reward -= LOSS_PENALTY
 
-    const satisfiedAll = totalShortfall === 0
-    if (!satisfiedAll || hitRejectCap) {
-      reward -= LOSS_PENALTY
-    }
-
-    return { reward, completed: satisfiedAll && !hitRejectCap }
+    return { reward, completed: satisfiedAll && !hitRejectCap, shortfalls }
   }
 
   // ---------- training over elite episodes ----------
@@ -507,6 +498,11 @@ export class SelfPlayTrainer {
       const avgAdmittedAll = batch.reduce((s, e) => s + e.admittedAtEnd, 0) / batch.length
       const totalNudges = batch.reduce((s, e) => s + (e.nudgeCount ?? 0), 0)
       const bestEp = batch.reduce((b, e) => (e.reward > b.reward ? e : b), batch[0])
+      const bestEpInfo = this.scoreEpisode(
+        batch[0].countsPerStep.at(-1) ?? {}, // or track final counts explicitly
+        bestEp.rejections,
+        bestEp.admittedAtEnd < 1000 // crude: reject-cap equivalent in your loop
+      )
 
       console.log(`Epoch ${epoch + 1}/${epochs}:`)
       console.log(`  Success rate: ${(successRate * 100).toFixed(1)}%`)
@@ -515,9 +511,13 @@ export class SelfPlayTrainer {
       console.log(`  Training loss: ${loss.toFixed(4)}`)
       console.log(`  Exploration rate: ${exploration.toFixed(3)}`)
       console.log(`  Avg admitted (all episodes): ${avgAdmittedAll.toFixed(1)}`)
+      const label = bestEp.completed ? 'SUCCESS' : 'FAIL'
       console.log(
-        `  Best episode — admitted: ${bestEp.admittedAtEnd}, rejections: ${bestEp.rejections}, reward: ${bestEp.reward}`
+        `  Best episode — (${label}) admitted: ${bestEp.admittedAtEnd}, rejections: ${bestEp.rejections}, reward: ${bestEp.reward}`
       )
+      if (!bestEp.completed && bestEpInfo.shortfalls.length) {
+        console.log('  Missed quotas:', bestEpInfo.shortfalls.map((s) => `${s.attr}:${s.need}`).join(', '))
+      }
       console.log(
         `  Teacher nudges used this epoch: ${totalNudges}, assistProb(now)=${this.assistGainPreview().toFixed(4)}`
       )

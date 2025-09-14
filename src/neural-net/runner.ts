@@ -12,7 +12,6 @@ import { createBerghainNet, NeuralNet } from './neural-net'
 const FEATURE_SIZE = 17 // encoder feature size for scenario 2
 const MAX_ADMISSIONS = 1_000
 const MAX_REJECTIONS = 20_000
-const TARGET_REJECTIONS = 5_000 // explicit, though scoring has a default
 
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x))
 
@@ -335,10 +334,11 @@ export class NeuralNetBouncerRunner {
         }
         // hybrid branch (inside the loop)
         const policyVote = scoring.shouldAdmit(guest, 1.0, 0.5)
+        this.bouncer.setCounts(scoring.getCounts())
         const netVote = this.bouncer.admit(status)
 
         // early: allow either to open the door
-        let admit = policyVote || netVote
+        admit = policyVote || netVote
 
         // late-game veto: only admit if it actually reduces worst expected shortfall
         if (scoring.isRunningOutOfAvailableSpots()) {
