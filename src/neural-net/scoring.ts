@@ -1,6 +1,7 @@
 /** @file scoring.ts */
 
 import type { GameConstraints, GameState, ScenarioAttributes } from '../types'
+import { Conf } from './config'
 import { average, sum, clamp, getAttributes } from './util'
 
 export type Correlation = GameState['game']['attributeStatistics']['correlations'][string]
@@ -71,8 +72,8 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
   const correlations = game.attributeStatistics.correlations
   const frequencies = game.attributeStatistics.relativeFrequencies
 
-  const TARGET_REJECTIONS = config.targetRejections ?? 5_000
-  const CUSHION = config.safetyCushion ?? 1 // you already pass safetyCushion: 1
+  const TARGET_REJECTIONS = config.targetRejections ?? Conf.TARGET_REJECTIONS
+  const CUSHION = config.safetyCushion ?? Conf.SAFETY_CUSHION // you already pass safetyCushion: 1
   const CUSHION_PER_QUOTA = 4 // “4 person cushion” per unmet quota
   const BREATH_MULTIPLIER = 8 // scales when to start getting strict
 
