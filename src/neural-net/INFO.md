@@ -156,6 +156,25 @@ Install deps and run via Bun:
 bun run src/neural-net/runner train 20 50
 ```
 
+## Overnight Training
+
+```bash
+# Phase 1 — shape the policy hard with full relabeling
+nohup bun run src/neural-net/runner train 30 150 \
+  --assistGain=3 \
+  --oracleRelabelFrac=1 \
+  --elitePercentile=0.10 \
+  > train.p1.out 2>&1 &
+
+# (later) Phase 2 — let the net carry more of the load
+nohup bun run src/neural-net/runner resume 30 150 \
+  --assistGain=3 \
+  --oracleRelabelFrac=0.5 \
+  --elitePercentile=0.10 \
+  > train.p2.out 2>&1 &
+
+```
+
 ## Test the latest weights
 
 ```bash
