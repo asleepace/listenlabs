@@ -1,22 +1,18 @@
 /** @file runner.ts */
 
-import type {
-  Game,
-  GameStatusRunning,
-  GameStatusCompleted,
-  GameStatusFailed,
-  PersonAttributesScenario2,
-  BerghainBouncer,
-  ScenarioAttributes,
-} from '../types'
+import type { Game, GameStatusRunning, PersonAttributesScenario2, BerghainBouncer, ScenarioAttributes } from '../types'
 
 import { NeuralNetBouncer } from './neural-net-bouncer'
 import { SelfPlayTrainer } from './training'
 import { initializeScoring } from './scoring'
 import * as fs from 'fs'
 import * as path from 'path'
-import { StateEncoder } from './state-encoder'
-import { createBerghainNet } from './neural-net'
+import { createBerghainNet, NeuralNet } from './neural-net'
+
+const FEATURE_SIZE = 17 // encoder feature size for scenario 2
+const MAX_ADMISSIONS = 1_000
+const MAX_REJECTIONS = 20_000
+const TARGET_REJECTIONS = 5_000 // explicit, though scoring has a default
 
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x))
 
@@ -87,7 +83,6 @@ export class NeuralNetBouncerRunner {
     }
     if (!log) log = { runs: [] }
     if (!log?.runs) log.runs = []
-    console.log(log.runs)
     log.runs.push(entry)
     fs.writeFileSync(this.logPath, JSON.stringify(log, null, 2))
   }
@@ -188,9 +183,14 @@ export class NeuralNetBouncerRunner {
         urgencyFactor: 2.0,
       })
 
-      // 🔑 Instead of bouncer.loadWeights(...), instantiate a net and load into it:
-      const net = createBerghainNet(17) // or encoder.getFeatureSize() if available here
-      ;(net as any).fromJSON?.(weights) || (net as any).loadJSON?.(weights) || (net as any).load?.(weights)
+      // Prefer static loader; fall back to instance methods if present.
+      let net: NeuralNet
+      try {
+        net = NeuralNet.fromJSON(weights)
+      } catch {
+        net = createBerghainNet(FEATURE_SIZE)
+        ;(net as any).fromJSON?.(weights) || (net as any).loadJSON?.(weights) || (net as any).load?.(weights)
+      }
       this.bouncer.setNetwork(net)
 
       console.log('Weights loaded successfully!')
@@ -208,7 +208,7 @@ export class NeuralNetBouncerRunner {
     game: Game,
     admitted: number
   ): number {
-    const remaining = Math.max(0, 1000 - admitted)
+    const remaining = Math.max(0, MAX_ADMISSIONS - admitted)
     let score = 0
     for (const c of game.constraints) {
       const current = counts[c.attribute] || 0
@@ -239,7 +239,7 @@ export class NeuralNetBouncerRunner {
 
     // greedy pick
     const chosen: PersonAttributesScenario2[] = []
-    while (chosen.length < 1000 && pool.length > 0) {
+    while (chosen.length < MAX_ADMISSIONS && pool.length > 0) {
       let bestIdx = -1
       let bestScore = -Infinity
       for (let i = 0; i < pool.length; i++) {
@@ -276,8 +276,9 @@ export class NeuralNetBouncerRunner {
     const getData = sampleData ? () => sampleData[personIndex++] : () => this.generatePerson(personIndex++)
 
     const scoring = initializeScoring(this.game, {
-      maxRejections: 20_000,
-      maxAdmissions: 1_000,
+      maxRejections: MAX_REJECTIONS,
+      maxAdmissions: MAX_ADMISSIONS,
+      targetRejections: TARGET_REJECTIONS,
     })
 
     while (scoring.inProgress() && (!sampleData || personIndex < sampleData.length)) {
@@ -327,7 +328,7 @@ export class NeuralNetBouncerRunner {
       else rejected++
 
       scoring.update({ guest, admit })
-      if (admitted >= 1000 || scoring.isFinishedWithQuotas()) break
+      if (admitted >= MAX_ADMISSIONS || scoring.isFinishedWithQuotas()) break
     }
 
     // summarize
@@ -338,10 +339,10 @@ export class NeuralNetBouncerRunner {
     })
     const allMet = constraints.every((c) => c.satisfied)
 
-    if (admitted >= 1000 && allMet) {
+    if (admitted >= MAX_ADMISSIONS && allMet) {
       return { status: 'completed', finalRejections: rejected, constraints }
     }
-    const hitRejectionCap = rejected >= 20000
+    const hitRejectionCap = rejected >= MAX_REJECTIONS
     return {
       status: 'failed',
       reason: hitRejectionCap ? 'Too many rejections' : 'Constraints not satisfied',
@@ -393,12 +394,16 @@ export async function main() {
     case 'train': {
       const epochs = parseInt(args[1] || '20', 10)
       const episodes = parseInt(args[2] || '50', 10)
+      console.log(`Weights: ${path.resolve(runner['weightsPath'])}`)
+      console.log(`Logs:    ${path.resolve(runner['logPath'])}`)
       await runner.train(epochs, episodes, flags)
       break
     }
     case 'resume': {
       const epochs = parseInt(args[1] || '10', 10)
       const episodes = parseInt(args[2] || '50', 10)
+      console.log(`Weights: ${path.resolve(runner['weightsPath'])}`)
+      console.log(`Logs:    ${path.resolve(runner['logPath'])}`)
       await runner.resume(epochs, episodes, flags)
       break
     }
@@ -418,7 +423,9 @@ export async function main() {
         }
       }
       console.log('\n=== Running Test Game ===\n')
-      const result = runner.runGame(sampleData || undefined)
+      console.log(`Mode: ${mode}`)
+      const result = runner.runGame(sampleData || undefined, mode)
+
       console.log('Game Result:')
       console.log(`  Status: ${result.status}`)
       console.log(`  Final Rejections: ${result.finalRejections}`)
@@ -435,10 +442,11 @@ export async function main() {
         break
       }
       console.log('\n=== Running Benchmark (10 games) ===\n')
+      console.log(`Mode: ${mode}`)
       const results: any[] = []
       let successes = 0
       for (let i = 0; i < 10; i++) {
-        const result = runner.runGame()
+        const result = runner.runGame(undefined, mode)
         results.push(result)
         if (result.status === 'completed') {
           successes++
@@ -468,7 +476,7 @@ export async function main() {
       )
       console.log('  test [datafile] [--mode=score|bouncer|hybrid]    - Run a single test game')
       console.log('  resume [epochs] [episodes]                       - Continue training from saved weights')
-      console.log('  benchmark                                        - Run 10 games and show statistics')
+      console.log('  benchmark [--mode=score|bouncer|hybrid]          - Run 10 games and show statistics')
       console.log('  diagnose                                         - Greedy feasibility check over a sampled pool')
     }
   }
