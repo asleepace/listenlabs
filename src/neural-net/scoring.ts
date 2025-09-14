@@ -136,11 +136,6 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
     return bonus
   }
 
-  /** Seat scarcity in [0..1]: closer to 1 when seats are getting scarce. */
-  const seatScarcity = (seatsLeft: number): number => {
-    return clamp(0, 120 / Math.max(1, seatsLeft), 1) // was 200 / seatsLeft
-  }
-
   return {
     peopleInLine: config.maxRejections,
     admitted: 0,
@@ -236,7 +231,7 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
 
       // optional tiny debug remains...
       if (before > 0) {
-        const scarcity = seatScarcity(seatsLeft)
+        const scarcity = this.seatScarcity()
         // ↓ require smaller improvement; earlier it was 0.05 + 0.25*scarcity
         const tighten = 0.02 + 0.15 * scarcity
         return delta >= tighten * Math.min(1, before)
@@ -245,6 +240,10 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
       const byScore = this.admitByScore(guest, baseTheta)
       const byFraction = this.admitByFraction(guest, baseFrac)
       return byScore || byFraction
+    },
+    /** returns the current counts of each quota */
+    getCounts(): Record<string, number> {
+      return Object.fromEntries(Object.entries(quotas).map(([key, value]) => [key, value.count]))
     },
 
     /** how many of the unmet quotas this guest hits */
@@ -278,7 +277,7 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
       if (totalQuotas.length === 0) return true
 
       const seats = Math.max(1, this.getTotalSpotsAvailable())
-      const scarcity = seatScarcity(seats)
+      const scarcity = this.seatScarcity()
 
       const seatProgress = this.getTotalProgress()
       const quotaProgress = this.getQuotaProgress() // 1.0 = on pace; >1 behind
@@ -293,7 +292,7 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
     /** Admit using numeric urgency score with dynamic threshold. */
     admitByScore(guest: ScenarioAttributes, baseTheta = 1.0): boolean {
       const seats = Math.max(1, this.getTotalSpotsAvailable())
-      const scarcity = seatScarcity(seats)
+      const scarcity = this.seatScarcity()
       const score = this.guestScore(guest)
       const quotaBehind = Math.max(0, this.getQuotaProgress() - 1.0)
       const theta = baseTheta + 0.6 * scarcity + 0.4 * Math.min(1, quotaBehind)

@@ -49,7 +49,8 @@ const SHORTFALL_WEIGHTS: Record<string, number> = {
 }
 
 const SURPLUS_WEIGHTS: Record<string, number> = {
-  creative: 1.6, // penalize 'creative' overshoot
+  // creative: 1.6, // penalize 'creative' overshoot
+  well_connected: 1.8,
   // others default to 1.0
 }
 

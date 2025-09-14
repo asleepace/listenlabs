@@ -289,9 +289,6 @@ export class NeuralNetBouncerRunner {
       maxAdmissions: 1_000,
       targetRejections: 5_500,
       safetyCushion: 1,
-      weights: {
-        // override here...
-      },
     })
 
     while (scoring.inProgress() && (!sampleData || personIndex < sampleData.length)) {
@@ -326,6 +323,7 @@ export class NeuralNetBouncerRunner {
           rejectedCount: rejected,
           nextPerson: { personIndex, attributes },
         }
+        this.bouncer.setCounts(scoring.getCounts())
         admit = this.bouncer.admit(status)
       } else if (mode === 'hybrid') {
         if (!this.bouncer) throw new Error('Bouncer not initialized')
@@ -335,10 +333,20 @@ export class NeuralNetBouncerRunner {
           rejectedCount: rejected,
           nextPerson: { personIndex, attributes },
         }
+        // hybrid branch (inside the loop)
         const policyVote = scoring.shouldAdmit(guest, 1.0, 0.5)
         const netVote = this.bouncer.admit(status)
-        // Gate by policy: only admit when policy says YES; net adds extra conservatism
-        admit = policyVote && netVote
+
+        // early: allow either to open the door
+        let admit = policyVote || netVote
+
+        // late-game veto: only admit if it actually reduces worst expected shortfall
+        if (scoring.isRunningOutOfAvailableSpots()) {
+          const before = scoring.worstExpectedShortfall(scoring.getPeopleLeftInLine())
+          const after = scoring.worstExpectedShortfall(Math.max(0, scoring.getPeopleLeftInLine() - 1), guest)
+          const helpsWorstGap = after + 1e-9 < before
+          admit = admit && helpsWorstGap
+        }
       } else {
         // score-only
         admit = scoring.shouldAdmit(guest, 1.0, 0.5)
