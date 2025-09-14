@@ -83,7 +83,9 @@ export class NeuralNet {
       current = output
     }
 
-    return current.toArray()
+    const out = current.toArray()
+    for (let i = 0; i < out.length; i++) if (!Number.isFinite(out[i])) out[i] = 0.5
+    return out
   }
 
   /** Alias for readability in callers that expect `infer(...)`. */
@@ -96,25 +98,27 @@ export class NeuralNet {
       throw new Error('Must call forward() before backward()')
     }
 
-    const targetMatrix = typeof target === 'number' ? new Matrix(1, 1, [target]) : Matrix.fromArray(target).transpose()
+    const targetArray = typeof target === 'number' ? [target] : (target as number[])
+    // Label smoothing: 0→0.02, 1→0.98
+    const ySmooth = targetArray.map((t) => t * 0.96 + 0.02)
+    const targetMatrix = Matrix.fromArray(ySmooth).transpose()
     const outputLayer = this.layers[this.layers.length - 1]
     const output = this.layerOutputs[this.layerOutputs.length - 1]
 
     // Loss gradient:
     // For sigmoid output, use BCE-style gradient: dL/dz = (ŷ - y)
-    // For tanh/linear we keep the old chain.
-    // BCE + sigmoid head: dL/dz = y_hat - y  (stable, avoids saturation)
+    // BCE + sigmoid head: dL/dz = y_hat - y_smooth
     let delta: Matrix
     if (outputLayer.activation === 'sigmoid') {
       delta = output.subtract(targetMatrix)
     } else {
-      // fallback: MSE for non-sigmoid heads
+      // Fallback for non-sigmoid heads
       delta = output.subtract(targetMatrix).scale(2 / output.cols)
       if (outputLayer.activation === 'tanh') {
         delta = delta.hadamard(output.map((y) => gradients.tanh(y)))
       }
     }
-    // tiny clip to prevent occasional spikes
+    // Small clip on delta to stop rare spikes
     const CLIP = 5
     delta = delta.map((v) => Math.max(-CLIP, Math.min(CLIP, v)))
 
@@ -124,14 +128,34 @@ export class NeuralNet {
       const layer = this.layers[i]
       const layerInput = this.layerInputs[i]
 
-      const weightGrad = layerInput.transpose().dot(delta)
-      const biasGrad = delta.copy()
+      let weightGrad = layerInput.transpose().dot(delta)
+      let biasGrad = delta.copy()
+
+      // Gradient-norm clipping (per-layer)
+      const gradNorm =
+        Math.sqrt(weightGrad.data.reduce((s, v) => s + v * v, 0) + biasGrad.data.reduce((s, v) => s + v * v, 0)) + 1e-12
+      const MAX_NORM = 10
+      const scale = Math.min(1, MAX_NORM / gradNorm)
+      if (scale < 1) {
+        weightGrad = weightGrad.scale(scale)
+        biasGrad = biasGrad.scale(scale)
+      }
 
       // L2 regularization
       const weightUpdate = weightGrad.add(layer.weights.scale(this.l2Lambda)).scale(this.learningRate)
 
       layer.weights = layer.weights.subtract(weightUpdate)
       layer.bias = layer.bias.subtract(biasGrad.scale(this.learningRate))
+
+      // Sanitize weights/bias (no NaN/Inf)
+      for (let k = 0; k < layer.weights.data.length; k++) {
+        const v = layer.weights.data[k]
+        layer.weights.data[k] = Number.isFinite(v) ? Math.max(Math.min(v, 1e6), -1e6) : 0
+      }
+      for (let k = 0; k < layer.bias.data.length; k++) {
+        const v = layer.bias.data[k]
+        layer.bias.data[k] = Number.isFinite(v) ? Math.max(Math.min(v, 1e6), -1e6) : 0
+      }
 
       if (i > 0) {
         delta = delta.dot(layer.weights.transpose())
@@ -174,7 +198,8 @@ export class NeuralNet {
         }
 
         const output = this.forward(input)
-        // Label smoothing: 0→0.02, 1→0.98
+
+        // BCE loss with the same smoothed label we use in backward
         const y = target[0] * 0.96 + 0.02
         const yhat = output[0]
         const eps = 1e-7
@@ -182,7 +207,7 @@ export class NeuralNet {
         const loss = -(y * Math.log(yhatClamped) + (1 - y) * Math.log(1 - yhatClamped))
 
         epochLoss += loss
-        this.backward(target)
+        this.backward([target[0]])
       }
       totalLoss = epochLoss / inputs.length
     }
@@ -267,8 +292,8 @@ export class NeuralNet {
 }
 
 // Clean, input-size-first topology.
-export function createBerghainNet(inputSize: number): NeuralNet {
-  const net = new NeuralNet(0.0007, 0.0001)
+export function createBerghainNet(inputSize: number = 17): NeuralNet {
+  const net = new NeuralNet(0.0003, 0.00001)
   net.addLayer(inputSize, 64, 'relu', 'he')
   net.addLayer(64, 32, 'relu', 'he')
   net.addLayer(32, 1, 'sigmoid', 'xavier')

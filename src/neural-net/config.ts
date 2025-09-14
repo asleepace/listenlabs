@@ -39,7 +39,7 @@ export namespace Conf {
    * Keep the classifier from collapsing to "deny" (raise if deny happy)
    * @default 0.5
    */
-  export const POS_MIN = 0.5
+  export const POS_MIN = 0.55
 
   /**
    * Training specific configuration.
