@@ -58,7 +58,7 @@ export async function initializeNeuralNetwork(initialState: GameState): Promise<
   const outputFile = `data/random-sample-${+new Date()}.json`
 
   const saveRandomSample = () => {
-    Disk.saveJsonFile(`data/random-sample-${+new Date()}.json`, trainingData).catch(console.warn)
+    Disk.saveJsonFile(outputFile, trainingData).catch(console.warn)
   }
 
   return {
@@ -77,6 +77,7 @@ export async function initializeNeuralNetwork(initialState: GameState): Promise<
       if (trainingData.length % 100 === 0) saveRandomSample()
 
       return {
+        currentIndex: trainingData.length,
         decision: lastAdmit,
         attributes,
         admitted: scoring.admitted,

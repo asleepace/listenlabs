@@ -7,6 +7,7 @@ import { StateEncoder } from './state-encoder'
 import { initializeScoring } from './scoring'
 import { Conf } from './config'
 import { clamp, toFixed } from './util'
+import { Disk } from '../utils/disk'
 
 interface Episode {
   admittedPrefix: number[] // admitted count before each decision
@@ -33,6 +34,38 @@ interface TrainingConfig {
   teacherAssistProb?: number // legacy; not used directly
   assistGain?: number // k for adaptive assist
   oracleRelabelFrac?: number // fraction of elite samples to relabel with oracle [0..1]
+  dataset?: ScenarioAttributes[]
+}
+
+function shuffle<T>(data: T[]) {
+  // Unbiased Fisher–Yates shuffle
+  for (let i = data.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[data[i], data[j]] = [data[j], data[i]]
+  }
+  return data
+}
+
+export async function getSampleGame(filePath = 'data/smaples/sample-01.json'): Promise<PersonAttributesScenario2[]> {
+  const guests = await Disk.getJsonFile<PersonAttributesScenario2[][]>(filePath)
+  if (!guests || !Array.isArray(guests)) throw new Error(`Training: Invalid Game Data!`)
+  const copy = (): PersonAttributesScenario2 => ({
+    berlin_local: false,
+    well_connected: false,
+    creative: false,
+    techno_lover: false,
+  })
+  // convert tuples to objects
+  const guestList = guests.map((attributes) => {
+    return attributes.reduce(
+      (out, attribute) => ({
+        ...out,
+        [attribute as any]: true,
+      }),
+      copy()
+    )
+  })
+  return shuffle(guestList)
 }
 
 export class SelfPlayTrainer {
@@ -43,6 +76,9 @@ export class SelfPlayTrainer {
   private encoder: StateEncoder
   private config: TrainingConfig
   private resumedFromWeights = false
+
+  private dataset?: ScenarioAttributes[]
+  private datasetPtr = 0
 
   private bestEpisode: Episode | null = null
   private trainingStats: {
@@ -58,6 +94,8 @@ export class SelfPlayTrainer {
     this.encoder = new StateEncoder(game)
     this.net = createBerghainNet(this.encoder.getFeatureSize())
     console.log('[Net] featureSize =', this.encoder.getFeatureSize())
+
+    this.dataset = config?.dataset
 
     this.config = {
       episodes: 100,
@@ -86,8 +124,24 @@ export class SelfPlayTrainer {
     this.resumedFromWeights = true
   }
 
+  resetDatasetOrdering() {
+    if (!this.dataset) throw new Error('Training: Missing data set!')
+    this.dataset = shuffle(this.dataset)
+    this.datasetPtr = 0
+  }
+
+  nextPersonInDataset(personIndex: number): Person<PersonAttributesScenario2> {
+    if (!this.dataset) throw new Error('Training: Missing data set!')
+    if (this.datasetPtr >= this.dataset.length) this.resetDatasetOrdering()
+    const attributes = this.dataset.at(this.datasetPtr++) as PersonAttributesScenario2
+    if (!attributes) throw new Error('Training: Failed to load next guest: ' + this.datasetPtr)
+    return { attributes, personIndex }
+  }
+
   // ---------- synthetic generator ----------
   private generatePerson(index: number): Person<PersonAttributesScenario2> {
+    if (this.dataset) return this.nextPersonInDataset(index)
+
     const attributes: PersonAttributesScenario2 = {} as any
     const stats = this.game.attributeStatistics
     const samples: Record<string, boolean> = {}
@@ -425,6 +479,7 @@ export class SelfPlayTrainer {
     let exploration = this.resumedFromWeights ? this.config.explorationEnd : this.config.explorationStart
 
     for (let epoch = 0; epoch < epochs; epoch++) {
+      if (this.dataset) this.resetDatasetOrdering()
       const batch: Episode[] = []
       let successCount = 0
       let totalRejections = 0

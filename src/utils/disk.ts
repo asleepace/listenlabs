@@ -10,9 +10,7 @@ export namespace Disk {
   /**
    * Returns an array of all files in the specified directory.
    */
-  export async function getFilePathsInDir(
-    pattern = 'data/*'
-  ): Promise<string[]> {
+  export async function getFilePathsInDir(pattern = 'data/*'): Promise<string[]> {
     console.log(`[disk] reading files from directory: "${pattern}"`)
     const filePaths: string[] = []
     const glob = new Glob(pattern)
@@ -55,10 +53,7 @@ export namespace Disk {
   /**
    *  Simple help for saving JSON.
    */
-  export async function saveJsonFile<T extends {}>(
-    filePath: string,
-    jsonData: T
-  ) {
+  export async function saveJsonFile<T extends {}>(filePath: string, jsonData: T) {
     try {
       const file = Bun.file(filePath)
       await file.write(JSON.stringify(jsonData, null, 2))
@@ -68,5 +63,15 @@ export namespace Disk {
       console.log(jsonData)
       return undefined
     }
+  }
+
+  /**
+   *  Simple help for saving JSON.
+   */
+  export async function getJsonFile<T extends {}>(filePath: string) {
+    const file = Bun.file(filePath)
+    const data = await file.json()
+    if (!data) throw new Error(`Disk: failed to load file "${filePath}"`)
+    return data as T
   }
 }

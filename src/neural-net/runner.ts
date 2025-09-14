@@ -3,7 +3,7 @@
 import type { Game, GameStatusRunning, PersonAttributesScenario2, BerghainBouncer, ScenarioAttributes } from '../types'
 
 import { NeuralNetBouncer } from './neural-net-bouncer'
-import { SelfPlayTrainer } from './training'
+import { getSampleGame, SelfPlayTrainer } from './training'
 import { initializeScoring } from './scoring'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -11,6 +11,8 @@ import { createBerghainNet, NeuralNet } from './neural-net'
 import { clamp, parseFlags } from './util'
 import { Conf } from './config'
 import { StateEncoder } from './state-encoder'
+import { Disk } from '../utils/disk'
+import { Try } from '@asleepace/try'
 
 type RunGameIteration = {
   status: GameStatusRunning<ScenarioAttributes>
@@ -87,6 +89,12 @@ export class NeuralNetBouncerRunner {
     const elitePercentile = flags.elitePercentile ? Number(flags.elitePercentile) : 0.2
     const resumeFlag = flags.resume === 'true' // also supported via separate "resume" command
 
+    // optional dataset for training
+    const datafile = (flags.datafile || flags.data || '') as string
+    const optionalDataset = await Try.catch(async () => {
+      return await getSampleGame(datafile)
+    })
+
     const trainer = new SelfPlayTrainer(this.game, {
       episodes: episodesPerEpoch,
       batchSize: 32,
@@ -98,6 +106,7 @@ export class NeuralNetBouncerRunner {
       elitePercentile,
       assistGain,
       oracleRelabelFrac,
+      dataset: optionalDataset.unwrapOr(undefined),
     })
 
     if (resumeFlag && fs.existsSync(this.weightsPath)) {
