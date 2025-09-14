@@ -180,7 +180,7 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
       for (const q of this.quotas()) {
         const cur = q.count + (guest && guest[q.attribute] ? 1 : 0)
         const expectedFuture = Math.max(0, peopleLeftInLine) * Math.max(0, q.frequency)
-        const target = q.minCount
+        const target = q.minCount + CUSHION // <— was q.minCount
         const gap = Math.max(0, target - (cur + expectedFuture))
         if (gap > worst) worst = gap
       }
@@ -190,28 +190,26 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
     /** Seat scarcity (recomputed from current seats left). */
     seatScarcity(): number {
       const seats = Math.max(1, this.getTotalSpotsAvailable())
-      return Math.min(1, 120 / seats)
+      const k = Math.max(60, Math.min(180, Math.round(0.15 * config.maxAdmissions))) // ~15% of capacity
+      return Math.min(1, k / seats)
     },
 
     /** Penalty-style score (lower is better) you can log or use for shaping. */
     getLossScore() {
       let unmet = 0
       const terms: number[] = []
-
       for (const q of Object.values(quotas)) {
         const gap = Math.abs(q.count - q.minCount)
-        if (q.isComplete()) {
-          terms.push(gap * pw.overagePerHead!) // mild overage cost
-        } else {
+        if (q.isComplete()) terms.push(gap * pw.overagePerHead!)
+        else {
           unmet++
-          terms.push(gap * pw.shortfallPerHead!) // stronger shortfall cost
+          terms.push(gap * pw.shortfallPerHead!)
         }
       }
-
       const completionPenalty = unmet === 0 ? average(terms) : sum(terms) + pw.unmetQuotaConstant! * unmet
 
-      const peopleSeen = this.getTotalPeopleSeen()
-      let delta = (peopleSeen - TARGET_REJECTIONS) * pw.targetPerPerson!
+      // use rejections vs targetRejections
+      let delta = (this.rejected - TARGET_REJECTIONS) * pw.targetPerPerson!
       if (delta < 0) delta = Math.max(delta, -pw.targetBonusCap!)
       else delta = Math.min(delta, pw.targetPenaltyCap!)
 
@@ -266,7 +264,7 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
 
     /** Numeric guest score built from urgencies + rare-combo bonus. */
     guestScore(guest: ScenarioAttributes): number {
-      const attrs = getAttributes(guest).filter((a) => quotas[a].inProgress())
+      const attrs = getAttributes(guest).filter((a) => quotas[a]?.inProgress?.())
       if (!attrs.length) return 0
       const peopleLeft = this.getPeopleLeftInLine()
       let score = 0
