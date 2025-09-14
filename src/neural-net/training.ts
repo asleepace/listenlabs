@@ -104,13 +104,15 @@ export class SelfPlayTrainer {
     console.log('[Net] featureSize =', this.encoder.getFeatureSize())
 
     this.dataset = config?.dataset
+    const hasDataset = !!this.dataset
 
     this.config = {
       episodes: 100,
       batchSize: 32,
       learningRate: 0.0003, // was 0.001
-      explorationStart: 0.7, // a bit lower to stabilize early play
-      explorationEnd: 0.2,
+      // lower exploration if dataset is present to increase stability
+      explorationStart: hasDataset ? 0.4 : 0.7,
+      explorationEnd: hasDataset ? 0.1 : 0.2,
       explorationDecay: 0.95, // slightly slower anneal
       successThreshold: 5000,
       elitePercentile: 0.1, // was 0.2 (more variety than 0.05, still selective)

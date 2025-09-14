@@ -25,6 +25,9 @@ bun run src/neural-net/runner benchmark --mode=hybrid
 # Test on a fixed dataset (optional)
 bun run src/neural-net/runner test ./fixtures/samples.json --mode=hybrid
 
+# Train on a specific dataset:
+bun run src/neural-net/runner train 10 60 --data=./data/samples/sample-01.json --elitePercentile=0.10 --assistGain=3 --oracleRelabelFrac=0.5
+
 ### --- Training w/ Warm Start ---
 
 # Re-align + warm train
