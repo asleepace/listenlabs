@@ -102,7 +102,7 @@ export class NeuralNetBouncerRunner {
       explorationStart: 0.9,
       explorationEnd: 0.2,
       explorationDecay: 0.97,
-      successThreshold: 5000,
+      successThreshold: 4_000,
       elitePercentile,
       assistGain,
       oracleRelabelFrac,

@@ -89,12 +89,12 @@ export class NeuralNetBouncer implements BerghainBouncer {
 
   /** Progress-aware threshold with safe bounds */
   private dynamicThreshold(status: GameStatusRunning<any>): number {
-    const base = this.cfg.baseThreshold ?? 0.32
+    const base = this.cfg.baseThreshold ?? 0.3 // a hair lower early
     const minT = this.cfg.minThreshold ?? 0.22
-    const maxT = this.cfg.maxThreshold ?? 0.62
-    const urgency = this.cfg.urgencyFactor ?? 1.0
+    const maxT = this.cfg.maxThreshold ?? 0.65 // allow a tad higher late
+    const urgency = this.cfg.urgencyFactor ?? 2.5 // steeper rise
     const progress = Math.min(1, status.admittedCount / Math.max(1, Conf.MAX_ADMISSIONS))
-    const theta = base + 0.18 * urgency * progress
+    const theta = base + 0.22 * urgency * progress
     return Math.max(minT, Math.min(maxT, theta))
   }
 
@@ -165,7 +165,6 @@ export class NeuralNetBouncer implements BerghainBouncer {
     if (!NeuralNet.isNeuralNet(this.net)) {
       throw new Error('NeuralNetBouncer: Neural net is not defined!')
     }
-
     if (!counts) {
       throw new Error('NeuralNetBouncer: Missing counts!')
     }
@@ -178,10 +177,13 @@ export class NeuralNetBouncer implements BerghainBouncer {
 
     // Call your NN. Prefer `forward`, else fall back to `inference`.
     const raw = this.net.forward?.(x) ?? this.net.infer(x)
-    const p = this.toProbability(raw)
-    const theta = this.dynamicThreshold(status)
+    const pRaw = this.toProbability(raw)
+    const p = Number.isFinite(pRaw) ? Math.max(0, Math.min(1, pRaw)) : 0.5
 
-    // Check the current quotas to prevent overfilling
+    // Base dynamic threshold
+    let theta = this.dynamicThreshold(status)
+
+    // Check current unmet quotas to prevent overfilling
     const needed = this.unmetNeeds(counts)
     const [required, critical] = this.getSafetyGates(status, needed)
 
@@ -190,20 +192,36 @@ export class NeuralNetBouncer implements BerghainBouncer {
       return true
     }
 
+    // Hard gates
     if (required.length) {
-      const hasRequired = required.every((a) => guest[a])
-      if (!hasRequired) return false
+      // "required" = must have ALL of these attrs
+      const hasAllRequired = required.every((a) => guest[a])
+      if (!hasAllRequired) return false
     }
     if (critical.length) {
-      const hasCritical = critical.some((a) => guest[a])
-      if (!hasCritical) return false
+      // "critical" = must have AT LEAST ONE of these attrs
+      const hasSomeCritical = critical.some((a) => guest[a])
+      if (!hasSomeCritical) return false
     }
 
-    // epsilon-greedy
+    // Soft bias: if guest helps unmet quotas, lower the bar a touch
+    const hasUnmet = Object.keys(needed).some((a) => guest[a])
+    if (hasUnmet) theta -= 0.04
+
+    // Extra nudge if guest matches the single most-needed attribute
+    const topAttr = Object.entries(needed).sort((a, b) => b[1] - a[1])[0]?.[0]
+    if (topAttr && guest[topAttr]) theta -= 0.03
+
+    // Clamp final threshold to safe bounds
+    const minT = this.cfg.minThreshold ?? 0.22
+    const maxT = this.cfg.maxThreshold ?? 0.62
+    theta = Math.max(minT, Math.min(maxT, theta))
+
+    // epsilon-greedy (disabled in prod via cfg.explorationRate=0)
     const eps = this.cfg.explorationRate ?? 0
     if (eps > 0 && Math.random() < eps) return Math.random() < 0.5
 
-    // decide to let them in or not
+    // Final decision
     return p >= theta
   }
 
