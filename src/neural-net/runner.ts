@@ -489,6 +489,15 @@ export async function main() {
       console.log(`  Average Rejections (successful only): ${avgRejections.toFixed(0)}`)
       break
     }
+    case 'sanity': {
+      const out1 = await Bun.$`bun run src/neural-net/runner test "" --mode=score`.text()
+      const out2 = await Bun.$`bun run src/neural-net/runner test "" --mode=bouncer`.text()
+      const out3 = await Bun.$`bun run src/neural-net/runner test "" --mode=hybrid`.text()
+      console.log(out1)
+      console.log(out2)
+      console.log(out3)
+      return
+    }
     case 'diagnose':
       runner.diagnose(100_000)
       break
@@ -502,6 +511,7 @@ export async function main() {
       console.log('  resume [epochs] [episodes]                       - Continue training from saved weights')
       console.log('  benchmark [--mode=score|bouncer|hybrid]          - Run 10 games and show statistics')
       console.log('  diagnose                                         - Greedy feasibility check over a sampled pool')
+      console.log('  sanity                                           - run tests in all three modes (alias)')
     }
   }
 }

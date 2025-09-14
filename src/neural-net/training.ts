@@ -250,13 +250,12 @@ export class SelfPlayTrainer {
       if (usePolicyFusion) {
         const policyVote = scoring.shouldAdmit(guest, 1.0, 0.5)
         const helpsWorstGap = this.oracleShouldAdmit(trueCounts, person.attributes, admitted)
-        const seatsLeft = 1000 - admitted
 
         // Allow scoring to open doors when NN denied
-        if (!admit && policyVote) admit = true
+        admit = policyVote || admit
 
-        // Late-game veto: if NN wants to admit but it doesn't help the worst gap, veto.
-        if (admit && !helpsWorstGap && seatsLeft <= 200) {
+        // Late-game veto: if we're running out of seats AND this admit doesn't help the worst gap, deny.
+        if (admit && scoring.isRunningOutOfAvailableSpots() && !helpsWorstGap) {
           admit = false
         }
       }
@@ -480,8 +479,9 @@ export class SelfPlayTrainer {
       let totalRejections = 0
 
       for (let ep = 0; ep < this.config.episodes; ep++) {
-        // Last 3 epochs: evaluate the pure model (no teacher, no fusion) to prevent over-dependence
-        const isFinishing = epoch >= epochs - 3
+        const finishingStart = Math.max(0, epochs - 3)
+        const isFinishing = epoch >= finishingStart
+
         const episode = this.runEpisode({
           explorationRate: exploration,
           usePolicyFusion: !isFinishing,

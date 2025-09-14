@@ -85,7 +85,11 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
   const frequencies = game.attributeStatistics.relativeFrequencies
 
   const TARGET_REJECTIONS = config.targetRejections ?? 5_000
-  const CUSHION = Math.max(0, config.safetyCushion ?? 1) // NEW
+  const MAX = config.maxAdmissions ?? 1000
+  const REJ_MAX = config.maxRejections ?? 20000
+  const CUSHION = config.safetyCushion ?? 1 // you already pass safetyCushion: 1
+  const CUSHION_PER_QUOTA = 5 // “5 person cushion” per unmet quota
+  const BREATH_MULTIPLIER = 10 // scales when to start getting strict
 
   const quotas = Object.fromEntries(
     game.constraints.map((constraint) => {
@@ -148,6 +152,28 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
     },
     get frequencies() {
       return frequencies
+    },
+    /**
+     * Start tightening admits when projected demand risks exceeding seats left.
+     * - If only one quota remains → allow a 1-seat slack (off-by-one guard).
+     * - Otherwise, start being stricter roughly ~200 seats before the end when all 4 quotas are unmet:
+     *   breathingRoom = CUSHION_PER_QUOTA (5) * unmetQuotas * BREATH_MULTIPLIER (10)
+     *   => 5 * 4 * 10 = 200
+     */
+    isRunningOutOfAvailableSpots(): boolean {
+      if (this.isComplete()) return false
+
+      const totalUnmet = this.unmetQuotasCount()
+      const spotsReserved = this.getMaxPeopleNeeded()
+      const totalSpots = this.getTotalSpotsAvailable()
+
+      if (totalUnmet < 2) {
+        // one quota left → be slightly under; allow off-by-one tolerance
+        return spotsReserved + 1 >= totalSpots
+      }
+
+      const breathingRoom = CUSHION * CUSHION_PER_QUOTA * BREATH_MULTIPLIER * totalUnmet
+      return spotsReserved + breathingRoom >= totalSpots
     },
     unmetQuotasCount(): number {
       return this.quotas().length
