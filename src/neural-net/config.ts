@@ -36,6 +36,12 @@ export namespace Conf {
   export const SAFETY_CUSHION = 1
 
   /**
+   * Keep the classifier from collapsing to "deny" (raise if deny happy)
+   * @default 0.5
+   */
+  export const POS_MIN = 0.5
+
+  /**
    * Training specific configuration.
    */
   export const TRAINING = Object.freeze({

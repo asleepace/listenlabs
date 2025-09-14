@@ -152,7 +152,7 @@ export class SelfPlayTrainer {
     const remaining = Math.max(1, Conf.MAX_ADMISSIONS - admitted)
     const { gap } = this.worstExpectedGap(counts, remaining)
     const g = gap / remaining // normalized [0..1+]
-    return clamp(this.config.assistGain! * g, [0, 0.5])
+    return clamp(this.config.assistGain! * g, [0, 0.65])
   }
 
   // ---------- run one episode ----------
@@ -173,9 +173,9 @@ export class SelfPlayTrainer {
   }): Episode {
     const bouncer = new NeuralNetBouncer(this.game, {
       explorationRate,
-      baseThreshold: 0.35,
-      minThreshold: 0.25,
-      maxThreshold: 0.7,
+      baseThreshold: 0.32,
+      minThreshold: 0.22,
+      maxThreshold: 0.62,
       urgencyFactor: 2.0,
     })
     bouncer.setNetwork(this.net)
@@ -348,8 +348,8 @@ export class SelfPlayTrainer {
         if (Math.random() < relabelFrac) {
           const oracleLabel = this.oracleShouldAdmit(counts, person, admittedSoFar) ? 1 : 0
           label = oracleLabel
-          // oversample steps where oracle ≠ model
-          if (oracleLabel !== modelLabel) repeats += 5
+          // Oversample hard examples more aggressively
+          if (oracleLabel !== modelLabel) repeats += 8
         }
 
         // Rare-attr boost: if 'creative' still unmet and present, upweight
@@ -365,11 +365,11 @@ export class SelfPlayTrainer {
 
     if (X.length === 0) return 0
 
-    // ensure at least ~35% positives to avoid collapse to "deny"
-    const POS_MIN = 0.4
+    // ensure at least ~40% positives to avoid collapse to "deny"
+    // If you notice the NN getting too “admit-happy”, raise the positive floor a touch:
     const posIdx: number[] = []
     for (let i = 0; i < y.length; i++) if (y[i] === 1) posIdx.push(i)
-    const wantPos = Math.ceil(POS_MIN * y.length)
+    const wantPos = Math.ceil(Conf.POS_MIN * y.length)
     if (posIdx.length > 0 && posIdx.length < wantPos) {
       const need = wantPos - posIdx.length
       for (let k = 0; k < need; k++) {

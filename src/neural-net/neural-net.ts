@@ -177,7 +177,8 @@ export class NeuralNet {
           // output is a 1-D array; targets 0/1
           for (let j = 0; j < output.length; j++) {
             const yhat = Math.min(1 - eps, Math.max(eps, output[j]))
-            const y = target[j]
+            // Label smoothing: 0 -> 0.02, 1 -> 0.98
+            const y = target[j] * 0.96 + 0.02
             loss += -(y * Math.log(yhat) + (1 - y) * Math.log(1 - yhat))
           }
           loss /= output.length
