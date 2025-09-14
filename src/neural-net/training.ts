@@ -506,11 +506,11 @@ export class SelfPlayTrainer {
 
       console.log(`Epoch ${epoch + 1}/${epochs}:`)
       console.log(`  Success rate: ${(successRate * 100).toFixed(1)}%`)
-      console.log(`  Avg rejections (successful): ${avgRejections.toFixed(0)}`)
+      console.log(`  Avg rejections (successful):`, +avgRejections.toFixed(0))
+      console.log(`  Avg admitted (all episodes):`, +avgAdmittedAll.toFixed(0))
       console.log(`  Best rejections: ${this.bestEpisode?.rejections || 'N/A'}`)
       console.log(`  Training loss: ${loss.toFixed(4)}`)
       console.log(`  Exploration rate: ${exploration.toFixed(3)}`)
-      console.log(`  Avg admitted (all episodes): ${avgAdmittedAll.toFixed(1)}`)
       const label = bestEp.completed ? 'SUCCESS' : 'FAIL'
       console.log(
         `  Best episode — (${label}) admitted: ${bestEp.admittedAtEnd}, rejections: ${bestEp.rejections}, reward: ${bestEp.reward}`
@@ -577,6 +577,7 @@ export class SelfPlayTrainer {
   ): {
     successRate: number
     avgRejections: number
+    avgAdmissions: number
     minRejections: number
     maxRejections: number
   } {
@@ -584,6 +585,7 @@ export class SelfPlayTrainer {
 
     let successes = 0
     let totalRejections = 0
+    let totalAdmissions = 0
     let minRejections = Infinity
     let maxRejections = 0
 
@@ -596,6 +598,7 @@ export class SelfPlayTrainer {
       if (episode.completed) {
         successes++
         totalRejections += episode.rejections
+        totalAdmissions += episode.admittedAtEnd
         minRejections = Math.min(minRejections, episode.rejections)
         maxRejections = Math.max(maxRejections, episode.rejections)
       }
@@ -604,10 +607,15 @@ export class SelfPlayTrainer {
     return {
       successRate: successes / episodes,
       avgRejections: successes > 0 ? totalRejections / successes : 20000,
-      minRejections: minRejections === Infinity ? 20000 : minRejections,
+      avgAdmissions: successes < 1 ? totalAdmissions / episodes : 1_000,
+      minRejections: minRejections === Infinity ? 20000 + minRejections : minRejections,
       maxRejections: successes > 0 ? maxRejections : 20000,
     }
   }
+}
+
+const toFixed = (x: number, dec = 0): number => {
+  return +x.toFixed(dec)
 }
 
 export async function trainBouncer(game: Game): Promise<NeuralNetBouncer> {
@@ -628,7 +636,8 @@ export async function trainBouncer(game: Game): Promise<NeuralNetBouncer> {
   const results = trainer.test(100)
   console.log('\nTest Results:')
   console.log(`Success rate: ${(results.successRate * 100).toFixed(1)}%`)
-  console.log(`Average rejections: ${results.avgRejections.toFixed(0)}`)
+  console.log(`Average admissions:`, toFixed(results.avgAdmissions))
+  console.log(`Average rejections:`, toFixed(results.avgRejections))
   console.log(`Best: ${results.minRejections}, Worst: ${results.maxRejections}`)
 
   const bouncer = new NeuralNetBouncer(game)

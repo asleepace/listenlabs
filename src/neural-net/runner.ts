@@ -13,6 +13,11 @@ const FEATURE_SIZE = 17 // encoder feature size for scenario 2
 const MAX_ADMISSIONS = 1_000
 const MAX_REJECTIONS = 20_000
 
+type RunGameIteration = {
+  status: GameStatusRunning<ScenarioAttributes>
+  scoring: ReturnType<typeof initializeScoring>
+}
+
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x))
 
 function parseFlags(args: string[]) {
@@ -28,10 +33,10 @@ function parseFlags(args: string[]) {
 }
 
 export class NeuralNetBouncerRunner {
-  private bouncer: NeuralNetBouncer | null = null
-  private game: Game | null = null
-  private weightsPath: string
-  private logPath: string
+  public bouncer: NeuralNetBouncer | null = null
+  public game: Game | null = null
+  public weightsPath: string
+  public logPath: string
 
   constructor(private dataDir: string = './bouncer-data', private scenario: '2' = '2') {
     if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true })
@@ -137,14 +142,16 @@ export class NeuralNetBouncerRunner {
     const pure = trainer.test(100, { explorationRate: 0, usePolicyFusion: false, useTeacherAssist: false })
     console.log('Pure NN (no fusion, no assist):')
     console.log(`  Success Rate: ${(pure.successRate * 100).toFixed(1)}%`)
-    console.log(`  Average Rejections: ${pure.avgRejections.toFixed(0)}`)
+    console.log(`  Average Rejections:`, +pure.avgRejections.toFixed(0))
+    console.log(`  Average Admissions:`, +pure.avgAdmissions.toFixed(0))
     console.log(`  Best Performance: ${pure.minRejections} rejections`)
     console.log(`  Worst Performance: ${pure.maxRejections} rejections`)
 
     const hybridEval = trainer.test(100, { explorationRate: 0, usePolicyFusion: true, useTeacherAssist: false })
     console.log('\nHybrid (policy fusion on, no assist):')
     console.log(`  Success Rate: ${(hybridEval.successRate * 100).toFixed(1)}%`)
-    console.log(`  Average Rejections: ${hybridEval.avgRejections.toFixed(0)}`)
+    console.log(`  Average Rejections:`, +pure.avgRejections.toFixed(0))
+    console.log(`  Average Admissions:`, +pure.avgAdmissions.toFixed(0))
     console.log(`  Best Performance: ${hybridEval.minRejections} rejections`)
     console.log(`  Worst Performance: ${hybridEval.maxRejections} rejections`)
 
@@ -274,7 +281,43 @@ export class NeuralNetBouncerRunner {
     return this.bouncer
   }
 
-  runGame(sampleData?: any[], mode: 'score' | 'bouncer' | 'hybrid' = 'score'): any {
+  assertBouncerExists(): asserts this is { bouncer: NeuralNetBouncer } {
+    if (!this.bouncer) throw new Error('Bouncer has not been initialized!')
+  }
+
+  handleModeBouncer({ scoring, status }: RunGameIteration) {
+    this.assertBouncerExists()
+    const guest = status.nextPerson.attributes
+    const count = scoring.getCounts()
+    this.bouncer.setCounts(count)
+    const admit = this.bouncer.admit(status, count)
+    scoring.update({ guest, admit })
+  }
+
+  handleModeHybrid({ scoring, status }: RunGameIteration) {
+    this.assertBouncerExists()
+    const guest = status.nextPerson.attributes
+    const count = scoring.getCounts()
+    this.bouncer.setCounts(count)
+    const policyVote = scoring.shouldAdmit(guest, 1.0, 0.5)
+    const netVote = this.bouncer.admit(status, count)
+    let admit = policyVote || netVote
+    if (scoring.isRunningOutOfAvailableSpots()) {
+      const before = scoring.worstExpectedShortfall(scoring.getPeopleLeftInLine())
+      const after = scoring.worstExpectedShortfall(Math.max(0, scoring.getPeopleLeftInLine() - 1), guest)
+      const helpsWorstGap = after + 1e-9 < before
+      admit = admit && helpsWorstGap
+    }
+    scoring.update({ guest, admit })
+  }
+
+  handleModeScore({ scoring, status }: RunGameIteration) {
+    const guest = status.nextPerson.attributes
+    const admit = scoring.shouldAdmit(guest, 1.0, 0.5)
+    scoring.update({ guest, admit })
+  }
+
+  runGame(sampleData?: any[], mode: 'score' | 'bouncer' | 'hybrid' = 'score') {
     if (!this.game) throw new Error('Game not initialized')
 
     let admitted = 0
@@ -283,6 +326,28 @@ export class NeuralNetBouncerRunner {
 
     const getData = sampleData ? () => sampleData[personIndex++] : () => this.generatePerson(personIndex++)
 
+    const getOrGenerateNextGuest = (): ScenarioAttributes => {
+      if (!this.game) throw new Error('Game not initialized')
+      const personData = getData()
+
+      // normalize
+      const attributes: PersonAttributesScenario2 = {} as any
+      for (const key of Object.keys(this.game.attributeStatistics.relativeFrequencies)) {
+        attributes[key] = false
+      }
+      if (Array.isArray(personData)) {
+        for (const a of personData) if (a in attributes) attributes[a] = true
+      } else if (personData && typeof personData === 'object') {
+        for (const [k, v] of Object.entries(personData)) if (k in attributes) attributes[k] = !!v
+      } else {
+        console.log(personData)
+        throw new Error('unknown type of data!')
+      }
+
+      return attributes as ScenarioAttributes
+    }
+
+    // --- initialize scoring for all bookkeeping ---
     const scoring = initializeScoring(this.game, {
       maxRejections: 20_000,
       maxAdmissions: 1_000,
@@ -291,92 +356,45 @@ export class NeuralNetBouncerRunner {
     })
 
     while (scoring.inProgress() && (!sampleData || personIndex < sampleData.length)) {
-      const personData = getData()
+      // --- get or generate the next guest ---
+      const guest = getOrGenerateNextGuest()
 
-      // normalize
-      const attributes: PersonAttributesScenario2 = {} as any
-      for (const key of Object.keys(this.game.attributeStatistics.relativeFrequencies)) {
-        attributes[key as keyof PersonAttributesScenario2] = false
-      }
-      if (Array.isArray(personData)) {
-        for (const a of personData) if (a in attributes) attributes[a as keyof PersonAttributesScenario2] = true
-      } else if (personData && typeof personData === 'object') {
-        for (const [k, v] of Object.entries(personData))
-          if (k in attributes) attributes[k as keyof PersonAttributesScenario2] = !!v
+      // --- all quotas have been met (auto-admit) ---
+      if (scoring.isFinishedWithQuotas()) {
+        scoring.update({ guest, admit: true })
+        continue
       }
 
-      const guest = attributes as ScenarioAttributes
-      const quotasCompleted = scoring.isFinishedWithQuotas()
-
-      // --- pick decision source ---
-      let admit: boolean = quotasCompleted
-
-      if (quotasCompleted && admitted < 1000) {
-        // Seats left and quotas are complete -> admit everyone to finish with zero extra rejections
-        admit = true
-      } else if (mode === 'bouncer') {
-        if (!this.bouncer) throw new Error('Bouncer not initialized')
-        const status: GameStatusRunning<PersonAttributesScenario2> = {
-          status: 'running',
-          admittedCount: admitted,
-          rejectedCount: rejected,
-          nextPerson: { personIndex, attributes },
-        }
-        this.bouncer.setCounts(scoring.getCounts())
-        admit = this.bouncer.admit(status)
-      } else if (mode === 'hybrid') {
-        if (!this.bouncer) throw new Error('Bouncer not initialized')
-        const status: GameStatusRunning<PersonAttributesScenario2> = {
-          status: 'running',
-          admittedCount: admitted,
-          rejectedCount: rejected,
-          nextPerson: { personIndex, attributes },
-        }
-        // hybrid branch (inside the loop)
-        const policyVote = scoring.shouldAdmit(guest, 1.0, 0.5)
-        this.bouncer.setCounts(scoring.getCounts())
-        const netVote = this.bouncer.admit(status)
-
-        // early: allow either to open the door
-        admit = policyVote || netVote
-
-        // late-game veto: only admit if it actually reduces worst expected shortfall
-        if (scoring.isRunningOutOfAvailableSpots()) {
-          const before = scoring.worstExpectedShortfall(scoring.getPeopleLeftInLine())
-          const after = scoring.worstExpectedShortfall(Math.max(0, scoring.getPeopleLeftInLine() - 1), guest)
-          const helpsWorstGap = after + 1e-9 < before
-          admit = admit && helpsWorstGap
-        }
-      } else {
-        // score-only
-        admit = scoring.shouldAdmit(guest, 1.0, 0.5)
+      // --- generate mock game status ---
+      const status: GameStatusRunning<ScenarioAttributes> = {
+        status: 'running',
+        admittedCount: scoring.admitted,
+        rejectedCount: scoring.rejected,
+        nextPerson: { personIndex, attributes: guest },
       }
 
-      if (admit) admitted++
-      else rejected++
-
-      scoring.update({ guest, admit })
-      if (admitted >= MAX_ADMISSIONS || rejected >= MAX_REJECTIONS) break
+      // --- handle each mode ---
+      switch (mode) {
+        case 'bouncer': {
+          this.handleModeBouncer({ scoring, status })
+          continue
+        }
+        case 'hybrid': {
+          this.handleModeHybrid({ scoring, status })
+          continue
+        }
+        case 'score': {
+          this.handleModeScore({ scoring, status })
+          continue
+        }
+      }
     }
 
-    // summarize
-    const constraints = this.game.constraints.map((c) => {
-      const q = scoring.get(c.attribute)
-      const current = q?.count ?? 0
-      return { attribute: c.attribute, current, required: c.minCount, satisfied: current >= c.minCount }
-    })
-    const allMet = constraints.every((c) => c.satisfied)
-
-    if (admitted >= MAX_ADMISSIONS && allMet) {
-      return { status: 'completed', finalRejections: rejected, constraints }
-    }
-    const hitRejectionCap = rejected >= MAX_REJECTIONS
-    return {
-      status: 'failed',
-      reason: hitRejectionCap ? 'Too many rejections' : 'Constraints not satisfied',
-      finalRejections: rejected,
-      constraints,
-    }
+    // NOTE: The game is considered won as long as we meet all the quotas and we
+    // have one of the following conditions:
+    //  - 1,000 total admissions
+    //  - 10,000 total rejections
+    return scoring.getSummary()
   }
 
   /** Sample a synthetic person as a list of attribute names set to true. */

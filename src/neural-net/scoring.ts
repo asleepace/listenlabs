@@ -4,7 +4,8 @@ import type { GameConstraints, GameState, ScenarioAttributes } from '../types'
 
 export type Correlation = GameState['game']['attributeStatistics']['correlations'][string]
 export type Quota = ReturnType<typeof createQuota>
-export type Guest = ReturnType<ReturnType<typeof initializeScoring>['forGuest']>
+export type Scoring = ReturnType<typeof initializeScoring>
+export type Guest = ReturnType<Scoring['forGuest']>
 
 export type ScoringConfig = {
   maxRejections: number
@@ -75,6 +76,14 @@ export function createQuota(
     },
     inProgress() {
       return this.minCount > this.count
+    },
+    getSummary() {
+      return {
+        attribute: constraint.attribute,
+        current: this.count,
+        required: constraint.minCount,
+        satisfied: this.isComplete(),
+      } as const
     },
   }
 }
@@ -147,6 +156,20 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
       return frequencies
     },
     /**
+     * Returns true when the venue has more spots available than the sum of all people
+     * needed to meet every quota.
+     */
+    isUnderFilled(): boolean {
+      return this.getTotalSpotsAvailable() > this.getMaxPeopleNeeded()
+    },
+    /**
+     * Returns true when the venue only has enough available spots for the quota with
+     * the max number of people needed (no cushion).
+     */
+    isOverFilled(): boolean {
+      return this.getTotalSpotsAvailable() <= this.getMinPeopleNeeded()
+    },
+    /**
      * Start tightening admits when projected demand risks exceeding seats left.
      * - If only one quota remains → allow a 1-seat slack (off-by-one guard).
      * - Otherwise, start being stricter roughly ~200 seats before the end when all 4 quotas are unmet:
@@ -155,6 +178,7 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
      */
     isRunningOutOfAvailableSpots(): boolean {
       if (this.isComplete()) return false
+      if (this.isUnderFilled()) return false
 
       const totalUnmet = this.unmetQuotasCount()
       const spotsReserved = this.getMaxPeopleNeeded()
@@ -273,10 +297,7 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
 
     /** Admit if guest covers ≥ baseFrac of current unmet quotas; tighten if scarce/behind. */
     admitByFraction(guest: ScenarioAttributes, baseFrac: number): boolean {
-      const totalQuotas = this.quotas()
-      if (totalQuotas.length === 0) return true
-
-      const seats = Math.max(1, this.getTotalSpotsAvailable())
+      if (this.isFinishedWithQuotas()) return true
       const scarcity = this.seatScarcity()
 
       const seatProgress = this.getTotalProgress()
@@ -291,26 +312,33 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
 
     /** Admit using numeric urgency score with dynamic threshold. */
     admitByScore(guest: ScenarioAttributes, baseTheta = 1.0): boolean {
-      const seats = Math.max(1, this.getTotalSpotsAvailable())
       const scarcity = this.seatScarcity()
       const score = this.guestScore(guest)
       const quotaBehind = Math.max(0, this.getQuotaProgress() - 1.0)
       const theta = baseTheta + 0.6 * scarcity + 0.4 * Math.min(1, quotaBehind)
       return score >= theta
     },
-    /** returns if all quotas have been met and we've hit 1,000 admissions. */
+    /** returns true when above max admissions or max rejections. */
     isComplete() {
-      return this.quotas().length === 0
+      return !this.inProgress()
     },
+    /** returns true when under or equal to max admissions and max rejections. */
     inProgress() {
       return this.admitted < config.maxAdmissions && this.rejected < config.maxRejections
     },
+    /** returns the total number of people admitted and rejected. */
     getTotalPeopleSeen() {
       return this.admitted + this.rejected
     },
+    /** returns the total number of people seen + 1 (useful for status) */
+    nextIndex() {
+      return this.getTotalPeopleSeen() + 1
+    },
+    /** returns the total number of people left in line. */
     getPeopleLeftInLine(): number {
       return Math.max(0, config.maxRejections - this.getTotalPeopleSeen())
     },
+    /** returns the total number of available spaces for admissions. */
     getTotalSpotsAvailable() {
       return Math.max(0, config.maxAdmissions - this.admitted)
     },
@@ -328,15 +356,19 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
       const vals = this.quotas().map((q) => clamp(0, q.relativeProgress(peopleLeftInLine), 3))
       return average(vals) || 1.0
     },
+    /** Returns true when all quotas have been met. */
     isFinishedWithQuotas(): boolean {
       return this.quotas().length === 0
     },
+    /** Returns an array of quotas which are still in progress. */
     quotas() {
       return Object.values(quotas).filter((quota) => quota.inProgress())
     },
+    /** Returns quota data for a specific attribute. */
     get(attr: string): Quota {
       return quotas[attr]
     },
+    /** Returns an object with helpers for a guest. */
     forGuest(guest: ScenarioAttributes) {
       return {
         attributes: getAttributes(guest)
@@ -353,10 +385,26 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
         },
       }
     },
-    getMaxPeopleNeeded() {
+    /**
+     * (optimistic) Returns the total number of people needed to reach the quota with the
+     * highest amout to go, since this needs to be filled no matter what.
+     */
+    getMinPeopleNeeded(): number {
       const arr = this.quotas().map((quota) => quota.needed())
       return arr.length ? Math.max(...arr) : 0
     },
+    /**
+     * (pessimistic) Returns the sum of all the people needed to meet every quota, generally
+     * the actual amount will be lower since a single person may have multiple attributes,
+     * but at later stages in the game this is helpful.
+     */
+    getMaxPeopleNeeded(): number {
+      return sum(this.quotas().map((quota) => quota.needed()))
+    },
+    /**
+     * @important make sure to call this after making a decision to update the counts on all the
+     * quotas and overall progress.
+     */
     update({ guest, admit }: { guest: ScenarioAttributes; admit: boolean }): boolean {
       if (admit === false) {
         this.rejected++
@@ -368,6 +416,20 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
       }
       this.admitted++
       return admit
+    },
+    /**
+     * Returns a summary of the current state for logging.
+     */
+    getSummary() {
+      const isSuccess = this.isFinishedWithQuotas()
+      return {
+        status: isSuccess ? 'completed' : 'failed',
+        success: isSuccess,
+        reason: `Admissions=${this.admitted} Rejected=${this.rejected}`,
+        finalRejections: this.rejected,
+        finalAdmissions: this.admitted,
+        constraints: Object.values(quotas).map((quota) => quota.getSummary()),
+      } as const
     },
   }
 }
