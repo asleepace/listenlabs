@@ -274,6 +274,10 @@ export class NeuralNetBouncerRunner {
     const scoring = initializeScoring(this.game, {
       maxRejections: 20_000,
       maxAdmissions: 1_000,
+      targetRejections: 5_000,
+      weights: {
+        // .. override here
+      },
     })
 
     while (scoring.inProgress() && (!sampleData || personIndex < sampleData.length)) {
@@ -296,7 +300,6 @@ export class NeuralNetBouncerRunner {
       }
 
       // --- decision (your rule-of-thumb combo) ---
-
       const guest = attributes as ScenarioAttributes
       const admit = scoring.shouldAdmit(guest, /*baseTheta=*/ 1.0, /*baseFrac=*/ 0.5)
 
@@ -318,6 +321,9 @@ export class NeuralNetBouncerRunner {
       return { attribute: c.attribute, current, required: c.minCount, satisfied: current >= c.minCount }
     })
     const allMet = constraints.every((c) => c.satisfied)
+
+    const totalScore = scoring.getLossScore()
+    console.log(`  Score (diagnostic): ${totalScore.toFixed(2)}`)
 
     // Decide final status
     if (admitted >= 1000 && allMet) {

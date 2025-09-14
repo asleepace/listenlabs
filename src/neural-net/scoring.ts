@@ -9,6 +9,15 @@ export type Guest = ReturnType<ReturnType<typeof initializeScoring>['forGuest']>
 export type ScoringConfig = {
   maxRejections: number
   maxAdmissions: number
+  targetRejections?: number // default 5,000 (target number of rejections to complete by)
+  weights?: {
+    shortfallPerHead?: number // default 2.0
+    overagePerHead?: number // default 0.5
+    unmetQuotaConstant?: number // default 100
+    targetPerPerson?: number // default 1.0  (penalize people seen past target)
+    targetBonusCap?: number // default 1000 (cap reward for finishing early)
+    targetPenaltyCap?: number // default 5000 (cap penalty for finishing late)
+  }
 }
 
 export const average = (values: number[]): number => {
@@ -22,6 +31,10 @@ export const diff = (v1: number, v2: number) => {
 
 export const clamp = (lo: number, val: number, hi: number): number => {
   return Math.max(lo, Math.min(val, hi))
+}
+
+export const sum = (vals: number[]): number => {
+  return vals.reduce((a, b) => a + b, 0) || 0
 }
 
 /**
@@ -71,6 +84,9 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
   const correlations = game.attributeStatistics.correlations
   const frequencies = game.attributeStatistics.relativeFrequencies
 
+  // target threshold we want to hit all quotas by
+  const TARGET_REJECTIONS = config.targetRejections ?? 5_000
+
   const quotas = Object.fromEntries(
     game.constraints.map((constraint) => {
       const attr = constraint.attribute
@@ -81,7 +97,15 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
   )
 
   // --- local helpers for scoring ---
-  const EPS = 1e-9
+  const pw = {
+    shortfallPerHead: 2.0,
+    overagePerHead: 0.5,
+    unmetQuotaConstant: 100,
+    targetPerPerson: 1.0,
+    targetBonusCap: 1000,
+    targetPenaltyCap: 5000,
+    ...(config.weights ?? {}),
+  }
 
   /** Per-quota urgency = deficit / expected arrivals with that attr in the remaining line mass. */
   const quotaUrgency = (q: Quota, peopleLeftInLine: number): number => {
@@ -148,6 +172,42 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
       const seats = Math.max(1, this.getTotalSpotsAvailable())
       // start tightening under ~200 seats (tunable)
       return Math.min(1, 200 / seats)
+    },
+    // keep your existing constants + pw as-is
+
+    getLossScore() {
+      let unmet = 0
+      const terms: number[] = []
+
+      for (const q of Object.values(quotas)) {
+        const gap = Math.abs(q.count - q.minCount)
+        if (q.isComplete()) {
+          // small penalty for overfilling
+          terms.push(gap * pw.overagePerHead)
+        } else {
+          unmet++
+          // larger penalty for being short
+          terms.push(gap * pw.shortfallPerHead)
+        }
+      }
+
+      // If all met: use average overage; else: sum + flat per-unmet penalty
+      const completionPenalty = unmet === 0 ? average(terms) : sum(terms) + pw.unmetQuotaConstant * unmet
+
+      // Rejection-based term (positive if beyond target, negative if earlier)
+      // (This matches "target rejections" semantics.)
+      const overUnder = (this.rejected - TARGET_REJECTIONS) * pw.targetPerPerson
+
+      // Optional guard: don’t reward early finishing unless all quotas are met
+      // const gatedOverUnder = unmet === 0 ? overUnder : Math.max(0, overUnder)
+
+      // Cap so this term can't explode
+      let delta = overUnder
+      if (delta < 0) delta = Math.max(delta, -pw.targetBonusCap)
+      else delta = Math.min(delta, pw.targetPenaltyCap)
+
+      // Total penalty-style score (lower is better)
+      return completionPenalty + delta
     },
 
     /**
@@ -298,24 +358,25 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
     /** Returns a helper object for common interactions with guests. */
     forGuest(guest: ScenarioAttributes) {
       return {
-        /** sorted in ascending order of least progress */
         attributes: getAttributes(guest)
           .filter((attr) => quotas[attr].inProgress())
           .sort((a, b) => quotas[a].progress() - quotas[b].progress()),
-        /** total number of unmet quotas */
         count() {
           return this.attributes.length
         },
-        /** returns true if the person contains all the unmet quotas. */
         hasEveryAttribute: (): boolean => {
-          return this.quotas().every((quota) => guest[quota.attribute])
+          return Object.values(quotas)
+            .filter((q) => q.inProgress())
+            .every((q) => guest[q.attribute])
         },
-        /** returns true if the person contains any unmet quota. */
         hasSomeAttribute: (): boolean => {
-          return this.quotas().some((quota) => guest[quota.attribute])
+          return Object.values(quotas)
+            .filter((q) => q.inProgress())
+            .some((q) => guest[q.attribute])
         },
       }
     },
+
     /** Returns the max number of people used for any of the quotas. */
     getMaxPeopleNeeded() {
       const arr = this.quotas().map((quota) => quota.needed())

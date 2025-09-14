@@ -110,7 +110,7 @@ export class SelfPlayTrainer {
       if (samples[a1]) {
         for (const [a2, corr] of Object.entries(correlations)) {
           if (a1 !== a2 && Math.abs(corr) > 0.3) {
-            const p = stats.relativeFrequencies[a2] * (1 + corr * 0.5)
+            const p = clamp(stats.relativeFrequencies[a2] * (1 + corr * 0.5), 0, 1)
             samples[a2] = Math.random() < p
           }
         }
@@ -137,12 +137,6 @@ export class SelfPlayTrainer {
       }
     }
     return { gap: worst, culprit }
-  }
-
-  private immediateNeed(counts: Record<string, number>, remaining: number, attribute: string): number {
-    const cur = counts[attribute] || 0
-    const min = this.game.constraints.find((c) => c.attribute === attribute)?.minCount ?? 0
-    return Math.max(0, min - cur) / Math.max(1, remaining)
   }
 
   // ---------- oracle policies ----------
@@ -224,15 +218,10 @@ export class SelfPlayTrainer {
       states.push(state)
 
       // --- hybrid decision (scoring + network) ---
-      const guest = person.attributes as unknown as ScenarioAttributes
-
-      // scoring vote (urgency-aware). When all quotas are met, this returns true.
-      const scoreVote =
-        scoring.admitByScore(guest, /*baseTheta=*/ 1.0) || scoring.admitByFraction(guest, /*baseFrac=*/ 0.5)
-
-      // model vote
+      const guest = person.attributes as ScenarioAttributes
       let admit = bouncer.admit(status)
-      const policyVote = scoring.shouldAdmit(guest, /*baseTheta=*/ 1.0, /*baseFrac=*/ 0.5)
+      const policyVote = scoring.shouldAdmit(guest, 1.0, 0.5)
+      if (!admit && policyVote) admit = true
 
       // simple fusion: let scoring overrule a deny (helps early training)
       if (!admit && policyVote) admit = true
