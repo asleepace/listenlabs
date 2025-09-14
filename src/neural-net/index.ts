@@ -55,6 +55,12 @@ export async function initializeNeuralNetwork(initialState: GameState): Promise<
   let lastAdmit = false
   let randomSample = true // allow game to progress to 10,000
 
+  const outputFile = `data/random-sample-${+new Date()}.json`
+
+  const saveRandomSample = () => {
+    Disk.saveJsonFile(`data/random-sample-${+new Date()}.json`, trainingData).catch(console.warn)
+  }
+
   return {
     admit(next) {
       lastPerson = next.nextPerson.attributes
@@ -67,6 +73,9 @@ export async function initializeNeuralNetwork(initialState: GameState): Promise<
     getProgress() {
       const attributes = getAttributes(lastPerson)
       trainingData.push(attributes)
+
+      if (trainingData.length % 100 === 0) saveRandomSample()
+
       return {
         decision: lastAdmit,
         attributes,
@@ -81,7 +90,7 @@ export async function initializeNeuralNetwork(initialState: GameState): Promise<
       }
     },
     getOutput(lastStatus) {
-      Disk.saveJsonFile(`data/random-sample-${+new Date()}.json`, trainingData).catch(console.warn)
+      saveRandomSample()
 
       return {
         ...initialState,
