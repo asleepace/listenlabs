@@ -38,7 +38,7 @@ bun run src/neural-net/runner resume 12 180 \
   --assistGain=2.0 \
   --oracleRelabelFrac=0.50 \
   --elitePercentile=0.08 \
-  --explorationStart=0.25 --explorationEnd=0.08 --explorationDecay=0.90
+  --explorationStart=0.15 --explorationEnd=0.05 --explorationDecay=0.90
 ```
 
 What this does:

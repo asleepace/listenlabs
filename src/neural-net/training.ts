@@ -72,7 +72,7 @@ export async function getSampleGame(filePath = 'data/samples/sample-01.json'): P
 }
 
 export class SelfPlayTrainer {
-  static readonly DISABLE_FUSION_AT_EPOCH = false
+  static readonly DISABLE_FUSION_AT_EPOCH = true
   static readonly MAX_SAMPLES_PER_EPOCH = 250_000
   static lastDatasetPath?: string
 
@@ -416,7 +416,7 @@ export class SelfPlayTrainer {
           const oracleLabel = this.oracleShouldAdmit(counts, person, admittedSoFar) ? 1 : 0
           label = oracleLabel
           // Oversample hard examples more aggressively
-          if (oracleLabel !== modelLabel) repeats += 4
+          if (oracleLabel !== modelLabel) repeats += 6
         }
 
         // Rare-attr boost: if 'creative' still unmet and present, upweight
@@ -507,6 +507,8 @@ export class SelfPlayTrainer {
     let bestSuccess = 0,
       stall = 0
 
+    this.net.setLearningRate(0.00007)
+
     for (let epoch = 0; epoch < epochs; epoch++) {
       if (this.dataset) this.resetDatasetOrdering()
       const batch: Episode[] = []
@@ -591,11 +593,11 @@ export class SelfPlayTrainer {
         },
       })
 
-      if ((epoch + 1) % 3 === 0) {
-        const cur = this.net.getLearningRate()
-        this.net.setLearningRate(cur * 0.7)
-        console.log(`[lr] decayed to ${this.net.getLearningRate()}`)
-      }
+      // if ((epoch + 1) % 3 === 0) {
+      //   const cur = this.net.getLearningRate()
+      //   this.net.setLearningRate(cur * 0.7)
+      //   console.log(`[lr] decayed to ${this.net.getLearningRate()}`)
+      // }
 
       if (successRate >= bestSuccess) {
         bestSuccess = successRate
