@@ -46,7 +46,8 @@ function shuffle<T>(data: T[]) {
   return data
 }
 
-export async function getSampleGame(filePath = 'data/smaples/sample-01.json'): Promise<PersonAttributesScenario2[]> {
+export async function getSampleGame(filePath = 'data/samples/sample-01.json'): Promise<PersonAttributesScenario2[]> {
+  console.log('[dataset] loading data:', filePath)
   const guests = await Disk.getJsonFile<PersonAttributesScenario2[][]>(filePath)
   if (!guests || !Array.isArray(guests)) throw new Error(`Training: Invalid Game Data!`)
   const copy = (): PersonAttributesScenario2 => ({
@@ -65,11 +66,14 @@ export async function getSampleGame(filePath = 'data/smaples/sample-01.json'): P
       copy()
     )
   })
+  SelfPlayTrainer.lastDatsetPath = filePath
+  console.log('[dataset] total entries:', guestList.length)
   return shuffle(guestList)
 }
 
 export class SelfPlayTrainer {
   static readonly DISABLE_FUSION_AT_EPOCH = true
+  static lastDatsetPath?: string
 
   private net: NeuralNet
   private game: Game
@@ -79,6 +83,10 @@ export class SelfPlayTrainer {
 
   private dataset?: ScenarioAttributes[]
   private datasetPtr = 0
+
+  public get hasDataset() {
+    return !!this.dataset
+  }
 
   private bestEpisode: Episode | null = null
   private trainingStats: {
@@ -521,6 +529,7 @@ export class SelfPlayTrainer {
       )
 
       console.log(`Epoch ${epoch + 1}/${epochs}:`)
+      console.log(`  Using dataset:`, this.hasDataset ? SelfPlayTrainer.lastDatsetPath : false)
       console.log(`  Success rate: ${(successRate * 100).toFixed(1)}%`)
       console.log(`  Avg rejections (successful):`, +avgRejections.toFixed(0))
       console.log(`  Avg admitted (all episodes):`, +avgAdmittedAll.toFixed(0))
