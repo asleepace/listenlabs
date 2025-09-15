@@ -207,7 +207,7 @@ export class NeuralNetBouncerRunner {
         minThreshold: 0.18,
         maxThreshold: 0.6,
         urgencyFactor: 1.5, // a little less tightening
-        optimism: 0.8, // bigger slack before gates kick in
+        optimism: 0.9, // bigger slack before gates kick in
         isProduction: true,
       })
 

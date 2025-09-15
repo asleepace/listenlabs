@@ -77,8 +77,8 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
 
   // To reduce last-minute scrambles (which inflate rejections), add a little breathing-room earlier
   // so the policy focuses on unmet heads sooner.
-  const CUSHION_PER_QUOTA = 4 // “4 person cushion” per unmet quota
-  const BREATH_MULTIPLIER = 6 // scales when to start getting strict
+  const CUSHION_PER_QUOTA = 2 // “4 person cushion” per unmet quota
+  const BREATH_MULTIPLIER = 2 // scales when to start getting strict
 
   const quotas = Object.fromEntries(
     game.constraints.map((constraint) => {
@@ -171,8 +171,11 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
         return spotsReserved >= totalSpots
       }
 
-      const breathingRoom = Math.min(100, CUSHION * CUSHION_PER_QUOTA * BREATH_MULTIPLIER * totalUnmet)
-      return spotsReserved + breathingRoom >= totalSpots
+      const minPeopleNeeded = this.getMinPeopleNeeded()
+      return minPeopleNeeded + CUSHION * CUSHION_PER_QUOTA * totalUnmet >= totalSpots
+
+      // const breathingRoom = Math.min(100, CUSHION * CUSHION_PER_QUOTA * BREATH_MULTIPLIER * totalUnmet)
+      // return spotsReserved + breathingRoom >= totalSpots
     },
     unmetQuotasCount(): number {
       return this.quotas().length

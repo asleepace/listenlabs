@@ -66,7 +66,7 @@ If you’re within ~500 rejections of your target and want one more nudge:
 
 ```bash
 bun run src/neural-net/runner resume 3 220 \
-  --datafile=data/samples/sample-04.json \
+  --datafile=data/samples/sample-01.json \
   --assistGain=2.0 \
   --oracleRelabelFrac=0.40 \
   --elitePercentile=0.12

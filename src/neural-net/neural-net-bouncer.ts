@@ -199,6 +199,8 @@ export class NeuralNetBouncer implements BerghainBouncer {
       return true
     }
 
+    const trueAttrCount = Object.values(guest).filter(Boolean).length
+
     // Safety gates
     const [required, critical] = this.getSafetyGates(status, needed)
 
@@ -209,7 +211,7 @@ export class NeuralNetBouncer implements BerghainBouncer {
     if (critical.length && !critical.some((a) => guest[a])) return false
 
     // Ignore well connected till the very end
-    if (guest.well_connected && Object.keys(guest).length === 1) {
+    if (guest.well_connected && trueAttrCount === 1) {
       return false
     }
 
