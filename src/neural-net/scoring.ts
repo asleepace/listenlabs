@@ -168,7 +168,6 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
         return spotsReserved >= totalSpots
       }
 
-      // Replace the current return with this:
       const breathingRoom = Math.min(100, CUSHION * CUSHION_PER_QUOTA * BREATH_MULTIPLIER * totalUnmet)
       return spotsReserved + breathingRoom >= totalSpots
     },

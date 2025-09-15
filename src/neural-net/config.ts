@@ -37,9 +37,9 @@ export namespace Conf {
 
   /**
    * Keep the classifier from collapsing to "deny" (raise if deny happy)
-   * @default 0.55
+   * @default 0.45
    */
-  export const POS_MIN = 0.48
+  export const POS_MIN = 0.45
 
   /**
    * Default learning rate for the model.

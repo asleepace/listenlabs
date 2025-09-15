@@ -679,6 +679,11 @@ export async function main() {
   }
 }
 
-if (require.main === module) {
+/**
+ *  ## Neural Entry Points
+ *
+ *  @note all the commands above use this file as the entry point.
+ */
+if (import.meta.main) {
   main().catch(console.error)
 }

@@ -90,12 +90,12 @@ export class NeuralNetBouncer implements BerghainBouncer {
 
   /** Progress-aware threshold with safe bounds */
   private dynamicThreshold(status: GameStatusRunning<any>): number {
-    // more optimistic: slightly lower base, gentler slope
-    const base = this.cfg.baseThreshold ?? 0.28 // was 0.32
-    const minT = this.cfg.minThreshold ?? 0.18 // was 0.22
-    const maxT = this.cfg.maxThreshold ?? 0.6 // was 0.62
+    const base = this.cfg.baseThreshold ?? 0.28
+    const minT = this.cfg.minThreshold ?? 0.18
+    const maxT = this.cfg.maxThreshold ?? 0.6
+    const optimism = this.cfg.optimism ?? 0.7 // higher = more lenient
     const progress = Math.min(1, status.admittedCount / Math.max(1, Conf.MAX_ADMISSIONS))
-    const slope = 0.1 // was 0.18 — less tightening as we fill
+    const slope = 0.1 * (1 - 0.5 * (optimism - 0.7)) // small effect of optimism on slope
     const theta = base + slope * progress
     return Math.max(minT, Math.min(maxT, theta))
   }
