@@ -122,7 +122,10 @@ export class NeuralNetBouncerRunner {
 
     if (resumeFlag && fs.existsSync(this.weightsPath)) {
       try {
-        const weights = JSON.parse(fs.readFileSync(this.weightsPath, 'utf-8'))
+        const bestPath = this.weightsPath.replace(/\.json$/, '.best.json')
+        const pathToLoad = fs.existsSync(bestPath) ? bestPath : this.weightsPath
+        const weights = JSON.parse(fs.readFileSync(pathToLoad, 'utf-8'))
+        console.log(`Loaded weights from: ${pathToLoad}`)
         trainer.loadWeights(weights)
         trainer.getNetwork().setLearningRate(0.0001)
         console.log(`[resume] Warm-started from ${this.weightsPath}`)

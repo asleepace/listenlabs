@@ -77,7 +77,7 @@ export async function getSampleGame(filePath: string): Promise<PersonAttributesS
 }
 
 export class SelfPlayTrainer {
-  static readonly DISABLE_FUSION_AT_EPOCH = true
+  static readonly DISABLE_FUSION_AT_EPOCH = false
   static readonly MAX_SAMPLES_PER_EPOCH = 250_000
   static lastDatasetPath?: string
 
@@ -534,10 +534,9 @@ export class SelfPlayTrainer {
       let totalRejections = 0
 
       for (let ep = 0; ep < this.config.episodes; ep++) {
-        const finishingStart = Math.max(0, epochs - 3)
-
-        // Keep assist/fusion on the whole time for stability during bring-up
-        const isFinishing = SelfPlayTrainer.DISABLE_FUSION_AT_EPOCH ? epoch >= finishingStart : false
+        // Disable fusion/assist only in the last 3 epochs of *long* runs (>= 6 epochs)
+        const finishingStart = epochs >= 6 ? epochs - 3 : Number.POSITIVE_INFINITY
+        const isFinishing = SelfPlayTrainer.DISABLE_FUSION_AT_EPOCH && epoch >= finishingStart
 
         const episode = this.runEpisode({
           explorationRate: exploration,

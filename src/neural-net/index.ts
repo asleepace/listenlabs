@@ -20,6 +20,7 @@ const trainingData: string[][] = []
 enum Weights {
   scenario2BestAverage = `../../bouncer-data/weights-s2.best-4407avg.json`,
   scenario2Normal = `../../bouncer-data/weights-scenario-2.json`,
+  scenario2Best = `../../bouncer-data/weights-scenario-2.best.json`,
 }
 
 /**
@@ -30,15 +31,15 @@ enum Weights {
  *  @note this is to be used with real challenge data (keep all config here please.)
  */
 export async function initializeNeuralNetwork(initialState: GameState): Promise<BerghainBouncer> {
-  const weightsPath = path.resolve(__dirname, Weights.scenario2Normal)
+  const weightsPath = path.resolve(__dirname, Weights.scenario2Best)
 
   console.log('[neural-net] weights:', weightsPath)
 
   // build bouncer (no exploration for prod)
   const bouncer = new NeuralNetBouncer(initialState.game, {
     explorationRate: 0,
-    baseThreshold: 0.26,
-    minThreshold: 0.16,
+    baseThreshold: 0.27,
+    minThreshold: 0.17,
     maxThreshold: 0.58,
     urgencyFactor: 1.3, // a little less tightening
     optimism: 0.9, // bigger slack before gates kick in
