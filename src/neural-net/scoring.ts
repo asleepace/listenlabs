@@ -74,8 +74,11 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
 
   const TARGET_REJECTIONS = config.targetRejections ?? Conf.TARGET_REJECTIONS
   const CUSHION = config.safetyCushion ?? Conf.SAFETY_CUSHION // you already pass safetyCushion: 1
-  const CUSHION_PER_QUOTA = 2 // “4 person cushion” per unmet quota
-  const BREATH_MULTIPLIER = 4 // scales when to start getting strict
+
+  // To reduce last-minute scrambles (which inflate rejections), add a little breathing-room earlier
+  // so the policy focuses on unmet heads sooner.
+  const CUSHION_PER_QUOTA = 4 // “4 person cushion” per unmet quota
+  const BREATH_MULTIPLIER = 6 // scales when to start getting strict
 
   const quotas = Object.fromEntries(
     game.constraints.map((constraint) => {

@@ -37,9 +37,9 @@ export namespace Conf {
 
   /**
    * Keep the classifier from collapsing to "deny" (raise if deny happy)
-   * @default 0.45
+   * @default 0.52
    */
-  export const POS_MIN = 0.48
+  export const POS_MIN = 0.52
 
   /**
    * Default learning rate for the model.
@@ -60,6 +60,7 @@ export namespace Conf {
     SHORTFALL_WEIGHTS: {
       creative: 1.6, // push scarce 'creative'
       techno_lover: 1.2, // mild bump to avoid TL misses
+      berlin_local: 1.3,
       // others default to 1.0
     } as Record<string, number>,
 

@@ -437,13 +437,34 @@ export class SelfPlayTrainer {
           if (oracleLabel !== modelLabel) repeats += 6
         }
 
-        // Rare-attr boost: if 'creative' still unmet and present, upweight
+        /* existing creative boost */
         const creativeConstraint = this.game.constraints.find((c) => c.attribute === 'creative')
         const needCreative = (creativeConstraint ? creativeConstraint.minCount : 0) - (counts['creative'] || 0)
         if (person['creative'] && needCreative > 0) {
           repeats += label === 1 ? 3 : 1
         }
 
+        /* NEW: berlin_local boost (mirrors creative) */
+        const blConstraint = this.game.constraints.find((c) => c.attribute === 'berlin_local')
+        const needBL = (blConstraint ? blConstraint.minCount : 0) - (counts['berlin_local'] || 0)
+        if (person['berlin_local'] && needBL > 0) {
+          repeats += label === 1 ? 2 : 1 // slightly milder than creative
+        }
+
+        /* NEW: tiny endgame clutch oversample when seats ≈ sum of needs */
+        const seatsLeft = Math.max(0, Conf.MAX_ADMISSIONS - admittedSoFar)
+        let totalNeed = 0
+        for (const c of this.game.constraints) {
+          totalNeed += Math.max(0, c.minCount - (counts[c.attribute] || 0))
+        }
+        const tightEndgame = totalNeed > 0 && seatsLeft > 0 && seatsLeft <= totalNeed + 1
+        if (tightEndgame) {
+          // reward hitting any unmet attr in a tight finish
+          const hitsUnmet = this.game.constraints.some(
+            (c) => (counts[c.attribute] || 0) < c.minCount && person[c.attribute]
+          )
+          if (hitsUnmet) repeats += 2
+        }
         pushSample(ep.states[i], label, repeats)
       }
     }

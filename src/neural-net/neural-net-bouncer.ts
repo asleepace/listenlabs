@@ -210,7 +210,7 @@ export class NeuralNetBouncer implements BerghainBouncer {
     const fewCutoff = 5 // treat "need <= 5" as tiny remaining
     const criticalFew = Object.keys(needed).filter((a) => needed[a] > 0 && needed[a] <= fewCutoff)
     const fewNeed = criticalFew.reduce((s, a) => s + needed[a], 0)
-    const slack = 1 // allow 1 seat of wiggle
+    const slack = 0 // allow 1 seat of wiggle
 
     if (criticalFew.length && seatsLeft <= fewNeed + slack) {
       // Must hit at least one of the near-critical attributes
@@ -223,9 +223,10 @@ export class NeuralNetBouncer implements BerghainBouncer {
     //   const topCritical = [...critical].sort((a, b) => needed[b] - needed[a]).slice(0, Math.min(2, critical.length))
     //   if (!topCritical.some((a) => guest[a])) return false
     // }
-    if (this.cfg.isProduction && seatsLeft <= 3 && Object.keys(needed).length) {
-      const top = Object.keys(needed).sort((a, b) => needed[b] - needed[a])[0]
-      if (!guest[top]) return false // must help the biggest remaining hole
+    const endgameAttrs = criticalFew.length ? criticalFew : critical
+    if (this.cfg.isProduction && endgameAttrs.length && seatsLeft <= 5) {
+      // Must hit at least one of the near-critical (or critical) attrs
+      return endgameAttrs.some((a) => guest[a])
     }
 
     // Optional exploration (usually 0 in prod)
