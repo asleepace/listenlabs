@@ -1,4 +1,5 @@
-// src/main.ts (where you currently wire BanditBouncer)
+/** @file index.ts (called from src/main.ts) */
+
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import { fileURLToPath } from 'url'
@@ -21,6 +22,13 @@ enum Weights {
   scenario2Normal = `../../bouncer-data/weights-scenario-2.json`,
 }
 
+/**
+ *  # Neural Net
+ *
+ *  This function initializes the neural net to be used against production data.
+ *
+ *  @note this is to be used with real challenge data (keep all config here please.)
+ */
 export async function initializeNeuralNetwork(initialState: GameState): Promise<BerghainBouncer> {
   const weightsPath = path.resolve(__dirname, Weights.scenario2Normal)
 
