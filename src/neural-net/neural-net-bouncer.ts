@@ -199,6 +199,18 @@ export class NeuralNetBouncer implements BerghainBouncer {
       if (!hasAnyCritical) return false
     }
 
+    // --- Last-mile clutch: if a few heads remain and seats are just enough, require a match.
+    const seatsLeft = Math.max(0, Conf.MAX_ADMISSIONS - status.admittedCount)
+    const fewCutoff = 3 // treat "need <= 3" as tiny remaining
+    const criticalFew = Object.keys(needed).filter((a) => needed[a] > 0 && needed[a] <= fewCutoff)
+    const fewNeed = criticalFew.reduce((s, a) => s + needed[a], 0)
+    const slack = 1 // allow 1 seat of wiggle
+
+    if (criticalFew.length && seatsLeft <= fewNeed + slack) {
+      // Must hit at least one of the near-critical attributes
+      if (!criticalFew.some((a) => guest[a])) return false
+    }
+
     // Optional exploration (usually 0 in prod)
     const eps = this.cfg.explorationRate ?? 0
     if (eps > 0 && Math.random() < eps) return Math.random() < 0.5
