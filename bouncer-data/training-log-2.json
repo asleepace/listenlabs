@@ -6696,6 +6696,77 @@
           "bestRejections": 3802
         }
       ]
+    },
+    {
+      "type": "run",
+      "scenario": "2",
+      "startedAt": "2025-09-15T08:00:09.090Z",
+      "finishedAt": "2025-09-15T08:00:19.440Z",
+      "params": {
+        "epochs": null,
+        "episodesPerEpoch": 140,
+        "assistGain": 2.2,
+        "oracleRelabelFrac": 0.25,
+        "elitePercentile": 0.12,
+        "resumeFlag": true
+      },
+      "testResults": {
+        "successRate": 1,
+        "avgRejections": 3743.39,
+        "avgAdmissions": 1000,
+        "minRejections": 3392,
+        "maxRejections": 4086
+      },
+      "trainingStats": []
+    },
+    {
+      "type": "epoch",
+      "scenario": "2",
+      "startedAt": "2025-09-15T08:02:03.445Z",
+      "timestamp": "2025-09-15T08:02:24.884Z",
+      "summary": {
+        "epoch": 1,
+        "loss": 0.3607481277175052,
+        "successRate": 1,
+        "avgRejections": 4458.05,
+        "exploration": 0.1,
+        "totalNudges": 18180,
+        "bestEpisode": {
+          "admitted": 1000,
+          "rejections": 3859,
+          "reward": -4255.02
+        }
+      }
+    },
+    {
+      "type": "run",
+      "scenario": "2",
+      "startedAt": "2025-09-15T08:02:03.445Z",
+      "finishedAt": "2025-09-15T08:02:34.079Z",
+      "params": {
+        "epochs": 3,
+        "episodesPerEpoch": 220,
+        "assistGain": 2,
+        "oracleRelabelFrac": 0.4,
+        "elitePercentile": 0.12,
+        "resumeFlag": true
+      },
+      "testResults": {
+        "successRate": 0.84,
+        "avgRejections": 3397.4523809523807,
+        "avgAdmissions": 1000,
+        "minRejections": 3162,
+        "maxRejections": 3604
+      },
+      "trainingStats": [
+        {
+          "epoch": 1,
+          "avgReward": -4458.05,
+          "avgRejections": 4458.05,
+          "successRate": 1,
+          "bestRejections": 3859
+        }
+      ]
     }
   ]
 }
