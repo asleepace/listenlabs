@@ -327,7 +327,6 @@ export class NeuralNetBouncerRunner {
   }
 
   // ---------- handle running a course on all sample data ----------
-  // ---------- handle running a course on all sample data ----------
   async curriculum({ positional, runner }: { positional: any[]; runner: NeuralNetBouncerRunner }) {
     // discover and order datasets
     const allFiles = (await Disk.getFilePathsInDir(`data/samples/*`))
