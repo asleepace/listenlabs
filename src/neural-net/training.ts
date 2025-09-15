@@ -444,22 +444,19 @@ export class SelfPlayTrainer {
           repeats += label === 1 ? 3 : 1
         }
 
-        /* NEW: berlin_local boost (mirrors creative) */
+        // NEW: berlin_local boost (milder than creative)
         const blConstraint = this.game.constraints.find((c) => c.attribute === 'berlin_local')
         const needBL = (blConstraint ? blConstraint.minCount : 0) - (counts['berlin_local'] || 0)
         if (person['berlin_local'] && needBL > 0) {
-          repeats += label === 1 ? 2 : 1 // slightly milder than creative
+          repeats += label === 1 ? 2 : 1
         }
 
-        /* NEW: tiny endgame clutch oversample when seats ≈ sum of needs */
+        // NEW: endgame clutch oversample when seats ≈ total need
         const seatsLeft = Math.max(0, Conf.MAX_ADMISSIONS - admittedSoFar)
         let totalNeed = 0
-        for (const c of this.game.constraints) {
-          totalNeed += Math.max(0, c.minCount - (counts[c.attribute] || 0))
-        }
+        for (const c of this.game.constraints) totalNeed += Math.max(0, c.minCount - (counts[c.attribute] || 0))
         const tightEndgame = totalNeed > 0 && seatsLeft > 0 && seatsLeft <= totalNeed + 1
         if (tightEndgame) {
-          // reward hitting any unmet attr in a tight finish
           const hitsUnmet = this.game.constraints.some(
             (c) => (counts[c.attribute] || 0) < c.minCount && person[c.attribute]
           )

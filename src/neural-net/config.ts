@@ -59,8 +59,8 @@ export namespace Conf {
     /** Per-attribute weights to nudge the policy where we were systematically off. */
     SHORTFALL_WEIGHTS: {
       creative: 1.6, // push scarce 'creative'
-      techno_lover: 1.2, // mild bump to avoid TL misses
-      berlin_local: 1.3,
+      techno_lover: 1.25, // mild bump to avoid TL misses
+      berlin_local: 1.4,
       // others default to 1.0
     } as Record<string, number>,
 

@@ -181,12 +181,13 @@ export class NeuralNetBouncer implements BerghainBouncer {
 
     // Encode state & get model probability
     const x = this.encoder.encode(status, counts)
-    const raw = this.net.forward?.(x) ?? this.net.infer(x)
+    const raw = (this.net as any).forward?.(x) ?? (this.net as any).infer(x)
     const p = this.toProbability(raw)
-    const theta = this.dynamicThreshold(status)
+    const thetaBase = this.dynamicThreshold(status)
 
     // Quota-aware safety gates
     const needed = this.unmetNeeds(counts)
+    const seatsLeft = Math.max(0, Conf.MAX_ADMISSIONS - status.admittedCount)
 
     // If all quotas are satisfied, be optimistic — admit to finish quickly.
     if (Object.keys(needed).length === 0) return true
@@ -206,48 +207,39 @@ export class NeuralNetBouncer implements BerghainBouncer {
     }
 
     // --- Last-mile clutch: if a few heads remain and seats are just enough, require a match.
-    const seatsLeft = Math.max(0, Conf.MAX_ADMISSIONS - status.admittedCount)
     const fewCutoff = 5 // treat "need <= 5" as tiny remaining
     const criticalFew = Object.keys(needed).filter((a) => needed[a] > 0 && needed[a] <= fewCutoff)
     const fewNeed = criticalFew.reduce((s, a) => s + needed[a], 0)
-    const slack = 0 // allow 1 seat of wiggle
-
+    const slack = 0 // no extra slack
     if (criticalFew.length && seatsLeft <= fewNeed + slack) {
-      // Must hit at least one of the near-critical attributes
       if (!criticalFew.some((a) => guest[a])) return false
     }
 
-    // Production-only: when very few seats remain, require hitting at least one of the top-need attrs.
-    // This avoids "every()" deadlocks while still preventing misses-by-1.
-    // if (this.cfg.isProduction && critical.length && seatsLeft <= 3) {
-    //   const topCritical = [...critical].sort((a, b) => needed[b] - needed[a]).slice(0, Math.min(2, critical.length))
-    //   if (!topCritical.some((a) => guest[a])) return false
-    // }
-    const endgameAttrs = criticalFew.length ? criticalFew : critical
-    if (this.cfg.isProduction && endgameAttrs.length && seatsLeft <= 5) {
-      // Must hit at least one of the near-critical (or critical) attrs
-      return endgameAttrs.some((a) => guest[a])
+    // Production endgame: with very few seats, require the guest to help the pressing few (if any),
+    // otherwise fall back to helping any critical unmet attribute.
+    if ((this.cfg as any).isProduction) {
+      const endgameAttrs = criticalFew.length ? criticalFew : critical
+      if (endgameAttrs.length && seatsLeft <= 5) {
+        if (!endgameAttrs.some((a) => guest[a])) return false
+      }
     }
 
     // Optional exploration (usually 0 in prod)
     const eps = this.cfg.explorationRate ?? 0
     if (eps > 0 && Math.random() < eps) return Math.random() < 0.5
 
-    const progress = status.admittedCount / Conf.MAX_ADMISSIONS
-    const targetAtThisPoint = Conf.TARGET_REJECTIONS * progress
-    const aheadOfTarget = Math.max(0, targetAtThisPoint - status.rejectedCount) // positive = we are “under” rejections
-    const targetNudge = Math.min(0.02, aheadOfTarget / 20000) // up to -0.02 on theta
-
-    const thetaAdj = Math.max(0, theta - targetNudge) // lower theta a hair if we’re under target
-
-    // Near-miss band: if model is close to threshold and guest hits an unmet attr, lean admit.
-    const near = (this.cfg.optimism ?? 0.8) * 0.04 // up to ~0.032
-    if (p >= theta - near && Object.keys(needed).some((a) => needed[a] > 0 && guest[a])) {
-      return true
+    // --- Threshold relief for unmet-attr hits (helps avoid “miss-by-1” endings)
+    const hitsUnmet = Object.keys(needed).filter((a) => guest[a]).length
+    let thetaAdj = 0
+    if (hitsUnmet > 0) thetaAdj += 0.02 * Math.min(2, hitsUnmet) // up to ~0.04 relief
+    const totalNeed = Object.values(needed).reduce((s, v) => s + v, 0)
+    if (seatsLeft > 0 && totalNeed > 0 && seatsLeft <= totalNeed + 1) {
+      thetaAdj += 0.02 // tight endgame: tiny extra relief
     }
+    const theta = Math.max(0, thetaBase - thetaAdj)
 
     // Model decision
-    return p >= thetaAdj
+    return p >= theta
   }
 
   // required by interface...

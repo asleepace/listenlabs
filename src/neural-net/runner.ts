@@ -667,6 +667,13 @@ export async function main() {
       console.log(`  Average Rejections (successful only): ${avgRejections.toFixed(0)}`)
       break
     }
+    case 'validate': {
+      const samples = await Disk.getFilePathsInDir('data/samples/*')
+      samples.forEach(async (sample) => {
+        await Bun.$`bun run neural test ${sample} --mode=bouncer`
+      })
+      break
+    }
     case 'sanity': {
       const out1 = await Bun.$`bun run src/neural-net/runner test "" --mode=score`.text()
       const out2 = await Bun.$`bun run src/neural-net/runner test "" --mode=bouncer`.text()
@@ -688,6 +695,7 @@ export async function main() {
       console.log('  test [datafile] [--mode=score|bouncer|hybrid]    - Run a single test game')
       console.log('  resume [epochs] [episodes]                       - Continue training from saved weights')
       console.log('  benchmark [--mode=score|bouncer|hybrid]          - Run 10 games and show statistics')
+      console.log('  validate                                         - Run test on on all samples in data/smaples/*')
       console.log('  diagnose                                         - Greedy feasibility check over a sampled pool')
       console.log('  curriculum                                       - train data on samples files in directory')
       console.log('  sanity                                           - run tests in all three modes (alias)')
