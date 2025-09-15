@@ -37,11 +37,11 @@ export async function initializeNeuralNetwork(initialState: GameState): Promise<
   // build bouncer (no exploration for prod)
   const bouncer = new NeuralNetBouncer(initialState.game, {
     explorationRate: 0,
-    baseThreshold: 0.28,
-    minThreshold: 0.18,
-    maxThreshold: 0.6,
-    urgencyFactor: 1.5, // a little less tightening
-    optimism: 0.8, // bigger slack before gates kick in
+    baseThreshold: 0.26,
+    minThreshold: 0.16,
+    maxThreshold: 0.58,
+    urgencyFactor: 1.3, // a little less tightening
+    optimism: 0.9, // bigger slack before gates kick in
     isProduction: true,
   })
 

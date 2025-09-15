@@ -91,13 +91,18 @@ export class NeuralNetBouncer implements BerghainBouncer {
 
   /** Progress-aware threshold with safe bounds */
   private dynamicThreshold(status: GameStatusRunning<any>): number {
-    const base = this.cfg.baseThreshold ?? 0.28
-    const minT = this.cfg.minThreshold ?? 0.18
-    const maxT = this.cfg.maxThreshold ?? 0.6
-    const optimism = this.cfg.optimism ?? 0.7 // higher = more lenient
+    const base = this.cfg.baseThreshold ?? 0.26 // was 0.28
+    const minT = this.cfg.minThreshold ?? 0.16 // was 0.18
+    const maxT = this.cfg.maxThreshold ?? 0.58 // was 0.60
+    const optimism = this.cfg.optimism ?? 0.8 // 0..1
+
     const progress = Math.min(1, status.admittedCount / Math.max(1, Conf.MAX_ADMISSIONS))
-    const slope = 0.1 * (1 - 0.5 * (optimism - 0.7)) // small effect of optimism on slope
-    const theta = base + slope * progress
+    const slope = 0.08 // was 0.10 — gentler tightening
+
+    // optimism nudges the threshold downward up to ~0.04
+    const adj = (optimism - 0.5) * 0.08
+    const theta = base + slope * progress - adj
+
     return Math.max(minT, Math.min(maxT, theta))
   }
 
@@ -214,13 +219,20 @@ export class NeuralNetBouncer implements BerghainBouncer {
 
     // Production-only: when very few seats remain, require hitting at least one of the top-need attrs.
     // This avoids "every()" deadlocks while still preventing misses-by-1.
-    if (this.cfg.isProduction && critical.length && seatsLeft <= 2) {
+    if (this.cfg.isProduction && critical.length && seatsLeft <= 3) {
       const topCritical = [...critical].sort((a, b) => needed[b] - needed[a]).slice(0, Math.min(2, critical.length))
       if (!topCritical.some((a) => guest[a])) return false
     }
+
     // Optional exploration (usually 0 in prod)
     const eps = this.cfg.explorationRate ?? 0
     if (eps > 0 && Math.random() < eps) return Math.random() < 0.5
+
+    // Near-miss band: if model is close to threshold and guest hits an unmet attr, lean admit.
+    const near = (this.cfg.optimism ?? 0.8) * 0.04 // up to ~0.032
+    if (p >= theta - near && Object.keys(needed).some((a) => needed[a] > 0 && guest[a])) {
+      return true
+    }
 
     // Model decision
     return p >= theta

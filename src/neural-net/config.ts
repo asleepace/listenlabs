@@ -39,7 +39,7 @@ export namespace Conf {
    * Keep the classifier from collapsing to "deny" (raise if deny happy)
    * @default 0.45
    */
-  export const POS_MIN = 0.45
+  export const POS_MIN = 0.5
 
   /**
    * Default learning rate for the model.
@@ -53,7 +53,7 @@ export namespace Conf {
   export const TRAINING = Object.freeze({
     LAMBDA_SHORTFALL: 50, // linear penalty per missing head
     QUAD_SHORTFALL: 0.05, // extra penalty for concentrated gaps
-    BETA_SURPLUS: 1.0, // mild penalty per head above required
+    BETA_SURPLUS: 0.7, // mild penalty per head above required
     LOSS_PENALTY: 100000, // flat penalty for losing (unmet or reject cap)
 
     /** Per-attribute weights to nudge the policy where we were systematically off. */

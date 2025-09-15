@@ -74,8 +74,8 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
 
   const TARGET_REJECTIONS = config.targetRejections ?? Conf.TARGET_REJECTIONS
   const CUSHION = config.safetyCushion ?? Conf.SAFETY_CUSHION // you already pass safetyCushion: 1
-  const CUSHION_PER_QUOTA = 3 // “4 person cushion” per unmet quota
-  const BREATH_MULTIPLIER = 5 // scales when to start getting strict
+  const CUSHION_PER_QUOTA = 2 // “4 person cushion” per unmet quota
+  const BREATH_MULTIPLIER = 4 // scales when to start getting strict
 
   const quotas = Object.fromEntries(
     game.constraints.map((constraint) => {
@@ -91,7 +91,7 @@ export function initializeScoring(game: GameState['game'], config: ScoringConfig
     shortfallPerHead: 3.0, // ↑ was 2.0
     overagePerHead: 0.25, // ↓ was 0.5
     unmetQuotaConstant: 200, // ↑ was 100
-    targetPerPerson: 2.0,
+    targetPerPerson: 2.5,
     targetBonusCap: 1000,
     targetPenaltyCap: 5000,
     ...(config.weights ?? {}),
