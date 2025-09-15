@@ -572,7 +572,9 @@ export class SelfPlayTrainer {
       console.log(`  Success:`, successRate !== 0)
       const label = bestEp.completed ? 'SUCCESS' : 'FAIL'
       console.log(
-        `  Best episode — (${label}) admitted: ${bestEp.admittedAtEnd}, rejections: ${bestEp.rejections}, reward: ${bestEp.reward}`
+        `  Best episode — (${label}) admitted: ${bestEp.admittedAtEnd}, rejections:`,
+        bestEp.rejections,
+        `, reward: ${bestEp.reward}`
       )
       if (!bestEp.completed && bestEpInfo.shortfalls.length) {
         console.log('  Missed quotas:', bestEpInfo.shortfalls.map((s) => `${s.attr}:${s.need}`).join(', '))
@@ -625,7 +627,10 @@ export class SelfPlayTrainer {
     }
 
     console.log('\nTraining complete!')
-    if (this.bestEpisode) console.log(`Best episode: ${this.bestEpisode.rejections} rejections`)
+    if (this.bestEpisode) {
+      console.log(`Best episode (rejections):`, this.bestEpisode.rejections)
+      console.log()
+    }
   }
 
   private assistGainPreview(): number {

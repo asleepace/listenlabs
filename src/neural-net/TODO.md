@@ -52,6 +52,8 @@ What this does:
 Run all three modes on the same file you’ll compete on:
 
 ```bash
+bun run src/neural-net/runner test data/samples/sample-07.json --mode=bouncer
+bun run src/neural-net/runner test data/samples/sample-06.json --mode=bouncer
 bun run src/neural-net/runner test data/samples/sample-05.json --mode=bouncer
 bun run src/neural-net/runner test data/samples/sample-04.json --mode=bouncer
 ```

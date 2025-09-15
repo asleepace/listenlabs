@@ -685,6 +685,7 @@ export async function main() {
       console.log('  resume [epochs] [episodes]                       - Continue training from saved weights')
       console.log('  benchmark [--mode=score|bouncer|hybrid]          - Run 10 games and show statistics')
       console.log('  diagnose                                         - Greedy feasibility check over a sampled pool')
+      console.log('  curriculum                                       - train data on samples files in directory')
       console.log('  sanity                                           - run tests in all three modes (alias)')
     }
   }
