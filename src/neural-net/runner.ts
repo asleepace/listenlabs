@@ -340,7 +340,28 @@ export class NeuralNetBouncerRunner {
       safetyCushion: 1,
     })
 
-    const getData = sampleData ? () => sampleData[scoring.nextIndex] : () => this.generatePerson(scoring.nextIndex)
+    // after:
+    function fisherYates<T>(arr: T[]) {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1))
+        ;[arr[i], arr[j]] = [arr[j], arr[i]]
+      }
+      return arr
+    }
+
+    let loopPool: any[] | undefined
+    let ptr = 0
+
+    const getData = sampleData
+      ? () => {
+          if (!loopPool) loopPool = fisherYates(sampleData.slice())
+          if (ptr >= loopPool.length) {
+            loopPool = fisherYates(loopPool) // reshuffle each wrap
+            ptr = 0
+          }
+          return loopPool[ptr++]
+        }
+      : () => this.generatePerson(scoring.nextIndex)
 
     const getOrGenerateNextGuest = (): ScenarioAttributes => {
       if (!this.game) throw new Error('Game not initialized')
@@ -363,7 +384,7 @@ export class NeuralNetBouncerRunner {
       return attributes as ScenarioAttributes
     }
 
-    while (scoring.inProgress() && (!sampleData || scoring.nextIndex < sampleData.length)) {
+    while (scoring.inProgress()) {
       // --- get or generate the next guest ---
       const guest = getOrGenerateNextGuest()
 

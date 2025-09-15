@@ -16,7 +16,7 @@ No resume; high oracle signal to shape the policy.
 
 ```bash
 bun run src/neural-net/runner train 12 160 \
-  --datafile=data/samples/sample-04.json \
+  --datafile=data/samples/sample-07.json \
   --assistGain=2.5 \
   --oracleRelabelFrac=0.70 \
   --elitePercentile=0.10 \
@@ -92,3 +92,17 @@ In initializeNeuralNetwork:
 - Keep the updated admit(...) with the quota-helpful threshold nudges you added.
 
 That’s it. Kick off Phase 1 now; when it finishes, run Phase 2, then the three eval commands, and ship the best mode.
+
+## Next Steps
+
+```bash
+# save best weights when they are found:
+cp bouncer-data/weights-scenario-2.json data/best/weights-scenario2-01.json
+
+# run against all current files...
+bun run src/neural-net/runner test data/samples/sample-07.json --mode=bouncer
+bun run src/neural-net/runner test data/samples/sample-06.json --mode=bouncer
+bun run src/neural-net/runner test data/samples/sample-05.json --mode=bouncer
+bun run src/neural-net/runner test data/samples/sample-04.json --mode=bouncer
+bun run src/neural-net/runner benchmark --mode=bouncer
+```
