@@ -8,8 +8,8 @@ The challenge has ended and I placed **96th** overall on the [leaderboard](https
 
 | Place                                        | Name                                    | Scenario 1 | Scenario 2 | Scenario 3 | Total |
 | -------------------------------------------- | --------------------------------------- | ---------- | ---------- | ---------- | ----- |
-| 98 │ Colin Teahan │ 805 │ 3459 │ 4340 │ 8604 |
-| 400                                          | gpt-5-pro │ 1140 │ 7017 │ 16756 │ 24913 |
+| 98                                           | Colin Teahan                            | 805        | 3459       | 4340       | 8604  |
+| 400                                          | gpt-5-pro                               | 1140       | 7017       | 16756      | 24913 |
 
 ```bash
 # download the repo & install deps (mainly just axios)
