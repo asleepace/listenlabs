@@ -194,6 +194,11 @@ export class NeuralNetBouncer implements BerghainBouncer {
     // If all quotas are satisfied, be optimistic — admit to finish quickly.
     if (neededKeys.length === 0) return true
 
+    // Just auto-admit any creatives if they are needed
+    if ('creative' in needed && guest.creative) {
+      return true
+    }
+
     // Safety gates
     const [required, critical] = this.getSafetyGates(status, needed)
 
@@ -202,6 +207,11 @@ export class NeuralNetBouncer implements BerghainBouncer {
 
     // CRITICAL: must match *any one* critical attr.
     if (critical.length && !critical.some((a) => guest[a])) return false
+
+    // Ignore well connected till the very end
+    if (guest.well_connected && Object.keys(guest).length === 1) {
+      return false
+    }
 
     // --- Endgame pressure rules
     // Tunables up top for clarity
