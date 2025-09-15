@@ -9,6 +9,7 @@ import type { GameState } from '../types'
 export namespace Disk {
   /**
    * Returns an array of all files in the specified directory.
+   * @default 'data/*''
    */
   export async function getFilePathsInDir(pattern = 'data/*'): Promise<string[]> {
     console.log(`[disk] reading files from directory: "${pattern}"`)

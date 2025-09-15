@@ -330,7 +330,7 @@ export class NeuralNetBouncerRunner {
   // ---------- handle running a course on all sample data ----------
   async curriculum({ positional, runner }: { positional: any[]; runner: NeuralNetBouncerRunner }) {
     // discover and order datasets
-    const allFiles = (await Disk.getFilePathsInDir('data/samples/'))
+    const allFiles = (await Disk.getFilePathsInDir(`data/samples/*`))
       .filter((f) => f.endsWith('.json'))
       .sort((a, b) => a.localeCompare(b))
 
@@ -339,7 +339,7 @@ export class NeuralNetBouncerRunner {
     samples.push('none:2') // end with a short self-play consolidation
     const defaultSampleString = samples.join(',')
 
-    console.log('[trainer] curriculum:', { samples, defaultSampleString })
+    console.log('[trainer] curriculum:', samples)
 
     const phasesArg: string = positional[0] || defaultSampleString
 
