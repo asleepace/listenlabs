@@ -163,45 +163,47 @@ export class NeuralNetBouncer implements BerghainBouncer {
    */
   public admit(status: GameStatusRunning<ScenarioAttributes>, countsOverride?: Record<string, number>): boolean {
     const counts = countsOverride ?? this.counts
-    if (!NeuralNet.isNeuralNet(this.net)) throw new Error('NeuralNetBouncer: Neural net is not defined!')
+
+    if (!NeuralNet.isNeuralNet(this.net)) {
+      throw new Error('NeuralNetBouncer: Neural net is not defined!')
+    }
+    if (!counts) {
+      throw new Error('NeuralNetBouncer: Missing counts!')
+    }
 
     const guest = status.nextPerson.attributes
-    const x = this.encoder.encode(status, counts)
-    const p = this.toProbability(this.net.forward?.(x) ?? this.net.infer(x))
-    let theta = this.dynamicThreshold(status)
 
-    // unmet quotas situation
+    // Encode state & get model probability
+    const x = this.encoder.encode(status, counts)
+    const raw = this.net.forward?.(x) ?? this.net.infer(x)
+    const p = this.toProbability(raw)
+    const theta = this.dynamicThreshold(status)
+
+    // Quota-aware safety gates
     const needed = this.unmetNeeds(counts)
-    if (Object.keys(needed).length === 0) return true // optimistic finish
+
+    // If all quotas are satisfied, be optimistic — admit to finish quickly.
+    if (Object.keys(needed).length === 0) return true
 
     const [required, critical] = this.getSafetyGates(status, needed)
 
-    // LATE gates only: allow optimism until we’re truly tight
-    const seatsLeft = Math.max(0, Conf.MAX_ADMISSIONS - status.admittedCount)
-    const totalNeed = Object.values(needed).reduce((s, n) => s + n, 0)
-
-    // optimism buffer: number of seats we allow for flexibility
-    const optimism = this.cfg.optimism ?? 0.7
-    const buffer = Math.max(12, Math.floor(optimism * 30)) // ~12–30 seats of slack
-
-    // Only enforce gates when we’re inside the danger zone.
-    const inDanger = seatsLeft <= totalNeed + Math.ceil(buffer * 0.25)
-
-    if (inDanger) {
-      if (required.length && !required.every((a) => guest[a])) return false
-      const hits = critical.filter((a) => guest[a]).length
-      if (critical.length && hits === 0) return false
-      // Friendly nudge if we do help: drop theta a bit
-      if (hits > 0) theta -= 0.06 * hits
+    // Softer REQUIRED: guest must match *any one* of the required attrs (not all).
+    if (required.length) {
+      const hasAnyRequired = required.some((a) => guest[a])
+      if (!hasAnyRequired) return false
     }
 
-    // modest bias for rare attr still unmet
-    if ((needed['creative'] ?? 0) > 0 && guest['creative']) theta -= 0.05
+    // CRITICAL: guest must match at least one of the critical attrs if present.
+    if (critical.length) {
+      const hasAnyCritical = critical.some((a) => guest[a])
+      if (!hasAnyCritical) return false
+    }
 
-    // exploration (likely 0 in prod)
+    // Optional exploration (usually 0 in prod)
     const eps = this.cfg.explorationRate ?? 0
     if (eps > 0 && Math.random() < eps) return Math.random() < 0.5
 
+    // Model decision
     return p >= theta
   }
 

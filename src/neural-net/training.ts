@@ -8,6 +8,7 @@ import { initializeScoring } from './scoring'
 import { Conf } from './config'
 import { clamp, toFixed } from './util'
 import { Disk } from '../utils/disk'
+import type { NeuralNetBouncerRunner } from './runner'
 
 interface Episode {
   admittedPrefix: number[] // admitted count before each decision
@@ -124,6 +125,11 @@ export class SelfPlayTrainer {
     }
 
     this.net.setLearningRate(this.config.learningRate)
+  }
+
+  setDataset(dataset: ScenarioAttributes[] | undefined) {
+    this.dataset = dataset
+    this.datasetPtr = 0
   }
 
   loadWeights(weights: any): void {

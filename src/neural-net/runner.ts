@@ -326,6 +326,111 @@ export class NeuralNetBouncerRunner {
     scoring.update({ guest, admit })
   }
 
+  // ---------- handle running a course on all sample data ----------
+  // ---------- handle running a course on all sample data ----------
+  async curriculum({ positional, runner }: { positional: any[]; runner: NeuralNetBouncerRunner }) {
+    // discover and order datasets
+    const allFiles = (await Disk.getFilePathsInDir('data/samples/'))
+      .filter((f) => f.endsWith('.json'))
+      .sort((a, b) => a.localeCompare(b))
+
+    const epochsPerSample = 4
+    const samples = allFiles.map((fp) => `${fp}:${epochsPerSample}`)
+    samples.push('none:2') // end with a short self-play consolidation
+    const defaultSampleString = samples.join(',')
+
+    console.log('[trainer] curriculum:', { samples, defaultSampleString })
+
+    const phasesArg: string = positional[0] || defaultSampleString
+
+    // Base episodes per epoch. We’ll optionally scale this per phase for uneven sizes.
+    const baseEpisodes = parseInt(positional[1] || '150', 10)
+
+    // Build game and trainer fresh (no runner.train side-effects)
+    const game = (runner as any).initializeGame()
+    const { SelfPlayTrainer, getSampleGame } = await import('./training')
+
+    const trainer = new SelfPlayTrainer(game, {
+      episodes: baseEpisodes,
+      explorationStart: 0.1,
+      explorationEnd: 0.05,
+      oracleRelabelFrac: 0.6,
+      elitePercentile: 0.12,
+      assistGain: 3,
+    })
+
+    const weightsPath = runner.weightsPath
+
+    // Track best checkpoint across the entire curriculum
+    let bestAcross = { rej: Infinity as number, json: trainer.getBestWeights() }
+
+    const parsePhases = (arg: string) =>
+      arg.split(',').map((s) => {
+        const [file, e] = s.split(':')
+        return { file, epochs: Math.max(1, parseInt(e || '3', 10)) }
+      })
+
+    const phases = parsePhases(phasesArg)
+
+    for (const phase of phases) {
+      let dataset: any[] | undefined = undefined
+      let phaseEpisodes = baseEpisodes
+
+      if (phase.file !== 'none') {
+        try {
+          // load + shuffle dataset
+          dataset = await getSampleGame(phase.file)
+          // OPTIONAL: scale episodes to dataset size (rough guidance)
+          // ~1 episode ~= 1000 decisions; tune to your env:
+          const k = Math.max(0.5, Math.min(2.0, dataset.length / 6000)) // 6k is mid-sized
+          phaseEpisodes = Math.max(80, Math.round(baseEpisodes * k))
+        } catch (e) {
+          console.warn(`[curriculum] failed to load ${phase.file}:`, (e as Error).message)
+          continue
+        }
+      }
+
+      // swap dataset (or switch to self-play)
+      trainer.setDataset(dataset as any)
+      if (phase.file !== 'none') (SelfPlayTrainer as any).lastDatasetPath = phase.file
+
+      // temporarily adjust episodes for this phase
+      const prevEpisodes = (trainer as any).config.episodes
+      ;(trainer as any).config.episodes = phaseEpisodes
+
+      console.log(`[phase] ${phase.file} — epochs=${phase.epochs}, episodes/epoch=${phaseEpisodes}`)
+
+      await trainer.train(phase.epochs, async (summary) => {
+        // save rolling weights every epoch
+        await Disk.saveJsonFile(weightsPath, trainer.getBestWeights())
+        console.log(`[phase save] ${phase.file} @ epoch ${summary.epoch} → ${weightsPath}`)
+      })
+
+      // restore episodes for next phase
+      ;(trainer as any).config.episodes = prevEpisodes
+
+      // quick pure-NN eval (consistent with your runner’s test)
+      const evalPure = trainer.test(60, { explorationRate: 0, usePolicyFusion: false, useTeacherAssist: false })
+      console.log(
+        `[phase eval] ${phase.file} → success=${(evalPure.successRate * 100).toFixed(
+          1
+        )}% , avgRej=${evalPure.avgRejections.toFixed(0)}`
+      )
+
+      if (evalPure.successRate > 0 && evalPure.avgRejections < bestAcross.rej) {
+        bestAcross = { rej: evalPure.avgRejections, json: trainer.getBestWeights() }
+        await Disk.saveJsonFile(weightsPath.replace(/\.json$/, '.best.json'), bestAcross.json)
+        console.log(
+          `[best-so-far] avgRej=${bestAcross.rej.toFixed(0)} → ${weightsPath.replace(/\.json$/, '.best.json')}`
+        )
+      }
+    }
+
+    // Final save (best across all phases)
+    await Disk.saveJsonFile(weightsPath, bestAcross.json)
+    console.log(`[curriculum] done. best avg rejections ~ ${bestAcross.rej.toFixed(0)} | saved → ${weightsPath}`)
+  }
+
   /**
    *  ========= RUN GAME =========
    */
@@ -474,6 +579,10 @@ export async function main() {
   const mode = (flags.mode as 'score' | 'bouncer' | 'hybrid') || 'score'
 
   switch (command) {
+    case 'curriculum': {
+      await runner.curriculum({ positional, runner })
+      break
+    }
     case 'train': {
       const epochs = parseInt(positional[0] || '20', 10)
       const episodes = parseInt(positional[1] || '50', 10)
