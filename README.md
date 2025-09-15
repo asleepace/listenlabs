@@ -1,10 +1,65 @@
-# listenlabs
-
 <img src="https://preview.redd.it/found-this-puzzle-on-a-billboard-in-sf-i-tried-feeding-it-v0-qe2xwiks2smf1.jpeg?width=1080&crop=smart&auto=webp&s=ea76455577cb6d9704b3761d9a158f4b7663bc75" />
 
-https://www.reddit.com/r/OpenAI/comments/1n6o5or/found_this_puzzle_on_a_billboard_in_sf_i_tried/#lightbox
+# Berghain Challenge
 
-## Game Configuration
+The challenge has ended and I placed **96th** overall on the [leaderboard](https://berghain.challenges.listenlabs.ai/).
+
+| Place                                        | Name                                    | Scenario 1 | Scenario 2 | Scenario 3 | Total |
+| -------------------------------------------- | --------------------------------------- | ---------- | ---------- | ---------- | ----- |
+| 98 │ Colin Teahan │ 805 │ 3459 │ 4340 │ 8604 |
+| 400                                          | gpt-5-pro │ 1140 │ 7017 │ 16756 │ 24913 |
+
+```bash
+# download the repo & install deps (mainly just axios)
+git clone https://github.com/asleepace/listenlabs.git
+bun i
+
+# run one of the specific scenarios
+bun run game --scenario 2
+
+# various neural-net commands (training)
+bun run game neural validate
+bun run game neural train
+bun run game nueral resume
+bun run game neural curriculum
+```
+
+## Table of Contents
+
+This repo contains several different algorithms for the "bouncers" used in this challenge, ranging from base logic to neaural nets.
+
+- [bouncers](./src/bouncers/): deprecated bouncers from previous versions
+- [cli](./src/cli/): command line interface helpers for the main app
+- [conf](./src/conf/): shared configuration files
+- [example](./src/example/): assorted code snippets
+- [math](./src/math/): math utilities for common operations
+- [neural-net](./src/neural-net/): everything neural net related (latest bouncer)
+- [utils](./src/utils/): utilities for reading stuff from disk, logging, etc.
+
+The following are important files:
+
+- [berghain.ts](./src/berghain.ts): used to create games, make api calls, etc.
+- [index.ts](./src/index.ts): main entry point where the app is run
+
+Along with these important data directories:
+
+- [data/](./data/): generic data produced from different places in the app
+- [data/samples/](./data/samples/): real challenge data recorded while playing
+- [data/best/](/data/best/): best weights from training neural net.
+- [bouncer-data/](/bouncer-data/): training data for neural net
+
+## Neural Net
+
+The latest and best version of the algorithm used in this challenge was the neural net implementation, which is found
+in the neural net directory.
+
+Please see the [`INFO.md`](./src/neural-net/INFO.md) in that folder for more info.
+
+## Related
+
+- https://www.reddit.com/r/OpenAI/comments/1n6o5or/found_this_puzzle_on_a_billboard_in_sf_i_tried/#lightbox
+
+## Bandit Configuration (Deprecated)
 
 ### HIGH IMPACT (tune these first):
 
