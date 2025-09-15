@@ -242,7 +242,7 @@ export class NeuralNetBouncer implements BerghainBouncer {
     }
 
     // Model decision
-    return p >= theta
+    return p >= thetaAdj
   }
 
   // required by interface...
