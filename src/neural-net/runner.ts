@@ -208,6 +208,7 @@ export class NeuralNetBouncerRunner {
         maxThreshold: 0.6,
         urgencyFactor: 1.5, // a little less tightening
         optimism: 0.8, // bigger slack before gates kick in
+        isProduction: true,
       })
 
       // Prefer static loader; fall back to instance methods if present.
