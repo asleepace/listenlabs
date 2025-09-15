@@ -21,7 +21,7 @@ export namespace Conf {
    * time we admit our last person (lower is better / harder).
    * @default 5_000
    */
-  export const TARGET_REJECTIONS = 3_800
+  export const TARGET_REJECTIONS = 4500
 
   /**
    * The total number of features for our neural net.
@@ -65,8 +65,8 @@ export namespace Conf {
     } as Record<string, number>,
 
     SURPLUS_WEIGHTS: {
-      // creative: 1.6, // penalize 'creative' overshoot
-      well_connected: 1.8,
+      // penalize 'creative' overshoot
+      well_connected: 2.4,
       // others default to 1.0
     } as Record<string, number>,
 

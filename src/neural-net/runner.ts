@@ -643,35 +643,54 @@ export async function main() {
         console.log('Please train the model first: bun run src/neural-net/runner train 20')
         break
       }
+
       console.log('\n=== Running Benchmark (10 games) ===\n')
       console.log(`Mode: ${mode}`)
+
       const results: any[] = []
       let successes = 0
+      let targetHits = 0
+
       for (let i = 0; i < 10; i++) {
         const result = runner.runGame(undefined, mode)
         results.push(result)
-        if (result.status === 'completed') {
+
+        const okMix = result.status === 'completed' // constraints satisfied
+        const finalRejections = result.finalRejections ?? 0
+        const hitTarget = finalRejections <= Conf.TARGET_REJECTIONS
+
+        if (okMix) {
           successes++
-          console.log(`Game ${i + 1}: SUCCESS - ${result.finalRejections} rejections`)
+          if (!hitTarget) {
+            console.warn(`[benchmark] hit mix but missed target: rej=${finalRejections} (> ${Conf.TARGET_REJECTIONS})`)
+          } else {
+            targetHits++
+          }
+          console.log(`Game ${i + 1}: SUCCESS - ${finalRejections} rejections`)
         } else {
           console.log(`Game ${i + 1}: FAILED`)
         }
       }
+
       const successfulGames = results.filter((r) => r.status === 'completed')
       const avgRejections =
         successfulGames.length > 0
           ? successfulGames.reduce((sum, r) => sum + r.finalRejections, 0) / successfulGames.length
           : 0
+
       console.log(`\nBenchmark Results:`)
-      console.log(`  Success Rate: ${((successes / 10) * 100).toFixed(0)}%`)
+      console.log(`  Success Rate (mix met): ${((successes / 10) * 100).toFixed(0)}%`)
       console.log(`  Average Rejections (successful only): ${avgRejections.toFixed(0)}`)
+      console.log(`  Target Hits: ${targetHits}/${successes} (<= ${Conf.TARGET_REJECTIONS})`)
       break
     }
+
     case 'validate': {
       const samples = await Disk.getFilePathsInDir('data/samples/*')
       samples.forEach(async (sample) => {
         await Bun.$`bun run neural test ${sample} --mode=bouncer`
       })
+      await Bun.$`bun run src/neural-net/runner benchmark --mode=bouncer`
       break
     }
     case 'sanity': {

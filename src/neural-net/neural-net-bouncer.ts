@@ -91,13 +91,13 @@ export class NeuralNetBouncer implements BerghainBouncer {
 
   /** Progress-aware threshold with safe bounds */
   private dynamicThreshold(status: GameStatusRunning<any>): number {
-    const base = this.cfg.baseThreshold ?? 0.26 // was 0.28
+    const base = this.cfg.baseThreshold ?? 0.27 // was 0.28
     const minT = this.cfg.minThreshold ?? 0.16 // was 0.18
     const maxT = this.cfg.maxThreshold ?? 0.58 // was 0.60
     const optimism = this.cfg.optimism ?? 0.8 // 0..1
 
     const progress = Math.min(1, status.admittedCount / Math.max(1, Conf.MAX_ADMISSIONS))
-    const slope = 0.08 // was 0.10 — gentler tightening
+    const slope = 0.09 // was 0.10 — gentler tightening
 
     // optimism nudges the threshold downward up to ~0.04
     const adj = (optimism - 0.5) * 0.08
@@ -170,6 +170,7 @@ export class NeuralNetBouncer implements BerghainBouncer {
   public admit(status: GameStatusRunning<ScenarioAttributes>, countsOverride?: Record<string, number>): boolean {
     const counts = countsOverride ?? this.counts
 
+    // --- Preconditions
     if (!NeuralNet.isNeuralNet(this.net)) {
       throw new Error('NeuralNetBouncer: Neural net is not defined!')
     }
@@ -179,66 +180,75 @@ export class NeuralNetBouncer implements BerghainBouncer {
 
     const guest = status.nextPerson.attributes
 
-    // Encode state & get model probability
+    // --- Model score + dynamic threshold
     const x = this.encoder.encode(status, counts)
     const raw = (this.net as any).forward?.(x) ?? (this.net as any).infer(x)
     const p = this.toProbability(raw)
     const thetaBase = this.dynamicThreshold(status)
 
-    // Quota-aware safety gates
-    const needed = this.unmetNeeds(counts)
+    // --- Quota bookkeeping
+    const needed = this.unmetNeeds(counts) // map attr -> remaining needed
+    const neededKeys = Object.keys(needed)
     const seatsLeft = Math.max(0, Conf.MAX_ADMISSIONS - status.admittedCount)
 
     // If all quotas are satisfied, be optimistic — admit to finish quickly.
-    if (Object.keys(needed).length === 0) return true
+    if (neededKeys.length === 0) return true
 
+    // Safety gates
     const [required, critical] = this.getSafetyGates(status, needed)
 
-    // Softer REQUIRED: guest must match *any one* of the required attrs (not all).
-    if (required.length) {
-      const hasAnyRequired = required.some((a) => guest[a])
-      if (!hasAnyRequired) return false
+    // REQUIRED: must match *any one* required attr.
+    if (required.length && !required.some((a) => guest[a])) return false
+
+    // CRITICAL: must match *any one* critical attr.
+    if (critical.length && !critical.some((a) => guest[a])) return false
+
+    // --- Endgame pressure rules
+    // Tunables up top for clarity
+    const FEW_CUTOFF = 7 // treat need <= 7 as "near-critical"
+    const ENDGAME_SEATS = 5 // final-seat gating begins here
+    const ENDGAME_SLACK = 0 // zero slack when near quotas
+    const THRESH_HIT_BONUS = 0.02 // per unmet-attr hit
+    const THRESH_MAX_HITS = 2 // cap for hit bonuses
+    const THRESH_TIGHT_BONUS = 0.02 // extra relief when seats ~= needs
+
+    // Compute “near-critical” set and totals once
+    const stillNeeded = neededKeys.filter((a) => needed[a] > 0)
+    const nearCritical = stillNeeded.filter((a) => needed[a] <= FEW_CUTOFF)
+    const fewNeed = nearCritical.reduce((s, a) => s + needed[a], 0)
+    const totalNeed = stillNeeded.reduce((s, a) => s + needed[a], 0)
+
+    // If seats are just enough to cover the last few, require a hit on those.
+    if (nearCritical.length && seatsLeft <= fewNeed + ENDGAME_SLACK) {
+      if (!nearCritical.some((a) => guest[a])) return false
     }
 
-    // CRITICAL: guest must match at least one of the critical attrs if present.
-    if (critical.length) {
-      const hasAnyCritical = critical.some((a) => guest[a])
-      if (!hasAnyCritical) return false
-    }
-
-    // --- Last-mile clutch: if a few heads remain and seats are just enough, require a match.
-    const fewCutoff = 5 // treat "need <= 5" as tiny remaining
-    const criticalFew = Object.keys(needed).filter((a) => needed[a] > 0 && needed[a] <= fewCutoff)
-    const fewNeed = criticalFew.reduce((s, a) => s + needed[a], 0)
-    const slack = 0 // no extra slack
-    if (criticalFew.length && seatsLeft <= fewNeed + slack) {
-      if (!criticalFew.some((a) => guest[a])) return false
-    }
-
-    // Production endgame: with very few seats, require the guest to help the pressing few (if any),
-    // otherwise fall back to helping any critical unmet attribute.
+    // Production endgame: with very few seats, require help on *still-needed* attrs.
     if ((this.cfg as any).isProduction) {
-      const endgameAttrs = criticalFew.length ? criticalFew : critical
-      if (endgameAttrs.length && seatsLeft <= 5) {
+      const endgameAttrs = nearCritical.length ? nearCritical : critical
+      if (endgameAttrs.length && seatsLeft <= ENDGAME_SEATS) {
         if (!endgameAttrs.some((a) => guest[a])) return false
       }
     }
 
-    // Optional exploration (usually 0 in prod)
+    // --- Optional exploration (usually 0 in prod)
     const eps = this.cfg.explorationRate ?? 0
     if (eps > 0 && Math.random() < eps) return Math.random() < 0.5
 
     // --- Threshold relief for unmet-attr hits (helps avoid “miss-by-1” endings)
-    const hitsUnmet = Object.keys(needed).filter((a) => guest[a]).length
+    const hitsUnmet = stillNeeded.reduce((n, a) => n + (guest[a] ? 1 : 0), 0)
     let thetaAdj = 0
-    if (hitsUnmet > 0) thetaAdj += 0.02 * Math.min(2, hitsUnmet) // up to ~0.04 relief
-    const totalNeed = Object.values(needed).reduce((s, v) => s + v, 0)
-    if (seatsLeft > 0 && totalNeed > 0 && seatsLeft <= totalNeed + 1) {
-      thetaAdj += 0.02 // tight endgame: tiny extra relief
+
+    if (hitsUnmet > 0) {
+      thetaAdj += THRESH_HIT_BONUS * Math.min(THRESH_MAX_HITS, hitsUnmet) // up to ~0.04
     }
+    if (seatsLeft > 0 && totalNeed > 0 && seatsLeft <= totalNeed + 1) {
+      thetaAdj += THRESH_TIGHT_BONUS // tiny extra nudge in tight endgames
+    }
+
     const theta = Math.max(0, thetaBase - thetaAdj)
 
-    // Model decision
+    // --- Final decision
     return p >= theta
   }
 
