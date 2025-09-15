@@ -1,0 +1,113 @@
+/** @file index.ts (called from src/main.ts) */
+
+import * as fs from 'fs/promises'
+import * as path from 'path'
+import { fileURLToPath } from 'url'
+import { NeuralNetBouncer } from './neural-net-bouncer'
+import { NeuralNet } from './neural-net'
+import type { BerghainBouncer, GameState, ScenarioAttributes } from '../types'
+import { initializeScoring } from './scoring'
+import { Conf } from './config'
+import { getAttributes, toFixed } from './util'
+import { Disk } from '../utils/disk'
+
+// ESM __dirname shim
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+const trainingData: string[][] = []
+
+enum Weights {
+  scenario2BestAverage = `../../bouncer-data/weights-s2.best-4407avg.json`,
+  scenario2Normal = `../../bouncer-data/weights-scenario-2.json`,
+  scenario2Best = `../../bouncer-data/weights-scenario-2.best.json`,
+}
+
+/**
+ *  # Neural Net
+ *
+ *  This function initializes the neural net to be used against production data.
+ *
+ *  @note this is to be used with real challenge data (keep all config here please.)
+ */
+export async function initializeNeuralNetwork(initialState: GameState): Promise<BerghainBouncer> {
+  const weightsPath = path.resolve(__dirname, Weights.scenario2Best)
+
+  console.log('[neural-net] weights:', weightsPath)
+
+  // build bouncer (no exploration for prod)
+  const bouncer = new NeuralNetBouncer(initialState.game, {
+    explorationRate: 0,
+    baseThreshold: 0.27,
+    minThreshold: 0.17,
+    maxThreshold: 0.58,
+    urgencyFactor: 1.3, // a little less tightening
+    optimism: 0.9, // bigger slack before gates kick in
+    isProduction: true,
+  })
+
+  // load weights (fallback to fresh net if missing)
+  const raw = await fs.readFile(weightsPath, 'utf-8')
+  const json = JSON.parse(raw)
+  const net = NeuralNet.fromJSON(json)
+  bouncer.setNetwork(net)
+  console.log(`[bouncer] Loaded weights: ${weightsPath}`)
+
+  const scoring = initializeScoring(initialState.game, {
+    maxAdmissions: Conf.MAX_ADMISSIONS,
+    maxRejections: Conf.MAX_REJECTIONS,
+  })
+
+  let lastPerson: ScenarioAttributes = {} as ScenarioAttributes
+  let lastAdmit = false
+  let isSampleOnly = false // allow game to progress to 10,000
+
+  const outputFile = `data/random-sample-${+new Date()}.json`
+
+  const saveRandomSample = () => {
+    Disk.saveJsonFile(outputFile, trainingData).catch(console.warn)
+  }
+
+  let totalCreativesSeen = 0
+
+  return {
+    admit(next) {
+      lastPerson = next.nextPerson.attributes
+      if (lastPerson.creative) totalCreativesSeen++
+
+      const admit = bouncer.admit(next, scoring.getCounts())
+      scoring.update({ guest: next.nextPerson.attributes, admit })
+      lastAdmit = admit
+      return admit
+    },
+    getProgress() {
+      const attributes = getAttributes(lastPerson)
+      trainingData.push(attributes)
+
+      if (trainingData.length % 100 === 0) saveRandomSample()
+
+      return {
+        currentIndex: trainingData.length,
+        creativeSeen: totalCreativesSeen,
+        decision: lastAdmit,
+        attributes,
+        admitted: scoring.admitted,
+        rejected: scoring.rejected,
+        quotas: scoring.quotas().map((quota) => ({
+          attribute: quota.attribute,
+          progress: toFixed(quota.progress(), 2),
+          needed: quota.needed(),
+        })),
+      }
+    },
+    getOutput(lastStatus) {
+      saveRandomSample()
+
+      return {
+        ...initialState,
+        status: lastStatus.status,
+        summary: scoring.getSummary(),
+      }
+    },
+  }
+}

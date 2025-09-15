@@ -2,6 +2,7 @@ import { BanditBouncer } from './bandit-bouncer'
 import { Berghain, type ListenLabsConfig } from './berghain'
 import { getCliArgs } from './cli/get-cli-args'
 // import { ColinsBouncer } from './colins-bouncer'
+import { initializeNeuralNetwork } from './neural-net'
 
 console.log('+'.repeat(64))
 
@@ -37,13 +38,14 @@ await Berghain.initialize({
   scenario,
 })
   .withBouncer(async (gameState) => {
-    const bouncer = new BanditBouncer(gameState, {
-      MAX_CAPACITY: 1_000,
-      TARGET_RANGE: 4_000,
-      TOTAL_PEOPLE: 10_000,
-    })
-    await bouncer.initializeLearningData()
-    return bouncer
+    return await initializeNeuralNetwork(gameState)
+    // const bouncer = new BanditBouncer(gameState, {
+    //   MAX_CAPACITY: 1_000,
+    //   TARGET_RANGE: 4_000,
+    //   TOTAL_PEOPLE: 10_000,
+    // })
+    // await bouncer.initializeLearningData()
+    // return bouncer
   })
   // .withBouncer((initialState) => new ColinsBouncer(initialState))
   .startNewGame()
