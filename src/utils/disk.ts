@@ -12,7 +12,6 @@ export namespace Disk {
    * @default 'data/*''
    */
   export async function getFilePathsInDir(pattern = 'data/*'): Promise<string[]> {
-    console.log(`[disk] reading files from directory: "${pattern}"`)
     const filePaths: string[] = []
     const glob = new Glob(pattern)
     for await (const filePath of glob.scan({ absolute: true })) {

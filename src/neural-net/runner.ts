@@ -94,10 +94,17 @@ export class NeuralNetBouncerRunner {
     const explorationDecay = flags.explorationDecay ? Number(flags.explorationDecay) : 0.9
 
     // optional dataset for training
-    const datafile = (flags.datafile || flags.data || '') as string
+    const samples = Array(8)
+      .fill(0)
+      .map((_, i) => `data/samples/sample-0${i + 1}.json`)
+    const randomSample = samples.at(Math.floor(samples.length * Math.random()))
+
+    const datafile = (flags.datafile || flags.data || randomSample) as string
     const optionalDataset = await Try.catch(async () => {
       return await getSampleGame(datafile)
     })
+
+    console.log('[resume] found dataset:', optionalDataset.isOk())
 
     const trainer = new SelfPlayTrainer(this.game, {
       episodes: episodesPerEpoch,
@@ -379,7 +386,7 @@ export class NeuralNetBouncerRunner {
       let dataset: any[] | undefined = undefined
       let phaseEpisodes = baseEpisodes
 
-      if (phase.file !== 'none') {
+      if (phase.file !== 'none' && phase.file) {
         try {
           // load + shuffle dataset
           dataset = await getSampleGame(phase.file)

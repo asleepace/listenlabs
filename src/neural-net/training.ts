@@ -47,10 +47,14 @@ function shuffle<T>(data: T[]) {
   return data
 }
 
-export async function getSampleGame(filePath = 'data/samples/sample-01.json'): Promise<PersonAttributesScenario2[]> {
+export async function getSampleGame(filePath: string): Promise<PersonAttributesScenario2[]> {
   console.log('[dataset] loading data:', filePath)
   const guests = await Disk.getJsonFile<PersonAttributesScenario2[][]>(filePath)
-  if (!guests || !Array.isArray(guests)) throw new Error(`Training: Invalid Game Data!`)
+  console.log('[dataset] entries:', guests.length)
+  if (!guests || !Array.isArray(guests)) {
+    console.warn('[dataset] failed to load file:', filePath)
+    throw new Error(`Training: Invalid Game Data!`)
+  }
   const copy = (): PersonAttributesScenario2 => ({
     berlin_local: false,
     well_connected: false,
