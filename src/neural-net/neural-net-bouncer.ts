@@ -228,6 +228,13 @@ export class NeuralNetBouncer implements BerghainBouncer {
     const eps = this.cfg.explorationRate ?? 0
     if (eps > 0 && Math.random() < eps) return Math.random() < 0.5
 
+    const progress = status.admittedCount / Conf.MAX_ADMISSIONS
+    const targetAtThisPoint = Conf.TARGET_REJECTIONS * progress
+    const aheadOfTarget = Math.max(0, targetAtThisPoint - status.rejectedCount) // positive = we are “under” rejections
+    const targetNudge = Math.min(0.02, aheadOfTarget / 20000) // up to -0.02 on theta
+
+    const thetaAdj = Math.max(0, theta - targetNudge) // lower theta a hair if we’re under target
+
     // Near-miss band: if model is close to threshold and guest hits an unmet attr, lean admit.
     const near = (this.cfg.optimism ?? 0.8) * 0.04 // up to ~0.032
     if (p >= theta - near && Object.keys(needed).some((a) => needed[a] > 0 && guest[a])) {

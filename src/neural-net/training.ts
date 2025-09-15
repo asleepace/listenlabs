@@ -380,6 +380,14 @@ export class SelfPlayTrainer {
     }
 
     let reward = -rejected
+
+    const progress = counts ? Object.values(counts).reduce((a, b) => a + b, 0) / Conf.MAX_ADMISSIONS : 1
+    const targetNow = Conf.TARGET_REJECTIONS * progress
+    const under = Math.max(0, targetNow - rejected)
+    const over = Math.max(0, rejected - targetNow)
+    reward += 0.5 * Math.min(200, under) // small bonus for being ahead of target
+    reward -= 0.5 * Math.min(400, over) // small penalty for lagging
+
     reward -= Conf.TRAINING.LAMBDA_SHORTFALL * totalShortfall
     reward -= Conf.TRAINING.QUAD_SHORTFALL * quadShortfall
     reward -= Conf.TRAINING.BETA_SURPLUS * totalSurplus
