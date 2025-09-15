@@ -24,6 +24,8 @@ bun run game nueral resume
 bun run game neural curriculum
 ```
 
+**NOTE**: Currently the neural net bouncer is only trained on Scenario 2 and will not work for the others, if you want to try a different scenario please swap out the bouncer in `src/index.ts` in the `.withBouncer(() => { /* ... */})` block.
+
 ## Table of Contents
 
 This repo contains several different algorithms for the "bouncers" used in this challenge, ranging from base logic to neaural nets.
