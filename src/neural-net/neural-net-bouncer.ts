@@ -27,6 +27,7 @@ export class NeuralNetBouncer implements BerghainBouncer {
       maxThreshold?: number
       urgencyFactor?: number
       optimism?: number // 0..1 higher = more optimistic (default 0.7)
+      isProduction?: boolean
     } = {}
   ) {
     this.encoder = new StateEncoder(game)
@@ -201,7 +202,7 @@ export class NeuralNetBouncer implements BerghainBouncer {
 
     // --- Last-mile clutch: if a few heads remain and seats are just enough, require a match.
     const seatsLeft = Math.max(0, Conf.MAX_ADMISSIONS - status.admittedCount)
-    const fewCutoff = 3 // treat "need <= 3" as tiny remaining
+    const fewCutoff = 10 // treat "need <= 3" as tiny remaining
     const criticalFew = Object.keys(needed).filter((a) => needed[a] > 0 && needed[a] <= fewCutoff)
     const fewNeed = criticalFew.reduce((s, a) => s + needed[a], 0)
     const slack = 1 // allow 1 seat of wiggle
@@ -209,6 +210,11 @@ export class NeuralNetBouncer implements BerghainBouncer {
     if (criticalFew.length && seatsLeft <= fewNeed + slack) {
       // Must hit at least one of the near-critical attributes
       if (!criticalFew.some((a) => guest[a])) return false
+    }
+
+    // in production for last seats to be filled
+    if (this.cfg.isProduction && critical.length && seatsLeft <= 5) {
+      return critical.every((attr) => guest[attr])
     }
 
     // Optional exploration (usually 0 in prod)
