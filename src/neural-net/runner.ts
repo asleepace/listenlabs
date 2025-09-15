@@ -618,7 +618,8 @@ export async function main() {
       console.log('Mode:', mode)
       console.log('Game Result:')
       console.log(`  Status: ${result.status}`)
-      console.log(`  Final Rejections: ${result.finalRejections}`)
+      console.log(`  Success:`, result.success)
+      console.log(`  Final Rejections:`, result.finalRejections)
       console.log('  Constraints:')
       result.constraints.forEach((c: any) => {
         const ok = c.satisfied ? '✓' : '✗'

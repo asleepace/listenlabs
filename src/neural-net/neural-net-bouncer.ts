@@ -214,7 +214,7 @@ export class NeuralNetBouncer implements BerghainBouncer {
 
     // Production-only: when very few seats remain, require hitting at least one of the top-need attrs.
     // This avoids "every()" deadlocks while still preventing misses-by-1.
-    if (this.cfg.isProduction && critical.length && seatsLeft <= 5) {
+    if (this.cfg.isProduction && critical.length && seatsLeft <= 2) {
       const topCritical = [...critical].sort((a, b) => needed[b] - needed[a]).slice(0, Math.min(2, critical.length))
       if (!topCritical.some((a) => guest[a])) return false
     }

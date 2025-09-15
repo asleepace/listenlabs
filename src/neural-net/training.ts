@@ -562,7 +562,7 @@ export class SelfPlayTrainer {
       console.log(`  Success rate: ${(successRate * 100).toFixed(1)}%`)
       console.log(`  Avg rejections (successful):`, +avgRejections.toFixed(0))
       console.log(`  Avg admitted (all episodes):`, +avgAdmittedAll.toFixed(0))
-      console.log(`  Best rejections: ${this.bestEpisode?.rejections || 'N/A'}`)
+      console.log(`  Best rejections: `, this.bestEpisode?.rejections ?? 'n/a')
       console.log(`  Training loss: ${loss.toFixed(4)}`)
       console.log(`  Exploration rate: ${exploration.toFixed(3)}`)
       console.log(`  Success:`, successRate !== 0)
