@@ -499,11 +499,12 @@ export class SelfPlayTrainer {
     }
 
     // shuffle
-    for (let i = X.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1))
-      ;[X[i], X[j]] = [X[j], X[i]]
-      ;[y[i], y[j]] = [y[j], y[i]]
-    }
+    shuffle(X)
+    // for (let i = X.length - 1; i > 0; i--) {
+    //   const j = Math.floor(Math.random() * (i + 1))
+    //   ;[X[i], X[j]] = [X[j], X[i]]
+    //   ;[y[i], y[j]] = [y[j], y[i]]
+    // }
 
     // minibatches
     const batchSize = Math.max(1, this.config.batchSize)

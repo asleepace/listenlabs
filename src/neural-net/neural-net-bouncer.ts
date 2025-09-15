@@ -163,6 +163,8 @@ export class NeuralNetBouncer implements BerghainBouncer {
     return [[], []]
   }
 
+  private totalCreativeCount = 0
+
   /**
    * IMPORTANT: countsOverride lets the trainer pass the same counts it used to
    * encode the state, so train/test features match.
@@ -182,7 +184,7 @@ export class NeuralNetBouncer implements BerghainBouncer {
 
     // --- Model score + dynamic threshold
     const x = this.encoder.encode(status, counts)
-    const raw = (this.net as any).forward?.(x) ?? (this.net as any).infer(x)
+    const raw = this.net.forward?.(x) ?? this.net.infer(x)
     const p = this.toProbability(raw)
     const thetaBase = this.dynamicThreshold(status)
 
@@ -195,11 +197,21 @@ export class NeuralNetBouncer implements BerghainBouncer {
     if (neededKeys.length === 0) return true
 
     // Just auto-admit any creatives if they are needed
-    if ('creative' in needed && guest.creative) {
+    if (guest.creative) {
       return true
     }
 
     const trueAttrCount = Object.values(guest).filter(Boolean).length
+
+    // Auto admit if they have all atributes
+    if (trueAttrCount === Object.keys(guest).length) {
+      return true
+    }
+
+    // Ignore well connected till the very end
+    if (guest.well_connected && trueAttrCount === 1) {
+      return false
+    }
 
     // Safety gates
     const [required, critical] = this.getSafetyGates(status, needed)
@@ -209,11 +221,6 @@ export class NeuralNetBouncer implements BerghainBouncer {
 
     // CRITICAL: must match *any one* critical attr.
     if (critical.length && !critical.some((a) => guest[a])) return false
-
-    // Ignore well connected till the very end
-    if (guest.well_connected && trueAttrCount === 1) {
-      return false
-    }
 
     // --- Endgame pressure rules
     // Tunables up top for clarity

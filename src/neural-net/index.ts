@@ -8,7 +8,7 @@ import { NeuralNet } from './neural-net'
 import type { BerghainBouncer, GameState, ScenarioAttributes } from '../types'
 import { initializeScoring } from './scoring'
 import { Conf } from './config'
-import { getAttributes } from './util'
+import { getAttributes, toFixed } from './util'
 import { Disk } from '../utils/disk'
 
 // ESM __dirname shim
@@ -68,10 +68,13 @@ export async function initializeNeuralNetwork(initialState: GameState): Promise<
     Disk.saveJsonFile(outputFile, trainingData).catch(console.warn)
   }
 
+  let totalCreativesSeen = 0
+
   return {
     admit(next) {
       lastPerson = next.nextPerson.attributes
-      if (isSampleOnly) return false
+      if (lastPerson.creative) totalCreativesSeen++
+
       const admit = bouncer.admit(next, scoring.getCounts())
       scoring.update({ guest: next.nextPerson.attributes, admit })
       lastAdmit = admit
@@ -85,14 +88,14 @@ export async function initializeNeuralNetwork(initialState: GameState): Promise<
 
       return {
         currentIndex: trainingData.length,
+        creativeSeen: totalCreativesSeen,
         decision: lastAdmit,
         attributes,
         admitted: scoring.admitted,
         rejected: scoring.rejected,
         quotas: scoring.quotas().map((quota) => ({
           attribute: quota.attribute,
-          relative: (quota.relativeProgress(scoring.getPeopleLeftInLine()) * 100).toFixed(2) + '%',
-          progress: (quota.progress() * 100).toFixed(2) + '%',
+          progress: toFixed(quota.progress(), 2),
           needed: quota.needed(),
         })),
       }

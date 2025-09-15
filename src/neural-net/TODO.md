@@ -34,7 +34,7 @@ Resume from the latest; lower oracle mixing so the NN stands on its own a bit mo
 
 ```bash
 bun run src/neural-net/runner resume 12 180 \
-  --datafile=data/samples/sample-04.json \
+  --datafile=data/samples/sample-01.json \
   --assistGain=2.0 \
   --oracleRelabelFrac=0.50 \
   --elitePercentile=0.08 \
