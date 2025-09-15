@@ -28,6 +28,7 @@ export class NeuralNetBouncer implements BerghainBouncer {
       urgencyFactor?: number
       optimism?: number // 0..1 higher = more optimistic (default 0.7)
       isProduction?: boolean
+      softGates?: boolean
     } = {}
   ) {
     this.encoder = new StateEncoder(game)
@@ -187,9 +188,35 @@ export class NeuralNetBouncer implements BerghainBouncer {
     const thetaBase = this.dynamicThreshold(status)
 
     // --- Quota bookkeeping
-    const needed = this.unmetNeeds(counts) // map attr -> remaining needed
+    const needed = this.unmetNeeds(counts)
     const neededKeys = Object.keys(needed)
     const seatsLeft = Math.max(0, Conf.MAX_ADMISSIONS - status.admittedCount)
+
+    const needSum = neededKeys.reduce((s, k) => s + (needed[k] || 0), 0)
+    const hits = neededKeys.filter((a) => guest[a]).length
+
+    // --- SOFT-GATES MODE: admit aggressively, tiny/endgame windows only
+    if (this.cfg.softGates) {
+      if (neededKeys.length === 0) return true
+
+      // If we are badly behind on quotas, only block total neutrals to save seats.
+      const extremeDeficit = needSum > seatsLeft * 1.5
+      if (extremeDeficit && hits === 0) return false
+
+      // Micro endgame window (much smaller than normal)
+      const FEW_CUTOFF = 3
+      const ENDGAME_SEATS = 2
+      const stillNeeded = neededKeys.filter((a) => needed[a] > 0)
+      const nearCritical = stillNeeded.filter((a) => needed[a] <= FEW_CUTOFF)
+      const fewNeed = nearCritical.reduce((s, a) => s + needed[a], 0)
+      if (nearCritical.length && seatsLeft <= fewNeed) {
+        if (!nearCritical.some((a) => guest[a])) return false
+      }
+
+      // Loosen threshold to push rejections down
+      const theta = Math.max(0, thetaBase - 0.1 - 0.02 * Math.min(2, hits))
+      return p >= theta
+    }
 
     // If all quotas are satisfied, be optimistic — admit to finish quickly.
     if (neededKeys.length === 0) return true

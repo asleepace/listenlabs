@@ -180,7 +180,7 @@ export class NeuralNetBouncerRunner {
       trainingStats: trainer.getStats(),
     })
 
-    this.bouncer = new NeuralNetBouncer(this.game, { explorationRate: 0, baseThreshold: 0.5 })
+    this.bouncer = new NeuralNetBouncer(this.game, { explorationRate: 0, baseThreshold: 0.5, softGates: true })
     this.bouncer.setNetwork(trainer.getNetwork())
   }
 
@@ -209,6 +209,7 @@ export class NeuralNetBouncerRunner {
         urgencyFactor: 1.5, // a little less tightening
         optimism: 0.8, // bigger slack before gates kick in
         isProduction: true,
+        softGates: true,
       })
 
       // Prefer static loader; fall back to instance methods if present.

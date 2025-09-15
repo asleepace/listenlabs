@@ -44,6 +44,7 @@ export async function initializeNeuralNetwork(initialState: GameState): Promise<
     urgencyFactor: 1.3, // a little less tightening
     optimism: 0.9, // bigger slack before gates kick in
     isProduction: true,
+    softGates: true,
   })
 
   // load weights (fallback to fresh net if missing)

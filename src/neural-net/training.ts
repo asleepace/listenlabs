@@ -254,6 +254,7 @@ export class SelfPlayTrainer {
       minThreshold: 0.22,
       maxThreshold: 0.62,
       urgencyFactor: 2.0,
+      softGates: true
     })
     bouncer.setNetwork(this.net)
 
