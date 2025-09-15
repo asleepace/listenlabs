@@ -8,7 +8,7 @@ import { initializeScoring } from './scoring'
 import * as fs from 'fs'
 import * as path from 'path'
 import { createBerghainNet, NeuralNet } from './neural-net'
-import { clamp, parseFlags } from './util'
+import { clamp, parseFlags, toFixed } from './util'
 import { Conf } from './config'
 import { StateEncoder } from './state-encoder'
 import { Disk } from '../utils/disk'
@@ -338,7 +338,11 @@ export class NeuralNetBouncerRunner {
     samples.push('none:2') // end with a short self-play consolidation
     const defaultSampleString = samples.join(',')
 
-    console.log('[trainer] curriculum:', samples)
+    const getLastPath = (path: string) => {
+      return path.split('samples/').at(-1) ?? path
+    }
+
+    console.log('[trainer] curriculum:', samples.map(getLastPath))
 
     const phasesArg: string = positional[0] || defaultSampleString
 
@@ -384,7 +388,7 @@ export class NeuralNetBouncerRunner {
           const k = Math.max(0.5, Math.min(2.0, dataset.length / 6000)) // 6k is mid-sized
           phaseEpisodes = Math.max(80, Math.round(baseEpisodes * k))
         } catch (e) {
-          console.warn(`[curriculum] failed to load ${phase.file}:`, (e as Error).message)
+          console.warn(`[curriculum] failed to load ${getLastPath(phase.file)}:`, (e as Error).message)
           continue
         }
       }
@@ -397,12 +401,12 @@ export class NeuralNetBouncerRunner {
       const prevEpisodes = (trainer as any).config.episodes
       ;(trainer as any).config.episodes = phaseEpisodes
 
-      console.log(`[phase] ${phase.file} — epochs=${phase.epochs}, episodes/epoch=${phaseEpisodes}`)
+      console.log(`[phase] ${getLastPath(phase.file)} — epochs=${phase.epochs}, episodes/epoch=${phaseEpisodes}`)
 
       await trainer.train(phase.epochs, async (summary) => {
         // save rolling weights every epoch
         await Disk.saveJsonFile(weightsPath, trainer.getBestWeights())
-        console.log(`[phase save] ${phase.file} @ epoch ${summary.epoch} → ${weightsPath}`)
+        console.log(`[phase save] ${getLastPath(phase.file)} @ epoch ${summary.epoch} → `, { weightsPath })
       })
 
       // restore episodes for next phase
@@ -411,9 +415,8 @@ export class NeuralNetBouncerRunner {
       // quick pure-NN eval (consistent with your runner’s test)
       const evalPure = trainer.test(60, { explorationRate: 0, usePolicyFusion: false, useTeacherAssist: false })
       console.log(
-        `[phase eval] ${phase.file} → success=${(evalPure.successRate * 100).toFixed(
-          1
-        )}% , avgRej=${evalPure.avgRejections.toFixed(0)}`
+        `[phase eval] ${getLastPath(phase.file)} → success=${(evalPure.successRate * 100).toFixed(1)}% , avgRej=`,
+        toFixed(evalPure.avgRejections)
       )
 
       if (evalPure.successRate > 0 && evalPure.avgRejections < bestAcross.rej) {
@@ -427,7 +430,7 @@ export class NeuralNetBouncerRunner {
 
     // Final save (best across all phases)
     await Disk.saveJsonFile(weightsPath, bestAcross.json)
-    console.log(`[curriculum] done. best avg rejections ~ ${bestAcross.rej.toFixed(0)} | saved → ${weightsPath}`)
+    console.log(`[curriculum] done. best avg rejections ~ `, toFixed(bestAcross.rej, 0), ` | saved → ${weightsPath}`)
   }
 
   /**
