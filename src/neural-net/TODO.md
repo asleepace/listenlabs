@@ -107,4 +107,12 @@ bun run src/neural-net/runner test data/samples/sample-06.json --mode=bouncer
 bun run src/neural-net/runner test data/samples/sample-05.json --mode=bouncer
 bun run src/neural-net/runner test data/samples/sample-04.json --mode=bouncer
 bun run src/neural-net/runner benchmark --mode=bouncer
+
+# after adding new samples - lock in there distributions
+bun run src/neural-net/runner curriculum \
+"data/samples/sample-11.json:1,data/samples/sample-12.json:1,data/samples/sample-13.json:1,data/samples/sample-14.json:1,data/samples/sample-15.json:1,data/samples/sample-16.json:1" \
+120 \
+--explorationStart=0.04 --explorationEnd=0.03 \
+--oracleRelabelFrac=0.40 --assistGain=3 --elitePercentile=0.10
+
 ```
